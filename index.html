@@ -7,7 +7,44 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div id="game-container">
+    <!-- Start Screen for Deck Selection -->
+    <div id="start-screen">
+        <h1>Musician Card Game</h1>
+        <div id="deck-selection">
+            <div class="player-deck-selection">
+                <h2>Player 1 Deck</h2>
+                <select id="player1-deck-select">
+                    <option value="strings-aggro">String Section</option>
+                    <option value="guitar-rock">Electric Ensemble</option>
+                    <option value="piano-control">Piano Trio</option>
+                    <option value="percussion-midrange">Rhythm Section</option>
+                    <option value="choir-support">A Cappella</option>
+                    <option value="brass-tempo">Brass Band</option>
+                    <option value="toolbox">Mixed Ensemble</option>
+                </select>
+                <p id="player1-deck-description" class="deck-description">Emily, Sophia, Ash, Fiona with Riley Hall. Fast string attacks.</p>
+            </div>
+
+            <div class="player-deck-selection">
+                <h2>Player 2 Deck</h2>
+                <select id="player2-deck-select">
+                    <option value="strings-aggro">String Section</option>
+                    <option value="guitar-rock">Electric Ensemble</option>
+                    <option value="piano-control" selected>Piano Trio</option>
+                    <option value="percussion-midrange">Rhythm Section</option>
+                    <option value="choir-support">A Cappella</option>
+                    <option value="brass-tempo">Brass Band</option>
+                    <option value="toolbox">Mixed Ensemble</option>
+                </select>
+                <p id="player2-deck-description" class="deck-description">Katie, David, Jennie, Kana with Steinert Basement. Duo queue bonus.</p>
+            </div>
+        </div>
+        <button id="start-game-btn" class="btn btn-large">Start Game</button>
+        <button id="open-deck-builder-btn" class="btn btn-large" style="margin-top: 20px;">Build Custom Deck</button>
+        <button id="view-cards-btn" class="btn btn-large" style="margin-top: 10px;">View All Cards</button>
+    </div>
+
+    <div id="game-container" class="hidden">
         <!-- Main game area -->
         <div id="main-game-area">
             <!-- Game Info Header -->
@@ -136,6 +173,47 @@
         <div class="modal-content">
             <span class="close-modal">&times;</span>
             <div id="action-content"></div>
+        </div>
+    </div>
+
+    <!-- Deck Builder Modal -->
+    <div id="deck-builder-modal" class="modal hidden">
+        <div class="modal-content deck-builder-content">
+            <span class="close-modal">&times;</span>
+            <h2>Custom Deck Builder</h2>
+
+            <div class="deck-builder-container">
+                <div class="deck-builder-sidebar">
+                    <h3>Your Deck (<span id="deck-count">0</span>/30)</h3>
+                    <div class="deck-name-input">
+                        <input type="text" id="custom-deck-name" placeholder="Deck Name" maxlength="30">
+                    </div>
+                    <div id="current-deck-list" class="current-deck-list"></div>
+                    <div class="deck-builder-actions">
+                        <button id="save-deck-btn" class="btn" disabled>Save Deck</button>
+                        <button id="clear-deck-btn" class="btn">Clear Deck</button>
+                    </div>
+                    <div class="saved-decks-section">
+                        <h3>Saved Custom Decks</h3>
+                        <div id="saved-decks-list"></div>
+                    </div>
+                </div>
+
+                <div class="deck-builder-cards">
+                    <div class="card-type-tabs">
+                        <button class="tab-btn active" data-type="character">Characters</button>
+                        <button class="tab-btn" data-type="energy">Energy</button>
+                        <button class="tab-btn" data-type="item">Items</button>
+                        <button class="tab-btn" data-type="tool">Tools</button>
+                        <button class="tab-btn" data-type="supporter">Supporters</button>
+                        <button class="tab-btn" data-type="stadium">Stadiums</button>
+                    </div>
+
+                    <div class="card-pool-container">
+                        <div id="card-pool"></div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
