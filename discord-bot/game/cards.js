@@ -34,7 +34,7 @@ const CHARACTERS = {
             type: 'activated'
         },
         moves: [
-            { name: 'Triple Stop', cost: ['S', 'X', 'X'], damage: 0, effect: 'Flip three coins. Does 30 damage for each heads.' }
+            { name: 'Vibrato', cost: ['S', 'X'], damage: 30 }
         ],
         retreatCost: 1
     },
@@ -49,6 +49,7 @@ const CHARACTERS = {
             type: 'activated'
         },
         moves: [
+            { name: 'Chorus', cost: ['C', 'C'], damage: 20, effect: 'Does 10 more damage per benched character you have in play.' },
             { name: 'SATB', cost: ['C', 'X'], damage: 0, effect: 'For each of your choir in play, choose one of your opponent\'s characters and do 10 damage to it.' }
         ],
         retreatCost: 1
@@ -59,8 +60,8 @@ const CHARACTERS = {
         hp: 110,
         gradYear: 2027,
         moves: [
-            { name: 'Double Tongue', cost: ['W'], damage: 0, effect: 'Two individual attacks of 10 damage each' },
-            { name: 'Artist Alley', cost: ['X', 'X', 'X'], damage: 0, effect: 'Discard any amount of concert posters from your hand and do 30 damage for each.' }
+            { name: 'Multiphonics', cost: ['W', 'W', 'W'], damage: 0, effect: 'Flip two coins. If both of them are heads, do 40 damage to each of your opponent\'s benched characters. If both of them are tails, do 80 damage to your opponent\'s active character.' },
+            { name: 'Circular Breathing', cost: ['W'], damage: 10, effect: 'During your next turn, this attack does 10 more damage. Effect stacks if used consecutively.' }
         ],
         retreatCost: 2
     },
@@ -70,12 +71,18 @@ const CHARACTERS = {
         hp: 100,
         gradYear: 2028,
         ability: {
+            name: 'Amplify',
+            description: 'If Grace is on your bench, your guitars do +20 damage.',
+            type: 'passive'
+        },
+        ability2: {
             name: 'Royalties',
             description: 'If Grace is active, any opposing character with any AVGE patch or t-shirt takes 20 damage.',
             type: 'passive'
         },
         moves: [
-            { name: 'Feedback Loop', cost: ['G', 'X'], damage: 40, effect: 'Each of your plucked strings take 10 damage.' }
+            { name: 'Distortion', cost: ['G', 'G', 'G'], damage: 30, effect: 'During your next turn, your guitars do 40 more damage.' },
+            { name: 'Strum', cost: ['G'], damage: 20 }
         ],
         retreatCost: 1
     },
@@ -90,8 +97,8 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: '440 Hz', cost: ['X'], damage: 0, effect: 'Attach an energy from your hand to one of your benched characters.' },
-            { name: 'Song voting', cost: ['S', 'S', 'S'], damage: 0, effect: '10 damage x number of unique members in play. Do 40 damage to myself, and 10 damage to all benched characters.' }
+            { name: 'Harmonics', cost: ['S', 'S'], damage: 0, effect: 'Flip two coins. If both of them are heads, do 80 damage. Otherwise, do nothing.' },
+            { name: 'Open Strings', cost: ['S'], damage: 10, effect: 'Draw a card. If it is an energy, attach it to this character.' }
         ],
         retreatCost: 1
     },
@@ -111,7 +118,8 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Grand Piano', cost: ['K', 'X', 'X'], damage: 60, effect: 'You may only use this attack if the stadium in play is a performance stadium.' }
+            { name: 'Grand Piano', cost: ['K', 'X', 'X'], damage: 60, effect: 'You may only use this attack if the stadium in play is a performance stadium.' },
+            { name: 'Four Hands', cost: ['K', 'K', 'X'], damage: 30, effect: '+30 damage if you have another piano on your bench.' }
         ],
         retreatCost: 2
     },
@@ -120,9 +128,14 @@ const CHARACTERS = {
         type: [TYPES.PERCUSSION],
         hp: 100,
         gradYear: 2027,
+        ability: {
+            name: 'Looking for drummer',
+            description: 'If Kei is on your bench, you may shuffle him back into your deck, but your turn ends.',
+            type: 'activated'
+        },
         moves: [
-            { name: 'Rudiments', cost: ['P'], damage: 10, effect: '10 damage to one of your opponent\'s characters of your choice.' },
-            { name: 'Arranging', cost: ['P', 'X'], damage: 0, effect: 'Discard any number of Musescore files from your hand and do 20 damage for each you discard.' }
+            { name: 'Arranging', cost: ['P', 'X'], damage: 0, effect: 'Discard any number of Musescore files from your hand and do 20 damage for each you discard.' },
+            { name: 'Cymbal Crash', cost: ['P'], damage: 20 }
         ],
         retreatCost: 1
     },
@@ -132,8 +145,8 @@ const CHARACTERS = {
         hp: 120,
         gradYear: 2027,
         moves: [
-            { name: 'Percussion Ensemble', cost: ['P'], damage: 0, effect: 'Search your deck for 3 percussion instruments and attach all of them to any percussionist.' },
-            { name: 'Four Mallets', cost: ['P', 'X', 'X'], damage: 0, effect: 'Four individual attacks of 10 damage each.' }
+            { name: 'Arrange (variant)', cost: ['P', 'X', 'X'], damage: 0, effect: 'Reveal top 4 cards. Discard all the Musescore files, and do 40 damage for each musescore file. Put the rest in your hand.' },
+            { name: 'Percussion Ensemble', cost: ['P', 'P', 'X'], damage: 0, effect: 'Search your deck for 3 percussion instruments and attach all of them to any percussionist.' }
         ],
         retreatCost: 2
     },
@@ -143,8 +156,51 @@ const CHARACTERS = {
         hp: 100,
         gradYear: 2028,
         moves: [
-            { name: 'Glissando', cost: ['K'], damage: 30, effect: 'You cannot use this attack during your next turn.' },
-            { name: 'Improv', cost: ['X', 'X', 'X'], damage: 0, effect: 'Discard the top 3 cards of your opponent\'s deck. 40 damage x the number of item cards discarded.' }
+            { name: 'Hands separately', cost: ['K'], damage: 0, effect: 'Does 0 damage. During your next turn, this attack does 40 damage.' },
+            { name: 'Damper Pedal', cost: ['K', 'K'], damage: 20, effect: 'Damage of your opponent\'s next attack is halved (rounded up)' }
+        ],
+        retreatCost: 1
+    },
+    KANA: {
+        name: 'Kana',
+        type: [TYPES.WOODWINDS],
+        hp: 140,
+        gradYear: 2026,
+        ability: {
+            name: 'Immense Aura',
+            description: 'Take 20 less damage from each attack.',
+            type: 'passive'
+        },
+        moves: [
+            { name: 'Conducting', cost: ['W', 'W', 'X'], damage: 0, effect: 'For each type in play, do 20 damage.' },
+            { name: 'Screech!', cost: ['W', 'X', 'X'], damage: 0, effect: 'Roll a d6. Damage is equal to 10 + (10 * the number on the D6)' }
+        ],
+        retreatCost: 3
+    },
+    GABE: {
+        name: 'Gabe',
+        type: [TYPES.STRINGS],
+        hp: 60,
+        gradYear: 2029,
+        moves: [
+            { name: 'You know what it is', cost: ['S', 'X'], damage: 70, effect: 'Only usable if he has exactly 60 health. Does 70 damage to one character.' },
+            { name: '440 Hz', cost: ['X'], damage: 0, effect: 'Attach an energy from your hand to one of your benched characters.' }
+        ],
+        retreatCost: 1
+    },
+    ASH: {
+        name: 'Ash',
+        type: [TYPES.STRINGS],
+        hp: 90,
+        gradYear: 2028,
+        ability: {
+            name: 'Instagram Viral',
+            description: 'If both benches are full, she does 2x as much damage',
+            type: 'passive'
+        },
+        moves: [
+            { name: 'Vibrato', cost: ['S', 'X'], damage: 30 },
+            { name: 'Triple Stops', cost: ['S', 'X', 'X'], damage: 0, effect: 'Flip three coins. Does 30 damage for each heads.' }
         ],
         retreatCost: 1
     },
@@ -159,7 +215,8 @@ const CHARACTERS = {
             type: 'activated'
         },
         moves: [
-            { name: 'Full Force', cost: ['C', 'C', 'X'], damage: 30, effect: 'Your opponent\'s benched characters take 10 damage.' }
+            { name: 'Falsetto', cost: ['C', 'C'], damage: 30, effect: 'You may choose to use this attack without any energy, but your opponent gets to draw three cards.' },
+            { name: 'Coloratura', cost: ['C', 'X', 'X'], damage: 20, effect: 'Flip a coin. If heads, this does 50 more damage.' }
         ],
         retreatCost: 1
     },
@@ -174,7 +231,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: '30 Emails', cost: ['X'], damage: 10, effect: 'If the stadium is ice rink, do 50 damage.' },
+            { name: '30 Emails', cost: ['S', 'X', 'X'], damage: 40, effect: 'If the stadium is ice rink, do 2x damage.' },
             { name: 'Snap Pizz', cost: ['S', 'S', 'X'], damage: 20, effect: 'Discard 2 energy from one of your opponent\'s characters.' }
         ],
         retreatCost: 2
@@ -185,12 +242,18 @@ const CHARACTERS = {
         hp: 90,
         gradYear: 2028,
         ability: {
+            name: 'SCP',
+            description: 'Take 2x damage from Sophia and Pascal.',
+            type: 'passive'
+        },
+        ability2: {
             name: 'Wait no... I\'m not into femboys–',
-            description: 'Cavin does 10 more damage for each maid in play.',
+            description: 'Deal 10 more damage for each maid in play.',
             type: 'passive'
         },
         moves: [
-            { name: 'Cymbal Crash', cost: ['P'], damage: 20 }
+            { name: 'Stick Trick', cost: ['P', 'X'], damage: 10, effect: 'Swap with one of your Benched characters for free.' },
+            { name: 'Rudiments', cost: ['P'], damage: 10, effect: '10 damage to one of your opponent\'s characters of your choice.' }
         ],
         retreatCost: 1
     },
@@ -205,8 +268,8 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Ragebaited', cost: ['P', 'X'], damage: 10, effect: 'When below 50% hp this attack does +20 damage. When below 20% hp, +60 damage.' },
-            { name: 'Ominous Chimes', cost: ['P', 'X', 'X'], damage: 0, effect: 'Shuffle this character and all cards attached to it back into your deck. At the end of your opponent\'s next turn, their Active character takes 50 damage.' }
+            { name: 'Ragebaited', cost: ['P', 'X', 'X'], damage: 40, effect: 'When below 50% hp this attack does +20 damage. When below 20% hp, double damage.' },
+            { name: 'Rimshot', cost: ['P', 'X'], damage: 0, effect: 'Roll a d6. If you roll a 1-4, do 60 damage.' }
         ],
         retreatCost: 2
     },
@@ -217,12 +280,12 @@ const CHARACTERS = {
         gradYear: 2029,
         ability: {
             name: 'Moe moe kyun~!',
-            description: 'All your maids do +10 extra damage',
+            description: 'All your maids do extra damage',
             type: 'passive'
         },
         moves: [
-            { name: 'Stick Trick', cost: ['P', 'X'], damage: 10, effect: 'Swap with one of your Benched characters for free.' },
-            { name: 'Excused Absence', cost: ['P', 'X', 'X'], damage: 0, effect: 'Heal 20 damage from each of your characters.' }
+            { name: 'Excused Absence', cost: ['P', 'X'], damage: 0, effect: 'Heals all your other cards in play' },
+            { name: 'Four Mallets', cost: ['P', 'X', 'X'], damage: 0, effect: 'Four individual attacks of 10 damage each.' }
         ],
         retreatCost: 1
     },
@@ -241,32 +304,6 @@ const CHARACTERS = {
         ],
         retreatCost: 1
     },
-    GABE: {
-        name: 'Gabe',
-        type: [TYPES.STRINGS],
-        hp: 60,
-        gradYear: 2029,
-        moves: [
-            { name: 'You know what it is', cost: ['X', 'X'], damage: 70, effect: 'Only usable if he has exactly 60 health. Does 70 damage to one character.' },
-            { name: 'Harmonics', cost: ['S', 'S'], damage: 0, effect: 'Flip two coins. If both of them are heads, do 80 damage. Otherwise, do nothing.' }
-        ],
-        retreatCost: 1
-    },
-    KANA: {
-        name: 'Kana',
-        type: [TYPES.WOODWINDS],
-        hp: 140,
-        gradYear: 2026,
-        ability: {
-            name: 'Immense Aura',
-            description: 'Take 20 less damage from each attack.',
-            type: 'passive'
-        },
-        moves: [
-            { name: 'Screech!', cost: ['W', 'X', 'X'], damage: 0, effect: 'Roll a d6. Damage is equal to 10 + (10 * the number on the D6)' }
-        ],
-        retreatCost: 3
-    },
     DAVID: {
         name: 'David',
         type: [TYPES.PIANO],
@@ -278,7 +315,8 @@ const CHARACTERS = {
             type: 'activated'
         },
         moves: [
-            { name: 'Damper Pedal', cost: ['K', 'K'], damage: 20, effect: 'Damage of your opponent\'s next attack is halved (rounded up)' }
+            { name: 'Simulation', cost: ['K', 'X'], damage: 0, effect: 'Shuffle your deck, and guess the number of character cards in the top 5 cards. Reveal them. If you are correct, put those cards in your hand. Otherwise, shuffle them back into your deck.' },
+            { name: 'Glissando', cost: ['K'], damage: 30, effect: 'You cannot use this attack during your next turn.' }
         ],
         retreatCost: 1
     },
@@ -288,8 +326,8 @@ const CHARACTERS = {
         hp: 90,
         gradYear: 2027,
         moves: [
-            { name: 'Circular Breathing', cost: ['W'], damage: 10, effect: 'During your next turn, this attack does 10 more damage. Effect stacks if used consecutively.' },
-            { name: 'Flute Solo', cost: ['W', 'W'], damage: 0, effect: 'If she is the only WW character in play, this attack does 80 damage.' }
+            { name: 'Flute Solo', cost: ['W', 'X', 'X'], damage: 30, effect: 'If she is the only WW character in play, this attack does 80 damage.' },
+            { name: 'Double Tongue', cost: ['W'], damage: 0, effect: 'Two individual attacks of 10 damage each' }
         ],
         retreatCost: 1
     },
@@ -299,8 +337,8 @@ const CHARACTERS = {
         hp: 110,
         gradYear: 2026,
         moves: [
-            { name: 'Rimshot', cost: ['P', 'X'], damage: 0, effect: 'Roll a d6. If you roll a 1-4, do 60 damage.' },
-            { name: 'Algorithm', cost: ['X', 'X', 'X'], damage: 0, effect: 'If any of your opponent\'s characters have a duplicate on your side, they take 60 damage each.' }
+            { name: 'Algorithm', cost: ['P', 'X', 'X'], damage: 0, effect: 'If any of your opponent\'s characters have a duplicate on your side, they take 50 damage each.' },
+            { name: 'Ominous Chimes', cost: ['P', 'X', 'X'], damage: 0, effect: 'Shuffle this character back into your deck. At the end of your opponent\'s next turn, their Active character takes 50 damage.' }
         ],
         retreatCost: 2
     },
@@ -310,8 +348,8 @@ const CHARACTERS = {
         hp: 100,
         gradYear: 2026,
         moves: [
-            { name: 'Small Ensemble committee', cost: ['K', 'K'], damage: 0, effect: 'If at least one of David, Evelyn, Bokai, and Roberto are in play, this does 10 damage to each opposing character. If at least three are in play it does 50 damage to each opposing character.' },
-            { name: 'Four Hands', cost: ['K', 'K', 'X'], damage: 30, effect: '+30 damage if you have another piano on your bench.' }
+            { name: 'Small Ensemble committee', cost: ['K', 'X', 'X'], damage: 0, effect: 'If at least one of David, Evelyn, Bokai, and Roberto are in play, this does 10 damage to each opposing character. If they are all in play it does 50 damage to each opposing character.' },
+            { name: 'Wordle', cost: ['K'], damage: 0, effect: 'Does 0 damage if resisted, 20 damage if normal effectiveness, and 50 damage if super effective' }
         ],
         retreatCost: 1
     },
@@ -321,8 +359,8 @@ const CHARACTERS = {
         hp: 120,
         gradYear: 2025,
         moves: [
-            { name: 'Guitar Shredding', cost: ['G', 'G'], damage: 10, effect: 'Discard all guitar energy attached to this character. For each energy, discard 2 cards from the top of your opponent\'s deck.' },
-            { name: 'Distortion', cost: ['G', 'G', 'G'], damage: 30, effect: 'During your next turn, your plucked strings do 40 more damage.' }
+            { name: 'Power Chord', cost: ['G', 'G', 'G'], damage: 70, effect: 'Discard 2 Energy from this character.' },
+            { name: 'Fingerstyle', cost: ['G', 'X'], damage: 0, effect: 'You can only use this attack if this character did not use Turn Up, Power Chord, or Distortion during your last turn. Flip 8 coins and do 10 damage for each heads.' }
         ],
         retreatCost: 2
     },
@@ -332,27 +370,18 @@ const CHARACTERS = {
         hp: 90,
         gradYear: 2028,
         ability: {
+            name: 'Information Advantage',
+            description: 'At the beginning of each of your turns, if you have at least twice as many cards as your opponent in your hand, you may look at their hand and discard one of their cards.',
+            type: 'activated'
+        },
+        ability2: {
             name: 'BAI wrangler',
             description: 'If a concert hall is in play, take 20 less damage from any attack.',
             type: 'passive'
         },
         moves: [
-            { name: 'Multiphonics', cost: ['W', 'W', 'W'], damage: 0, effect: 'Flip two coins. If both of them are heads, do 40 damage to each of your opponent\'s benched characters. If both of them are tails, do 80 damage to your opponent\'s active character.' }
-        ],
-        retreatCost: 1
-    },
-    ASH: {
-        name: 'Ash',
-        type: [TYPES.STRINGS],
-        hp: 90,
-        gradYear: 2028,
-        ability: {
-            name: 'Instagram Viral',
-            description: 'If both benches are full, she does 2x as much damage',
-            type: 'passive'
-        },
-        moves: [
-            { name: 'Vibrato', cost: ['S', 'X'], damage: 30 }
+            { name: 'Sparkling Run', cost: ['W', 'X'], damage: 20, effect: 'Heal 20 damage.' },
+            { name: 'Overblow', cost: ['W', 'X'], damage: 40, effect: 'You take 10 recoil damage' }
         ],
         retreatCost: 1
     },
@@ -383,30 +412,6 @@ const CHARACTERS = {
 
 // Stadium Cards
 const STADIUMS = {
-    RILEY_HALL: {
-        name: 'Riley Hall',
-        type: 'stadium',
-        effect: 'If this Stadium is active at the beginning of your turn, each of your characters take 10 nonlethal damage for each of your empty bench slots.',
-        description: 'Attendance Policy: If this Stadium is active at the beginning of your turn, each of your characters take 10 nonlethal damage for each of your empty bench slots.'
-    },
-    ALUMNAE_HALL: {
-        name: 'Alumnae Hall',
-        type: 'stadium',
-        effect: 'Upon this Stadium being played, both players must discard all music stands. While this Stadium is active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.',
-        description: 'Return by 4pm: Upon this Stadium being played, both players must discard all music stands. Intense reverb: While this Stadium is active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.'
-    },
-    MAIN_HALL: {
-        name: 'Main Hall',
-        type: 'stadium',
-        effect: 'While this Stadium is active, each player may only play up to three Helper Cards per turn, beginning the turn after this is played.',
-        description: 'Small Ensemble Limit: While this Stadium is active, each player may only play up to three Helper Cards per turn, beginning the turn after this is played.'
-    },
-    SALOMON_DECI: {
-        name: 'Salomon DECI',
-        type: 'stadium',
-        effect: 'For every guitarist, piano, and percussion attack, roll a d6. If 1 or 2, +10 damage; if 3 to 6, -10 damage.',
-        description: 'Electric Acoustics: For every guitarist, piano, and percussion attack, roll a d6. If 1 or 2, +10 damage; if 3 to 6, -10 damage.'
-    },
     RED_ROOM: {
         name: 'Red Room',
         type: 'stadium',
@@ -431,38 +436,62 @@ const STADIUMS = {
         effect: 'Maids do +10 damage, and matcha heals +10 health',
         description: 'Maids do +10 damage, and matcha heals +10 health'
     },
-    STEINERT_PRACTICE: {
+    STEINERT: {
         name: 'Steinert Practice Room',
         type: 'stadium',
-        effect: 'Each player can\'t have more than 2 Benched pokemon. If a player has 3 benched pokemon, they must discard one. The player who played this card discards first. Pianos do +10 damage.',
-        description: 'Practice Prison: Each player can\'t have more than 2 Benched pokemon. If a player has 3 benched pokemon, they must discard one. The player who played this card discards first. Piano Practice: Pianos do +10 damage.'
-    },
-    STEINERT_BASEMENT: {
-        name: 'Steinert Basement Studio',
-        type: 'stadium',
-        effect: 'If you have exactly two pianos on your bench, draw two cards instead of one at the start of your turn. If there are two or more string players in play (across both sides), strings do +10 damage.',
-        description: 'Duo Queue: If you have exactly two pianos on your bench, draw two cards instead of one at the start of your turn. String Ensemble: If there are two or more string players in play (across both sides), strings do +10 damage.'
+        effect: 'Each player can\'t have more than 2 Benched characters. If a player has 3 benched characters, they must discard one. The player who played this card discards first. Pianos do +10 damage.',
+        description: 'Practice Prison: Each player can\'t have more than 2 Benched characters. If a player has 3 benched characters, they must discard one. The player who played this card discards first. Piano Practice: Pianos do +10 damage.'
     },
     FRIEDMAN: {
         name: 'Friedman Hall',
         type: 'stadium',
         effect: 'While this stadium is active, draw two cards per turn. Your opponent chooses one for you to keep; shuffle the other back into your deck. Choir does +10 damage.',
         description: 'Democratic Process: While this stadium is active, draw two cards per turn. Your opponent chooses one for you to keep; shuffle the other back into your deck. A capella: Choir does +10 damage.'
+    },
+    RILEY_HALL: {
+        name: 'Riley Hall',
+        type: 'stadium',
+        effect: 'If this Stadium is active at the beginning of your turn, each of your characters take 10 damage for each of your empty bench slots. Strings do +10 damage.',
+        description: 'Attendance Policy: If this Stadium is active at the beginning of your turn, each of your characters take 10 damage for each of your empty bench slots. String Sectionals: Strings do +10 damage.'
+    },
+    ALUMNAE_HALL: {
+        name: 'Alumnae Hall',
+        type: 'stadium',
+        effect: 'Upon this Stadium being played, both players must discard all music stands. While this Stadium is active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.',
+        description: 'Return by 4pm: Upon this Stadium being played, both players must discard all music stands. Intense reverb: While this Stadium is active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.'
+    },
+    MAIN_HALL: {
+        name: 'Main Hall',
+        type: 'stadium',
+        effect: 'While this Stadium is active, each player may only play up to three Helper Cards per turn, beginning the turn after this is played. All attacks do +10 damage.',
+        description: 'Small Ensemble Limit: While this Stadium is active, each player may only play up to three Helper Cards per turn, beginning the turn after this is played. Fan Chant: All attacks do +10 damage.'
+    },
+    SALOMON_DECI: {
+        name: 'Salomon DECI',
+        type: 'stadium',
+        effect: 'For every guitarist, piano, and percussion attack, roll a d6. If 1 or 2, +10 damage; if 3 to 6, -10 damage.',
+        description: 'Electric Acoustics: For every guitarist, piano, and percussion attack, roll a d6. If 1 or 2, +10 damage; if 3 to 6, -10 damage.'
+    },
+    STEINERT_BASEMENT: {
+        name: 'Steinert Basement Studio',
+        type: 'stadium',
+        effect: 'If you have exactly two pianos on your bench, draw two cards instead of one at the start of your turn. If there are two or more string players in play (across both sides), strings do +10 damage.',
+        description: 'Duo Queue: If you have exactly two pianos on your bench, draw two cards instead of one at the start of your turn. String Ensemble: If there are two or more string players in play (across both sides), strings do +10 damage.'
     }
 };
 
-// Tool Items (each character can hold at most one tool at a time)
+// Tool Items
 const TOOLS = {
     MAID_OUTFIT: {
         name: 'Maid outfit',
         type: 'tool',
-        effect: 'Forced recruitment: If attached to any character, they gain Maid status while they are holding this tool',
+        effect: 'While equipped, this character does not take damage from any attacks that do 10 damage to it or less and gains Maid status. Matcha heals +10 health to this character.',
         grantStatus: 'Maid'
     },
     CONDUCTOR_BATON: {
         name: 'Conductor Baton',
         type: 'tool',
-        effect: 'Grants Conductor status while they are holding this',
+        effect: 'While equipped, this character gains 30 health and Conductor status, but the retreat cost is doubled. Each music stand used gives +10 additional damage.',
         grantStatus: 'Conductor'
     },
     KIKI_HEADBAND: {
@@ -477,30 +506,30 @@ const TOOLS = {
         effect: 'Turns you into a Percussion type',
         addType: TYPES.PERCUSSION
     },
-    AVGE_TSHIRT: {
+    AVGE_SHIRT: {
         name: 'AVGE T-shirt',
         type: 'tool',
-        effect: 'Grants goon status while they are holding this',
+        effect: 'While equipped, this character gains Goon status.',
         grantStatus: 'Goon'
     },
     AVGE_STICKER: {
         name: 'AVGE showcase sticker',
         type: 'tool',
-        effect: 'If the pokemon attached to this is active at the beginning of your turn, draw 1 extra card.'
+        effect: 'If the player attached to this is active at the beginning of your turn, draw 1 extra card.'
     },
     MUSESCORE_SUB: {
         name: 'Musescore subscription',
         type: 'tool',
-        effect: 'Grants arranger status while they are holding this',
+        effect: 'While equipped, this character gains Arranger status. Whenever this character is damaged, you may retrieve an item card from your discard pile.',
         grantStatus: 'Arranger'
+    },
+    EXTENSION_CORD: {
+        name: 'Extension Cord',
+        type: 'tool',
+        effect: 'While equipped, this character gains Poppet status. Pop-Up: Does 20 extra damage if not in a performance space.',
+        grantStatus: 'Poppet'
     }
 };
-
-// Statuses
-// Maid: immune to small attacks (<=10 damage), +10 healing from each matcha
-// Conductor: This character gains 20 health, but the retreat cost is doubled. Each music stand used gives +10 additional damage
-// Goon: -10 damage per attack, Every time this character is attacked, reflects 20 damage
-// Arranger: Whenever damaged, you may retrieve an item card from your discard pile. When knocked out, you may search your discard pile for one musescore file and put it in your hand.
 
 // Non-Tool Items
 const ITEMS = {
@@ -519,35 +548,31 @@ const ITEMS = {
     MATCHA_LATTE: {
         name: 'Matcha Latte',
         type: 'item',
-        effect: 'All your characters heal 10 health.'
+        effect: 'All benched players heal 10 health.'
     },
     STRAWBERRY_MATCHA: {
         name: 'Strawberry Matcha Latte',
         type: 'item',
-        effect: 'One character of your choice heals 20 health.'
+        effect: 'All benched players heal 20 health. Cannot be used in a performance space.'
     },
     PRINTED_SCORE: {
         name: 'Printed score',
         type: 'item',
-        subtype: 'sheet_music',
         effect: 'Active character does 10 more damage this turn'
     },
     ANNOTATED_SCORE: {
         name: 'Annotated score',
         type: 'item',
-        subtype: 'sheet_music',
         effect: 'Active character does 20 more damage this turn. Discard 1 energy from your active character.'
     },
     MUSESCORE_FILE: {
         name: 'Musescore file',
         type: 'item',
-        subtype: 'musescore',
         effect: 'Your opponent reveals three cards in their hand. Choose to discard one.'
     },
     CORRUPTED_FILE: {
         name: 'Corrupted file',
         type: 'item',
-        subtype: 'musescore',
         effect: 'You can only play this if you have an arranger in play. Your opponent shuffles their hand into their deck and draws three cards.'
     },
     CAST_RESERVE: {
@@ -586,13 +611,12 @@ const ITEMS = {
     REHEARSAL_ROSTER: {
         name: 'Dress rehearsal roster',
         type: 'item',
-        subtype: 'roster',
         effect: 'Look at top 3 cards, choose 1 and discard the other two'
     },
     CONCERT_TICKET: {
         name: 'Concert ticket',
         type: 'item',
-        effect: 'Draw to 4 cards in hand'
+        effect: 'Draw cards until you have 4 cards in hand'
     },
     BAI_EMAIL: {
         name: 'BAI Email',
@@ -621,7 +645,7 @@ const ITEMS = {
     }
 };
 
-// Supporter Cards (can only play one per turn)
+// Supporter Cards
 const SUPPORTERS = {
     JOHANN: {
         name: 'Johann',
@@ -679,4 +703,16 @@ const ENERGY_TYPES = {
     GUITAR: { name: 'Guitar Energy', type: 'energy', energyType: TYPES.GUITAR },
     CHOIR: { name: 'Choir Energy', type: 'energy', energyType: TYPES.CHOIR },
     BRASS: { name: 'Brass Energy', type: 'energy', energyType: TYPES.BRASS }
+};
+
+// ES6 Module Exports
+export {
+    TYPES,
+    RESISTANCE_CHAIN,
+    CHARACTERS,
+    STADIUMS,
+    TOOLS,
+    ITEMS,
+    SUPPORTERS,
+    ENERGY_TYPES
 };

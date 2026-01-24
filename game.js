@@ -62,6 +62,12 @@ class GameState {
         };
     }
 
+    isPerformanceSpace(stadiumName) {
+        // Concert halls are: Main Hall, Alumnae Hall, Riley Hall, and Salomon DECI
+        const performanceSpaces = ['Main Hall', 'Alumnae Hall', 'Riley Hall', 'Salomon DECI'];
+        return performanceSpaces.includes(stadiumName);
+    }
+
     switchPlayer() {
         // Clear next turn effects for current player BEFORE switching (they've had their turn to use them)
         const previousPlayer = this.currentPlayer;
@@ -280,7 +286,7 @@ class GameState {
         }
 
         // Izzy's BAI wrangler: Take 20 less damage if concert hall is in play
-        if (characterCard.name === 'Izzy' && this.stadium && this.stadium.name === 'Concert Hall') {
+        if (characterCard.name === 'Izzy' && this.stadium && this.isPerformanceSpace(this.stadium.name)) {
             finalDamage -= 20;
             this.log('Izzy\'s BAI wrangler: -20 damage (Concert Hall active)');
         }
@@ -1296,7 +1302,11 @@ function executeItemEffect(card) {
             break;
 
         case 'Strawberry Matcha Latte':
-            // Cannot be used in performance space (ignoring for now)
+            // Cannot be used in performance space
+            if (game.stadium && game.isPerformanceSpace(game.stadium.name)) {
+                game.log('Cannot use Strawberry Matcha Latte in a performance space!', 'error');
+                return false;
+            }
             player.bench.forEach(char => {
                 if (char) {
                     const healAmount = game.stadium && game.stadium.name === 'Matcha Maid Cafe' ? 30 : 20;
@@ -1317,6 +1327,10 @@ function executeItemEffect(card) {
 
         case 'Miku otamatone':
             // Only in concert halls
+            if (!game.stadium || !game.isPerformanceSpace(game.stadium.name)) {
+                game.log('Miku otamatone can only be used in concert halls!', 'error');
+                return false;
+            }
             if (!game.attackModifiers[game.currentPlayer].otamatoneBonus) {
                 game.attackModifiers[game.currentPlayer].otamatoneBonus = 0;
             }
@@ -3558,6 +3572,14 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     if (hasLoang && attacker.status && attacker.status.includes('Maid')) {
         damage += 10;
         game.log('Loang ability: +10 damage (maid bonus)');
+    }
+
+    // Poppet status (Extension Cord): +20 damage if NOT in a performance space
+    if (attacker.status && attacker.status.includes('Poppet')) {
+        if (!game.stadium || !game.isPerformanceSpace(game.stadium.name)) {
+            damage += 20;
+            game.log('Poppet Pop-Up: +20 damage (not in performance space)');
+        }
     }
 
     // Grace's Royalties (if Grace is active and opponent has AVGE items)

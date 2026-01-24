@@ -160,6 +160,7 @@
 - **Abilities:**
   - Information Advantage (Activated) - At the beginning of each of your turns, if you have at least twice as many cards as your opponent in your hand, you may look at their hand and discard one of their cards.
   - BAI wrangler (Passive) - If a concert hall is in play, take 20 less damage from any attack.
+  - **Concert halls are:** Main Hall, Alumnae Hall, Riley Hall, and Salomon DECI
 - **Moves:**
   - Melody: (W) 20 damage
   - Wind Performance: (W + X) 30 damage
@@ -167,6 +168,8 @@
 ---
 
 ## Stadiums (12 Total)
+
+**Note:** Some cards reference "performance spaces" or "concert halls". The following stadiums are considered performance spaces: **Main Hall, Alumnae Hall, Riley Hall, and Salomon DECI**.
 
 ### Red Room
 - **Amp Diff:** Strings and woodwinds do -10 damage, while guitars and percussion do +10 damage.
@@ -176,11 +179,9 @@
 
 ### Petteruti Lounge
 - **Powerpoint Night:** At the start of each player's turn, their active character takes 10 nonlethal damage.
-- **Matcha Maid Cafe:** Maids do +10 damage, and matcha heals +10 health.
 
-### Concert Hall
-- **Concert Space:** At the beginning of each player's turn, flip a coin. Heads: draw 2 cards. Tails: opponent draws 2 cards.
-- **Performance Space:** While in play, all characters gain "Poppet" status.
+### Matcha Maid Cafe
+- **Maid Cafe:** Maids do +10 damage, and matcha heals +10 health.
 
 ### Ice Rink
 - **Slippery:** All retreat costs increased by 1.
@@ -194,7 +195,7 @@
 - **A capella:** Choir does +10 damage.
 
 ### Riley Hall
-- **Attendance Policy:** If this Stadium is active at the beginning of your turn, each of your characters take 20 damage for each of your empty bench slots.
+- **Attendance Policy:** If this Stadium is active at the beginning of your turn, each of your characters take 10 damage for each of your empty bench slots.
 - **String Sectionals:** Strings do +10 damage.
 
 ### Alumnae Hall
@@ -245,22 +246,25 @@
 
 ### Extension Cord
 - While equipped, this character gains Poppet status. Pop-Up: Does 20 extra damage if not in a performance space.
+- **Performance spaces are:** Main Hall, Alumnae Hall, Riley Hall, and Salomon DECI
 
 ---
 
 ## Items (Single Use - 14 Total)
 
 ### Otamatone
-- Draw 2 cards.
+- During this turn only, your active character has one more typeless energy attached to it.
 
 ### Miku Otamatone
-- Draw 3 cards.
+- During this turn only, your active character has two more typeless energy attached to it.
+- **Can only be used in concert halls** (Main Hall, Alumnae Hall, Riley Hall, or Salomon DECI)
 
 ### Matcha Latte
-- Heal 30 damage from one of your characters.
+- All benched players heal 10 health.
 
-### Strawberry Matcha
-- Heal 50 damage from one of your characters.
+### Strawberry Matcha Latte
+- All benched players heal 20 health.
+- **Cannot be used in a performance space** (Main Hall, Alumnae Hall, Riley Hall, or Salomon DECI)
 
 ### Concert Ticket
 - Search your deck for a character and put it in your hand. Shuffle your deck.
