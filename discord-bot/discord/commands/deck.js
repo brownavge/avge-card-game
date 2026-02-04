@@ -1,6 +1,6 @@
 // Deck Command - View and manage decks
 import { EmbedBuilder } from 'discord.js';
-import { COLORS } from '../../utils/constants.js';
+import { COLORS, PREBUILT_DECKS } from '../../utils/constants.js';
 import { getPrebuiltDecks, buildDeck } from '../../storage/DeckManager.js';
 
 export async function handleDeckCommand(interaction) {
@@ -93,16 +93,7 @@ async function handleViewDeck(interaction, deckName) {
 }
 
 function getDeckDisplayName(deckId) {
-    const names = {
-        'strings-aggro': 'String Section',
-        'guitar-rock': 'Electric Ensemble',
-        'piano-control': 'Piano Trio',
-        'percussion-midrange': 'Rhythm Section',
-        'choir-support': 'A Cappella',
-        'brass-tempo': 'Brass Band',
-        'toolbox': 'Mixed Ensemble'
-    };
-    return names[deckId] || deckId;
+    return PREBUILT_DECKS[deckId] || deckId;
 }
 
 function formatCardList(cards) {

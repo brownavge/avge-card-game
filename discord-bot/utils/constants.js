@@ -209,5 +209,12 @@ export const PREBUILT_DECKS = {
     'percussion-midrange': 'Rhythm Section',
     'choir-support': 'A Cappella',
     'brass-tempo': 'Brass Band',
-    'toolbox': 'Mixed Ensemble'
+    'toolbox': 'Mixed Ensemble',
+    'woodwinds-swarm': 'Woodwind Orchestra',
+    'brass-fortress': 'Brass Fortress',
+    'guitar-perc-rush': 'Rock & Roll',
+    'piano-choir-control': 'Symphony Control',
+    'hybrid-strings': 'Chamber Ensemble',
+    'rainbow-ensemble': 'Grand Orchestra',
+    'boss-battle': 'All-Stars'
 };

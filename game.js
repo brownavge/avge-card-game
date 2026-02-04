@@ -86,6 +86,7 @@ class GameState {
         this.supporterPlayedThisTurn = false;
         this.attackedThisTurn = false;
         this.helperCardsPlayedThisTurn = 0;
+        this.firstEnergyAttached = false; // Reset for Sophia Wang
         this.turn++;
         this.phase = 'main';
         this.log(`═════════════════════════════════════`, 'turn-change');
@@ -95,6 +96,13 @@ class GameState {
         // Clear attack modifiers from previous player's turn
         this.attackModifiers[previousPlayer] = {};
 
+        // Clear wasJustBenched flags
+        const currentPlayerObj = this.players[this.currentPlayer];
+        [currentPlayerObj.active, ...currentPlayerObj.bench].filter(c => c).forEach(char => {
+            char.wasJustBenched = false;
+            char.cameOffBenchThisTurn = false;
+        });
+
         this.applyStartOfTurnEffects();
 
         // Check if current player has any characters in play
@@ -103,6 +111,26 @@ class GameState {
 
     applyEndOfTurnEffects() {
         const player = this.players[this.currentPlayer];
+
+        // Happy Ruth's Leave Rehearsal Early - Return to hand if no attachments
+        [player.active, ...player.bench].filter(c => c).forEach(char => {
+            if (char && char.name === 'Happy Ruth') {
+                const hasAttachments = (char.attachedEnergy && char.attachedEnergy.length > 0) ||
+                                      (char.attachedTools && char.attachedTools.length > 0);
+                if (!hasAttachments) {
+                    player.hand.push(char);
+                    if (player.active === char) {
+                        player.active = null;
+                    } else {
+                        const benchIndex = player.bench.indexOf(char);
+                        if (benchIndex !== -1) {
+                            player.bench[benchIndex] = null;
+                        }
+                    }
+                    this.log('Happy Ruth\'s Leave Rehearsal Early: Returned to hand (no attachments)');
+                }
+            }
+        });
 
         // Katie's Nausicaa's heartbeat
         [player.active, ...player.bench].filter(c => c).forEach(char => {
@@ -116,6 +144,25 @@ class GameState {
                 });
             }
         });
+
+        // Ominous Chimes delayed damage
+        if (game.nextTurnEffects[this.currentPlayer].ominousChimesDamage) {
+            const targetId = game.nextTurnEffects[this.currentPlayer].ominousChimesTarget;
+            const target = [player.active, ...player.bench].find(c => c && c.id === targetId);
+
+            if (target) {
+                this.dealDamage(target, game.nextTurnEffects[this.currentPlayer].ominousChimesDamage);
+                this.log(`Ominous Chimes: ${target.name} takes ${game.nextTurnEffects[this.currentPlayer].ominousChimesDamage} delayed damage!`, 'damage');
+            }
+            game.nextTurnEffects[this.currentPlayer].ominousChimesDamage = 0;
+        }
+
+        // Yanwan Zhu's Bass Boost - draw after attack
+        if (player.active && player.active.shouldDrawFromBassBoost) {
+            this.drawCards(this.currentPlayer, 1);
+            this.log('Yanwan Zhu\'s Bass Boost: Drew 1 card!');
+            player.active.shouldDrawFromBassBoost = false;
+        }
     }
 
     beginAttackPhase() {
@@ -129,6 +176,20 @@ class GameState {
             alert('Player 1 cannot attack on their first turn!');
             this.log('Cannot attack: Player 1 cannot attack on their first turn', 'warning');
             return;
+        }
+
+        // Check for Meya Gao's I See Your Soul - cannot attack
+        if (game.nextTurnEffects[this.currentPlayer].cannotAttack) {
+            alert('Cannot attack this turn due to Meya Gao\'s I See Your Soul!');
+            this.log('Cannot attack: Meya Gao\'s I See Your Soul is active', 'warning');
+            game.nextTurnEffects[this.currentPlayer].cannotAttack = false;
+            return;
+        }
+
+        // Check for Luke Xu's Nullify - opponent abilities disabled
+        const opponentNum = this.currentPlayer === 1 ? 2 : 1;
+        if (game.nextTurnEffects[this.currentPlayer].abilitiesDisabled) {
+            this.log('Luke Xu\'s Nullify: Opponent abilities are disabled this turn!', 'info');
         }
 
         this.phase = 'attack';
@@ -166,6 +227,32 @@ class GameState {
         const opponentNum = this.currentPlayer === 1 ? 2 : 1;
         const opponent = this.players[opponentNum];
 
+        // Reset Four-leaf Clover flag at start of turn
+        game.usedFourLeafClover = false;
+
+        // Matthew Wang's Pot of Greed - flip coin at turn start, heads = draw
+        if (player.active && player.active.name === 'Matthew Wang') {
+            const coin = Math.random() < 0.5;
+            game.log(`Matthew Wang's Pot of Greed: Flipped ${coin ? 'heads' : 'tails'}`);
+            if (coin) {
+                this.drawCards(this.currentPlayer, 1);
+                game.log('Matthew Wang\'s Pot of Greed: Drew 1 card!');
+            }
+        }
+
+        // Trickster delayed damage
+        if (game.nextTurnEffects[this.currentPlayer].tricksterDamage) {
+            const targetId = game.nextTurnEffects[this.currentPlayer].tricksterTarget;
+            const target = player.active && player.active.id === targetId ? player.active :
+                          player.bench.find(c => c && c.id === targetId);
+
+            if (target) {
+                this.dealDamage(target, game.nextTurnEffects[this.currentPlayer].tricksterDamage);
+                game.log(`Trickster: ${target.name} takes ${game.nextTurnEffects[this.currentPlayer].tricksterDamage} delayed damage!`, 'damage');
+            }
+            game.nextTurnEffects[this.currentPlayer].tricksterDamage = 0;
+        }
+
         // Stadium effects at start of turn
         if (this.stadium) {
             if (this.stadium.name === 'Petteruti Lounge' && player.active) {
@@ -184,13 +271,13 @@ class GameState {
                     this.log('Friedman Hall: Drew 1 card (only 1 left in deck)');
                 }
             } else if (this.stadium.name === 'Riley Hall') {
-                // Take 20 damage per empty bench slot
+                // Take 10 damage per empty bench slot
                 const emptyBenchSlots = player.bench.filter(slot => !slot).length;
                 if (emptyBenchSlots > 0) {
                     const allChars = [player.active, ...player.bench].filter(c => c);
                     allChars.forEach(char => {
-                        this.dealDamage(char, 20 * emptyBenchSlots);
-                        this.log(`Riley Hall: ${char.name} takes ${20 * emptyBenchSlots} damage (${emptyBenchSlots} empty bench slots)`, 'damage');
+                        this.dealDamage(char, 10 * emptyBenchSlots);
+                        this.log(`Riley Hall: ${char.name} takes ${10 * emptyBenchSlots} damage (${emptyBenchSlots} empty bench slots)`, 'damage');
                     });
                 }
             } else if (this.stadium.name === 'Steinert Basement Studio') {
@@ -216,32 +303,32 @@ class GameState {
             });
         }
 
-        // Grace's Royalties ability
-        if (opponent.active && opponent.active.name === 'Grace') {
+        // Grace Zhao's Royalties ability
+        if (opponent.active && (opponent.active.name === 'Grace Zhao' || opponent.active.name === 'Grace')) {
             if (player.active && player.active.attachedTools) {
                 const hasAVGEItem = player.active.attachedTools.some(tool =>
-                    tool.name === 'AVGE T-shirt' || tool.name === 'AVGE showcase sticker'
+                    tool.name === 'AVGE T-Shirt' || tool.name === 'AVGE T-shirt' || tool.name === 'AVGE Showcase Sticker' || tool.name === 'AVGE showcase sticker'
                 );
                 if (hasAVGEItem) {
-                    this.dealDamage(player.active, 20);
-                    this.log('Grace\'s Royalties: Active character takes 20 damage!');
+                    this.dealDamage(player.active, 10);
+                    this.log('Grace Zhao\'s Royalties: Active character takes 10 damage!');
                 }
             }
         }
     }
 
-    dealDamage(characterCard, amount) {
+    dealDamage(characterCard, amount, source = null) {
         if (!characterCard) return;
 
         // Apply defensive abilities and status effects
         let finalDamage = amount;
 
-        // Goon status: -20 damage, reflects 50%
+        // Goon status: -20 damage, reflects 20 damage
         if (characterCard.status && characterCard.status.includes('Goon')) {
             finalDamage -= 20;
-            // Reflect 50% damage back to attacker (if there is an attacker)
-            if (source && source.damage !== undefined) {
-                const reflectDamage = Math.floor(amount * 0.5);
+            // Reflect 20 damage back to attacker (if there is an attacker)
+            if (source && source !== characterCard) {
+                const reflectDamage = 20;
                 source.damage = (source.damage || 0) + reflectDamage;
                 this.log(`Goon status: Reflected ${reflectDamage} damage back to ${source.name}!`, 'damage');
             }
@@ -291,8 +378,68 @@ class GameState {
             this.log('Izzy\'s BAI wrangler: -20 damage (Concert Hall active)');
         }
 
+        // Demi Lu's Steinert Warrior - Immune on bench if Steinert stadium
+        let playerNum = this.findPlayerWithCharacter(characterCard);
+        let playerObj = this.players[playerNum];
+        if (characterCard.name === 'Demi Lu' && playerObj && playerObj.bench.includes(characterCard)) {
+            if (this.stadium && (this.stadium.name === 'Steinert Practice Room' || this.stadium.name === 'Steinert Basement Studio')) {
+                finalDamage = 0;
+                this.log('Demi Lu\'s Steinert Warrior: Immune on bench in Steinert stadium!');
+            }
+        }
+
         finalDamage = Math.max(0, finalDamage);
+
+        // Weston Poe's Right back at you - Reflect 50+ damage
+        playerNum = this.findPlayerWithCharacter(characterCard);
+        playerObj = this.players[playerNum];
+        if (characterCard.name === 'Weston Poe' && finalDamage >= 50) {
+            const opponentNum = playerNum === 1 ? 2 : 1;
+            const opponent = this.players[opponentNum];
+            if (opponent.active) {
+                this.dealDamage(opponent.active, finalDamage);
+                this.log(`Weston Poe's Right back at you: Reflected ${finalDamage} damage!`, 'damage');
+            }
+            finalDamage = 0; // Weston takes no damage
+        }
+
+        // Daniel Zhu's Share the Pain - Redirect up to 20 damage
+        if (characterCard.name === 'Daniel Zhu' && finalDamage > 0) {
+            const redirectAmount = Math.min(20, finalDamage);
+            const benchChars = playerObj.bench.filter(c => c && c.id !== characterCard.id);
+            if (benchChars.length > 0) {
+                // For simplicity, redirect to first benched character
+                const redirectTarget = benchChars[0];
+                this.dealDamage(redirectTarget, redirectAmount);
+                finalDamage -= redirectAmount;
+                this.log(`Daniel Zhu's Share the Pain: Redirected ${redirectAmount} damage to ${redirectTarget.name}!`);
+            }
+        }
+
+        // Meya Gao's I See Your Soul - Both can't attack next turn if damaged
+        if (characterCard.name === 'Meya Gao' && finalDamage > 0) {
+            const opponentNum = playerNum === 1 ? 2 : 1;
+            game.nextTurnEffects[playerNum].cannotAttack = true;
+            game.nextTurnEffects[opponentNum].cannotAttack = true;
+            this.log('Meya Gao\'s I See Your Soul: Both players cannot attack next turn!');
+        }
+
         characterCard.damage = (characterCard.damage || 0) + finalDamage;
+
+        // Katie Xiang's Nausicaa's Undying Heartbeat - At ≤40 HP, heal 20 all characters
+        if (characterCard.name === 'Katie' || characterCard.name === 'Katie Xiang') {
+            const currentHP = characterCard.hp - characterCard.damage;
+            if (currentHP <= 40 && currentHP > 0) {
+                const allChars = [playerObj.active, ...playerObj.bench].filter(c => c);
+                allChars.forEach(char => {
+                    if (char.damage > 0) {
+                        const healAmount = Math.min(20, char.damage);
+                        char.damage -= healAmount;
+                        this.log(`Katie's Nausicaa's Undying Heartbeat: ${char.name} healed ${healAmount}!`, 'heal');
+                    }
+                });
+            }
+        }
 
         // Arranger status: retrieve item when damaged
         if (characterCard.status && characterCard.status.includes('Arranger') && finalDamage > 0) {
@@ -394,6 +541,32 @@ class GameState {
             }
             const card = player.deck.shift();
             player.hand.push(card);
+
+            // Yuelin Hu's Musical Cat - Draw AVGE birb → discard + 30 damage
+            if (card.name === 'AVGE Birb' && [player.active, ...player.bench].some(c => c && c.name === 'Yuelin Hu')) {
+                this.log('Yuelin Hu\'s Musical Cat: Drew AVGE Birb!');
+                player.discard.push(card);
+                player.hand = player.hand.filter(c => c.id !== card.id);
+
+                if (player.active) {
+                    game.nextTurnEffects[playerNum].avgebBirbPenalty = -30; // Negative for bonus
+                    this.log('Musical Cat: Active will deal +30 damage next turn!');
+                }
+            }
+
+            // Alice Wang's Euclidean Algorithm - Hand size equalization
+            const opponentNum = playerNum === 1 ? 2 : 1;
+            const opponent = this.players[opponentNum];
+            const hasAlice = [player.active, ...player.bench].some(c => c && c.name === 'Alice Wang');
+
+            if (hasAlice && player.hand.length > opponent.hand.length + 2) {
+                const discardCount = player.hand.length - opponent.hand.length;
+                for (let j = 0; j < discardCount && player.hand.length > 0; j++) {
+                    const discarded = player.hand.pop();
+                    player.discard.push(discarded);
+                }
+                this.log(`Alice Wang's Euclidean Algorithm: Discarded ${discardCount} cards to equalize hand sizes`);
+            }
         }
         this.render();
     }
@@ -481,12 +654,12 @@ function ensureStartingMusician(playerNum) {
 const DECK_TEMPLATES = {
     'strings-aggro': {
         name: 'String Section',
-        description: 'Emily, Sophia, Ash, Fiona with Riley Hall. Fast string attacks.',
+        description: 'Emily, Sophia, Ashley, Fiona with Riley Hall. Fast string attacks.',
         build: () => [
-            createCharacterCard(CHARACTERS.EMILY),
-            createCharacterCard(CHARACTERS.SOPHIA),
-            createCharacterCard(CHARACTERS.ASH),
-            createCharacterCard(CHARACTERS.FIONA),
+            createCharacterCard(CHARACTERS.EMILY_WANG),
+            createCharacterCard(CHARACTERS.SOPHIA_WANG),
+            createCharacterCard(CHARACTERS.ASHLEY_TOBY),
+            createCharacterCard(CHARACTERS.FIONA_LI),
             ...Array(10).fill(null).map(() => createEnergyCard(TYPES.STRINGS)),
             createItemCard(ITEMS.OTAMATONE),
             createItemCard(ITEMS.FOLDING_STAND),
@@ -495,21 +668,21 @@ const DECK_TEMPLATES = {
             createItemCard(ITEMS.ICE_SKATES),
             createItemCard(ITEMS.CONCERT_PROGRAM),
             createItemCard(ITEMS.VIDEO_CAMERA),
-            createItemCard(ITEMS.CAST_RESERVE),
+            createItemCard(ITEMS.PRINTED_SCORE),
             createToolCard(TOOLS.MAID_OUTFIT),
-            createToolCard(TOOLS.EXTENSION_CORD),
+            createToolCard(TOOLS.KIKI_HEADBAND),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
             ...Array(3).fill(null).map(() => createStadiumCard(STADIUMS.RILEY_HALL))
         ]
     },
     'piano-control': {
         name: 'Piano Trio',
-        description: 'Katie, David, Jennie, Kana with Steinert Basement. Duo queue bonus.',
+        description: 'Katie, David, Jennie, Henry with Steinert Basement. Piano control.',
         build: () => [
-            createCharacterCard(CHARACTERS.KATIE),
-            createCharacterCard(CHARACTERS.DAVID),
-            createCharacterCard(CHARACTERS.JENNIE),
-            createCharacterCard(CHARACTERS.KANA),
+            createCharacterCard(CHARACTERS.KATIE_XIANG),
+            createCharacterCard(CHARACTERS.DAVID_MAN),
+            createCharacterCard(CHARACTERS.JENNIE_WANG),
+            createCharacterCard(CHARACTERS.HENRY_WANG),
             ...Array(8).fill(null).map(() => createEnergyCard(TYPES.PIANO)),
             ...Array(3).fill(null).map(() => createEnergyCard(TYPES.WOODWINDS)),
             createItemCard(ITEMS.MATCHA_LATTE),
@@ -530,10 +703,10 @@ const DECK_TEMPLATES = {
         name: 'Rhythm Section',
         description: 'Bokai, Pascal, Cavin, Loang with Main Hall. Balanced percussion.',
         build: () => [
-            createCharacterCard(CHARACTERS.BOKAI),
-            createCharacterCard(CHARACTERS.PASCAL),
-            createCharacterCard(CHARACTERS.CAVIN),
-            createCharacterCard(CHARACTERS.LOANG),
+            createCharacterCard(CHARACTERS.BOKAI_BI),
+            createCharacterCard(CHARACTERS.PASCAL_KIM),
+            createCharacterCard(CHARACTERS.CAVIN_XUE),
+            createCharacterCard(CHARACTERS.LOANG_CHIANG),
             ...Array(9).fill(null).map(() => createEnergyCard(TYPES.PERCUSSION)),
             ...Array(2).fill(null).map(() => createEnergyCard(TYPES.BRASS)),
             createItemCard(ITEMS.OTAMATONE),
@@ -555,10 +728,10 @@ const DECK_TEMPLATES = {
         name: 'A Cappella',
         description: 'Rachel, Ross, Evelyn, Izzy with Friedman Hall. Choir healing.',
         build: () => [
-            createCharacterCard(CHARACTERS.RACHEL),
-            createCharacterCard(CHARACTERS.ROSS),
-            createCharacterCard(CHARACTERS.EVELYN),
-            createCharacterCard(CHARACTERS.IZZY),
+            createCharacterCard(CHARACTERS.RACHEL_CHEN),
+            createCharacterCard(CHARACTERS.ROSS_WILLIAMS),
+            createCharacterCard(CHARACTERS.EVELYN_WU),
+            createCharacterCard(CHARACTERS.IZZY_CHEN),
             ...Array(9).fill(null).map(() => createEnergyCard(TYPES.CHOIR)),
             ...Array(2).fill(null).map(() => createEnergyCard(TYPES.WOODWINDS)),
             createItemCard(ITEMS.MATCHA_LATTE),
@@ -568,7 +741,7 @@ const DECK_TEMPLATES = {
             createItemCard(ITEMS.CONCERT_TICKET),
             createItemCard(ITEMS.CAMERA),
             createItemCard(ITEMS.VIDEO_CAMERA),
-            createItemCard(ITEMS.SE_ROSTER),
+            createItemCard(ITEMS.CONCERT_ROSTER),
             createItemCard(ITEMS.ICE_SKATES),
             createItemCard(ITEMS.CONCERT_PROGRAM),
             createToolCard(TOOLS.MAID_OUTFIT),
@@ -579,12 +752,12 @@ const DECK_TEMPLATES = {
     },
     'brass-tempo': {
         name: 'Brass Band',
-        description: 'Kei, Ryan, Bokai, Kana with Lindemann. High-powered brass.',
+        description: 'Kei, Filip, Juan, Vincent with Lindemann. High-powered brass.',
         build: () => [
-            createCharacterCard(CHARACTERS.KEI),
-            createCharacterCard(CHARACTERS.RYAN),
-            createCharacterCard(CHARACTERS.BOKAI),
-            createCharacterCard(CHARACTERS.KANA),
+            createCharacterCard(CHARACTERS.KEI_WATANABE),
+            createCharacterCard(CHARACTERS.FILIP_KAMINSKI),
+            createCharacterCard(CHARACTERS.JUAN_BURGOS),
+            createCharacterCard(CHARACTERS.VINCENT_CHEN),
             ...Array(9).fill(null).map(() => createEnergyCard(TYPES.BRASS)),
             ...Array(2).fill(null).map(() => createEnergyCard(TYPES.PERCUSSION)),
             createItemCard(ITEMS.BUO_STAND),
@@ -597,20 +770,20 @@ const DECK_TEMPLATES = {
             createItemCard(ITEMS.PRINTED_SCORE),
             createItemCard(ITEMS.ICE_SKATES),
             createItemCard(ITEMS.CORRUPTED_FILE),
-            createToolCard(TOOLS.AVGE_SHIRT),
-            createToolCard(TOOLS.EXTENSION_CORD),
+            createToolCard(TOOLS.AVGE_TSHIRT),
+            createToolCard(TOOLS.KIKI_HEADBAND),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.WILL)),
             ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.LINDEMANN))
         ]
     },
     'guitar-rock': {
         name: 'Electric Ensemble',
-        description: 'Grace, Roberto, Emily, Ash with Salomon DECI. RNG damage.',
+        description: 'Grace, Roberto, Hanlei, Meya with Salomon DECI. RNG damage.',
         build: () => [
-            createCharacterCard(CHARACTERS.GRACE),
-            createCharacterCard(CHARACTERS.ROBERTO),
-            createCharacterCard(CHARACTERS.EMILY),
-            createCharacterCard(CHARACTERS.ASH),
+            createCharacterCard(CHARACTERS.GRACE_ZHAO),
+            createCharacterCard(CHARACTERS.ROBERTO_GONZALES),
+            createCharacterCard(CHARACTERS.HANLEI_GAO),
+            createCharacterCard(CHARACTERS.MEYA_GAO),
             ...Array(9).fill(null).map(() => createEnergyCard(TYPES.GUITAR)),
             ...Array(2).fill(null).map(() => createEnergyCard(TYPES.STRINGS)),
             createItemCard(ITEMS.OTAMATONE),
@@ -624,36 +797,192 @@ const DECK_TEMPLATES = {
             createItemCard(ITEMS.AVGE_BIRB),
             createItemCard(ITEMS.ANNOTATED_SCORE),
             createToolCard(TOOLS.MAID_OUTFIT),
-            createToolCard(TOOLS.EXTENSION_CORD),
+            createToolCard(TOOLS.KIKI_HEADBAND),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
             ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.SALOMON_DECI))
         ]
     },
     'toolbox': {
         name: 'Mixed Ensemble',
-        description: 'Gabe, David, Evelyn, Roberto with Alumnae. Versatile tools.',
+        description: 'Katie, Grace, Bokai, Ross with Alumnae. Versatile tools.',
         build: () => [
-            createCharacterCard(CHARACTERS.GABE),
-            createCharacterCard(CHARACTERS.DAVID),
-            createCharacterCard(CHARACTERS.EVELYN),
-            createCharacterCard(CHARACTERS.ROBERTO),
-            ...Array(4).fill(null).map(() => createEnergyCard(TYPES.STRINGS)),
+            createCharacterCard(CHARACTERS.KATIE_XIANG),
+            createCharacterCard(CHARACTERS.GRACE_ZHAO),
+            createCharacterCard(CHARACTERS.BOKAI_BI),
+            createCharacterCard(CHARACTERS.ROSS_WILLIAMS),
             ...Array(3).fill(null).map(() => createEnergyCard(TYPES.PIANO)),
             ...Array(3).fill(null).map(() => createEnergyCard(TYPES.GUITAR)),
-            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.WOODWINDS)),
-            createItemCard(ITEMS.CAMERA),
-            createItemCard(ITEMS.VIDEO_CAMERA),
-            createItemCard(ITEMS.MUSESCORE_FILE),
-            createItemCard(ITEMS.CORRUPTED_FILE),
+            ...Array(3).fill(null).map(() => createEnergyCard(TYPES.PERCUSSION)),
+            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.CHOIR)),
+            createItemCard(ITEMS.CONCERT_TICKET),
+            createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.CONCERT_PROGRAM),
             createItemCard(ITEMS.ICE_SKATES),
-            createItemCard(ITEMS.RAFFLE_TICKET),
             createItemCard(ITEMS.BAI_EMAIL),
+            createItemCard(ITEMS.VIDEO_CAMERA),
+            createItemCard(ITEMS.CAMERA),
             createToolCard(TOOLS.KIKI_HEADBAND),
+            createToolCard(TOOLS.MAID_OUTFIT),
             createToolCard(TOOLS.AVGE_STICKER),
-            createToolCard(TOOLS.MUSESCORE_SUB),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.EMMA)),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.VICTORIA)),
             ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.ALUMNAE_HALL))
+        ]
+    },
+    'woodwinds-swarm': {
+        name: 'Woodwind Orchestra',
+        description: 'Felix, Jayden, Kana, Anna, Desmond with healing and utility.',
+        build: () => [
+            createCharacterCard(CHARACTERS.FELIX_CHEN),
+            createCharacterCard(CHARACTERS.JAYDEN_BROWN),
+            createCharacterCard(CHARACTERS.KANA_TAKIZAWA),
+            createCharacterCard(CHARACTERS.ANNA_BROWN),
+            createCharacterCard(CHARACTERS.DESMOND_ROPER),
+            ...Array(12).fill(null).map(() => createEnergyCard(TYPES.WOODWINDS)),
+            createItemCard(ITEMS.MATCHA_LATTE),
+            createItemCard(ITEMS.STRAWBERRY_MATCHA),
+            createItemCard(ITEMS.CONCERT_TICKET),
+            createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.VIDEO_CAMERA),
+            createToolCard(TOOLS.MAID_OUTFIT),
+            createToolCard(TOOLS.AVGE_STICKER),
+            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
+            ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.ALUMNAE_HALL)),
+            createStadiumCard(STADIUMS.FRIEDMAN)
+        ]
+    },
+    'brass-fortress': {
+        name: 'Brass Fortress',
+        description: 'Barron, Juan, Vincent, Carolyn. Defensive brass with energy limits.',
+        build: () => [
+            createCharacterCard(CHARACTERS.BARRON_LEE),
+            createCharacterCard(CHARACTERS.JUAN_BURGOS),
+            createCharacterCard(CHARACTERS.VINCENT_CHEN),
+            createCharacterCard(CHARACTERS.CAROLYN_ZHENG),
+            ...Array(10).fill(null).map(() => createEnergyCard(TYPES.BRASS)),
+            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.PERCUSSION)),
+            createItemCard(ITEMS.MATCHA_LATTE),
+            createItemCard(ITEMS.STRAWBERRY_MATCHA),
+            createItemCard(ITEMS.CONCERT_TICKET),
+            createItemCard(ITEMS.BAI_EMAIL),
+            createItemCard(ITEMS.VIDEO_CAMERA),
+            createToolCard(TOOLS.CONDUCTOR_BATON),
+            createToolCard(TOOLS.MAID_OUTFIT),
+            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.MICHELLE)),
+            ...Array(3).fill(null).map(() => createStadiumCard(STADIUMS.LINDEMANN))
+        ]
+    },
+    'guitar-perc-rush': {
+        name: 'Rock & Roll',
+        description: 'Owen, Cavin, Ryan Lee, George. Fast aggressive Guitar-Percussion.',
+        build: () => [
+            createCharacterCard(CHARACTERS.OWEN_LANDRY),
+            createCharacterCard(CHARACTERS.CAVIN_XUE),
+            createCharacterCard(CHARACTERS.RYAN_LEE),
+            createCharacterCard(CHARACTERS.GEORGE_CHUDLEY),
+            ...Array(6).fill(null).map(() => createEnergyCard(TYPES.GUITAR)),
+            ...Array(6).fill(null).map(() => createEnergyCard(TYPES.PERCUSSION)),
+            createItemCard(ITEMS.OTAMATONE),
+            createItemCard(ITEMS.MIKU_OTAMATONE),
+            createItemCard(ITEMS.PRINTED_SCORE),
+            createItemCard(ITEMS.ANNOTATED_SCORE),
+            createItemCard(ITEMS.CONCERT_TICKET),
+            createToolCard(TOOLS.MAID_OUTFIT),
+            createToolCard(TOOLS.BUCKET),
+            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.ANGEL)),
+            ...Array(3).fill(null).map(() => createStadiumCard(STADIUMS.RED_ROOM))
+        ]
+    },
+    'piano-choir-control': {
+        name: 'Symphony Control',
+        description: 'Katie, Luke, Rachel, Ross. Piano-Choir control with abilities.',
+        build: () => [
+            createCharacterCard(CHARACTERS.KATIE_XIANG),
+            createCharacterCard(CHARACTERS.LUKE_XU),
+            createCharacterCard(CHARACTERS.RACHEL_CHEN),
+            createCharacterCard(CHARACTERS.ROSS_WILLIAMS),
+            ...Array(6).fill(null).map(() => createEnergyCard(TYPES.PIANO)),
+            ...Array(6).fill(null).map(() => createEnergyCard(TYPES.CHOIR)),
+            createItemCard(ITEMS.MATCHA_LATTE),
+            createItemCard(ITEMS.STRAWBERRY_MATCHA),
+            createItemCard(ITEMS.CONCERT_TICKET),
+            createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.CAMERA),
+            createToolCard(TOOLS.CONDUCTOR_BATON),
+            createToolCard(TOOLS.MUSESCORE_SUB),
+            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
+            createStadiumCard(STADIUMS.FRIEDMAN),
+            createStadiumCard(STADIUMS.STEINERT_PRACTICE),
+            createStadiumCard(STADIUMS.MAIN_HALL)
+        ]
+    },
+    'hybrid-strings': {
+        name: 'Chamber Ensemble',
+        description: 'Ina, Emily, Alice, Weston. Strings-Woodwinds utility.',
+        build: () => [
+            createCharacterCard(CHARACTERS.INA_MA),
+            createCharacterCard(CHARACTERS.EMILY_WANG),
+            createCharacterCard(CHARACTERS.ALICE_WANG),
+            createCharacterCard(CHARACTERS.WESTON_POE),
+            ...Array(8).fill(null).map(() => createEnergyCard(TYPES.STRINGS)),
+            ...Array(4).fill(null).map(() => createEnergyCard(TYPES.WOODWINDS)),
+            createItemCard(ITEMS.OTAMATONE),
+            createItemCard(ITEMS.MIKU_OTAMATONE),
+            createItemCard(ITEMS.CONCERT_TICKET),
+            createItemCard(ITEMS.ICE_SKATES),
+            createItemCard(ITEMS.VIDEO_CAMERA),
+            createToolCard(TOOLS.MAID_OUTFIT),
+            createToolCard(TOOLS.KIKI_HEADBAND),
+            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
+            ...Array(3).fill(null).map(() => createStadiumCard(STADIUMS.RILEY_HALL))
+        ]
+    },
+    'rainbow-ensemble': {
+        name: 'Grand Orchestra',
+        description: 'All 7 types. Barron, Ross, Owen, Cavin, Luke, Emily, Felix.',
+        build: () => [
+            createCharacterCard(CHARACTERS.BARRON_LEE),
+            createCharacterCard(CHARACTERS.ROSS_WILLIAMS),
+            createCharacterCard(CHARACTERS.OWEN_LANDRY),
+            createCharacterCard(CHARACTERS.CAVIN_XUE),
+            createCharacterCard(CHARACTERS.LUKE_XU),
+            createCharacterCard(CHARACTERS.EMILY_WANG),
+            createCharacterCard(CHARACTERS.FELIX_CHEN),
+            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.BRASS)),
+            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.CHOIR)),
+            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.GUITAR)),
+            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.PERCUSSION)),
+            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.PIANO)),
+            createEnergyCard(TYPES.STRINGS),
+            createItemCard(ITEMS.CONCERT_TICKET),
+            createItemCard(ITEMS.ICE_SKATES),
+            createItemCard(ITEMS.BAI_EMAIL),
+            createToolCard(TOOLS.BUCKET),
+            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LUCAS)),
+            ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.MAIN_HALL))
+        ]
+    },
+    'boss-battle': {
+        name: 'All-Stars',
+        description: 'Vincent, Ross, Edward, Kei, Ryan Li. High HP tanky characters.',
+        build: () => [
+            createCharacterCard(CHARACTERS.VINCENT_CHEN),
+            createCharacterCard(CHARACTERS.ROSS_WILLIAMS),
+            createCharacterCard(CHARACTERS.EDWARD_WIBOWO),
+            createCharacterCard(CHARACTERS.KEI_WATANABE),
+            createCharacterCard(CHARACTERS.RYAN_LI),
+            ...Array(3).fill(null).map(() => createEnergyCard(TYPES.BRASS)),
+            ...Array(3).fill(null).map(() => createEnergyCard(TYPES.CHOIR)),
+            ...Array(3).fill(null).map(() => createEnergyCard(TYPES.GUITAR)),
+            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.PERCUSSION)),
+            createItemCard(ITEMS.MATCHA_LATTE),
+            createItemCard(ITEMS.STRAWBERRY_MATCHA),
+            createItemCard(ITEMS.CONCERT_TICKET),
+            createItemCard(ITEMS.VIDEO_CAMERA),
+            createItemCard(ITEMS.CAMERA),
+            createToolCard(TOOLS.CONDUCTOR_BATON),
+            createToolCard(TOOLS.MAID_OUTFIT),
+            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.RICHARD)),
+            ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.LINDEMANN))
         ]
     }
 };
@@ -1170,12 +1499,26 @@ function showCardActions(card) {
 
 function playCharacterToActive(cardId) {
     const player = game.players[game.currentPlayer];
+    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const opponent = game.players[opponentNum];
     const card = player.hand.find(c => c.id === cardId);
 
     if (card && !player.active) {
         player.active = card;
         player.hand = player.hand.filter(c => c.id !== cardId);
         game.log(`${card.name} played to Active`);
+
+        // Mark as came off bench this turn (for Speedrun Central)
+        card.cameOffBenchThisTurn = true;
+
+        // Bokai Bi's Algorithm - If opponent has this character, deal 50 damage
+        const hasBokaiOnOppBench = opponent.bench.some(c => c && c.name === 'Bokai Bi');
+        const oppHasThisChar = [opponent.active, ...opponent.bench].some(c => c && c.name === card.name);
+        if (hasBokaiOnOppBench && oppHasThisChar) {
+            game.dealDamage(card, 50);
+            game.log(`Bokai Bi's Algorithm: ${card.name} takes 50 damage for being a duplicate!`, 'damage');
+        }
+
         closeModal('action-modal');
         updateUI();
     }
@@ -1183,12 +1526,26 @@ function playCharacterToActive(cardId) {
 
 function playCharacterToBench(cardId, slotIndex) {
     const player = game.players[game.currentPlayer];
+    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const opponent = game.players[opponentNum];
     const card = player.hand.find(c => c.id === cardId);
 
     if (card && player.bench[slotIndex] === null) {
         player.bench[slotIndex] = card;
         player.hand = player.hand.filter(c => c.id !== cardId);
         game.log(`${card.name} played to Bench`);
+
+        // Mark character as just benched (for Luke Xu's Nullify and other abilities)
+        card.wasJustBenched = true;
+
+        // Bokai Bi's Algorithm - If opponent has this character, deal 50 damage
+        const hasBokaiOnOppBench = opponent.bench.some(c => c && c.name === 'Bokai Bi');
+        const oppHasThisChar = [opponent.active, ...opponent.bench].some(c => c && c.name === card.name);
+        if (hasBokaiOnOppBench && oppHasThisChar) {
+            game.dealDamage(card, 50);
+            game.log(`Bokai Bi's Algorithm: ${card.name} takes 50 damage for being a duplicate!`, 'damage');
+        }
+
         closeModal('action-modal');
         updateUI();
     }
@@ -1196,6 +1553,8 @@ function playCharacterToBench(cardId, slotIndex) {
 
 function attachEnergy(cardId, target) {
     const player = game.players[game.currentPlayer];
+    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const opponent = game.players[opponentNum];
     const energyCard = player.hand.find(c => c.id === cardId);
 
     if (!energyCard || game.energyPlayedThisTurn) return;
@@ -1208,10 +1567,45 @@ function attachEnergy(cardId, target) {
     }
 
     if (targetChar) {
-        targetChar.attachedEnergy.push(energyCard);
-        player.hand = player.hand.filter(c => c.id !== cardId);
+        // Check for Barron Lee's Get Served - Opponent's active can't have more than 3 energy
+        // If opponent has Barron on their bench, you cannot attach to your active if it has 3+ energy
+        const barronOnOppSide = opponent.bench.some(c => c && (c.name === 'Barron Lee' || c.name === 'Barron'));
+        if (barronOnOppSide && targetChar === player.active && targetChar.attachedEnergy.length >= 3) {
+            game.log('Barron Lee\'s Get Served: Your active character cannot have more than 3 energy!', 'warning');
+            closeModal('action-modal');
+            return;
+        }
+
+        // Check for Eugenia Ampofo's Fermentation - attach 3 energy instead of 1
+        let attachCount = 1;
+        if (targetChar.name === 'Eugenia Ampofo' || targetChar.name === 'Eugenia') {
+            attachCount = 3;
+            game.log('Eugenia\'s Fermentation: Attaching 3 energy instead of 1!');
+        }
+
+        // Attach energies (up to how many are in hand)
+        for (let i = 0; i < attachCount; i++) {
+            const energyToAttach = player.hand.find(c => c.cardType === 'energy' && c.energyType === energyCard.energyType);
+            if (energyToAttach) {
+                targetChar.attachedEnergy.push(energyToAttach);
+                player.hand = player.hand.filter(c => c.id !== energyToAttach.id);
+                game.log(`Attached ${energyToAttach.name} to ${targetChar.name}`);
+            } else {
+                break; // No more energy of this type
+            }
+        }
+
         game.energyPlayedThisTurn = true;
-        game.log(`Attached ${energyCard.name} to ${targetChar.name}`);
+
+        // Sophia Wang's Original is Better - first energy attach each turn → opponent discards
+        const sophiaInPlay = [player.active, ...player.bench].some(c => c && (c.name === 'Sophia Wang' || c.name === 'Sophia'));
+        if (sophiaInPlay && targetChar.name === 'Sophia Wang' && opponent.hand.length > 0 && !targetChar.sophiaTriggeredThisTurn) {
+            const discarded = opponent.hand.pop();
+            opponent.discard.push(discarded);
+            game.log(`Sophia Wang's Original is Better: Opponent discarded ${discarded.name}!`);
+            targetChar.sophiaTriggeredThisTurn = true;
+        }
+
         closeModal('action-modal');
         updateUI();
     }
@@ -1279,42 +1673,30 @@ function executeItemEffect(card) {
 
     switch(card.name) {
         // Tool items - these attach to characters
-        case 'Maid outfit':
+        case 'Maid Outfit':
         case 'Conductor Baton':
-        case "Kiki's headband":
+        case "Kiki's Headband":
         case 'Bucket':
-        case 'AVGE T-shirt':
-        case 'AVGE showcase sticker':
-        case 'Musescore subscription':
-        case 'Extension Cord':
+        case 'AVGE T-Shirt':
+        case 'AVGE Showcase Sticker':
+        case 'Musescore Subscription':
             showToolAttachmentModal(card);
             return true; // Wait for modal, will discard after attachment
 
         // Healing items
         case 'Matcha Latte':
-            player.bench.forEach(char => {
-                if (char) {
-                    const healAmount = game.stadium && game.stadium.name === 'Matcha Maid Cafe' ? 20 : 10;
-                    char.damage = Math.max(0, (char.damage || 0) - healAmount);
-                    game.log(`${char.name} healed ${healAmount} HP`, 'heal');
-                }
+            // Heals ALL your characters (active + bench) by 10
+            [player.active, ...player.bench].filter(c => c).forEach(char => {
+                const healAmount = 10;
+                char.damage = Math.max(0, (char.damage || 0) - healAmount);
+                game.log(`${char.name} healed ${healAmount} HP`, 'heal');
             });
             break;
 
         case 'Strawberry Matcha Latte':
-            // Cannot be used in performance space
-            if (game.stadium && game.isPerformanceSpace(game.stadium.name)) {
-                game.log('Cannot use Strawberry Matcha Latte in a performance space!', 'error');
-                return false;
-            }
-            player.bench.forEach(char => {
-                if (char) {
-                    const healAmount = game.stadium && game.stadium.name === 'Matcha Maid Cafe' ? 30 : 20;
-                    char.damage = Math.max(0, (char.damage || 0) - healAmount);
-                    game.log(`${char.name} healed ${healAmount} HP`, 'heal');
-                }
-            });
-            break;
+            // Heals ONE character of your choice by 20
+            showHealSelectionModal(player, 20);
+            return true; // Wait for modal
 
         // Special energy items
         case 'Otamatone':
@@ -1325,10 +1707,10 @@ function executeItemEffect(card) {
             game.log('Active character has +1 typeless energy this turn', 'info');
             break;
 
-        case 'Miku otamatone':
+        case 'Miku Otamatone':
             // Only in concert halls
             if (!game.stadium || !game.isPerformanceSpace(game.stadium.name)) {
-                game.log('Miku otamatone can only be used in concert halls!', 'error');
+                game.log('Miku Otamatone can only be used in concert halls!', 'error');
                 return false;
             }
             if (!game.attackModifiers[game.currentPlayer].otamatoneBonus) {
@@ -1339,32 +1721,38 @@ function executeItemEffect(card) {
             break;
 
         // Deck manipulation
-        case 'Concert program':
+        case 'Concert Program':
             showTopCards(player, 5);
             break;
 
-        case 'Dress rehearsal roster':
+        case 'Dress Rehearsal Roster':
             showDeckSelection(player, 3, 1);
             break;
 
-        case 'Printed score':
-            if (opponent.deck.length > 0) {
-                const topCard = opponent.deck[0];
-                if (confirm(`Top card of opponent's deck: ${topCard.name}. Discard it?`)) {
-                    opponent.discard.push(opponent.deck.shift());
-                    game.log(`Discarded opponent's top card: ${topCard.name}`, 'info');
-                } else {
-                    game.log('Did not discard opponent\'s top card', 'info');
-                }
+        case 'Printed Score':
+            // Active character does +10 damage this turn
+            if (!game.attackModifiers[game.currentPlayer].damageBonus) {
+                game.attackModifiers[game.currentPlayer].damageBonus = 0;
             }
+            game.attackModifiers[game.currentPlayer].damageBonus += 10;
+            game.log('Active character does +10 damage this turn', 'info');
             break;
 
-        case 'Annotated score':
-            if (opponent.deck.length >= 2) {
-                showAnnotatedScoreModal(opponent);
-                return true; // Wait for modal
-            } else if (opponent.deck.length === 1) {
-                alert(`Opponent has only 1 card: ${opponent.deck[0].name}`);
+        case 'Annotated Score':
+            // Active character does +20 damage this turn, discard 1 energy from active
+            if (player.active && player.active.attachedEnergy && player.active.attachedEnergy.length > 0) {
+                const discardedEnergy = player.active.attachedEnergy.pop();
+                player.discard.push(discardedEnergy);
+                game.log(`Discarded ${discardedEnergy.name} from active`, 'info');
+
+                if (!game.attackModifiers[game.currentPlayer].damageBonus) {
+                    game.attackModifiers[game.currentPlayer].damageBonus = 0;
+                }
+                game.attackModifiers[game.currentPlayer].damageBonus += 20;
+                game.log('Active character does +20 damage this turn', 'info');
+            } else {
+                game.log('No energy to discard from active character - Annotated Score has no effect', 'error');
+                return false;
             }
             break;
 
@@ -1378,22 +1766,24 @@ function executeItemEffect(card) {
             }
             break;
 
-        case 'Corrupted file':
-            const coinFlip = Math.random() < 0.5;
-            if (!coinFlip) {
-                if (player.hand.length > 0) {
-                    const randomCard = player.hand[Math.floor(Math.random() * player.hand.length)];
-                    player.discard.push(randomCard);
-                    player.hand = player.hand.filter(c => c !== randomCard);
-                    game.log(`Coin flip: Tails. Discarded ${randomCard.name} from your hand`, 'info');
-                }
-            } else {
-                game.log('Coin flip: Heads', 'info');
+        case 'Corrupted File':
+            // Check if you have an Arranger in play
+            const hasArranger = [player.active, ...player.bench]
+                .filter(c => c)
+                .some(c => c.status && c.status.includes('Arranger'));
+
+            if (!hasArranger) {
+                game.log('Cannot use Corrupted File without an Arranger in play!', 'error');
+                return false;
             }
-            if (opponent.hand.length >= 3) {
-                showHandRevealModal(opponent, 3, false);
-                return true; // Wait for modal
-            }
+
+            // Opponent shuffles their hand into deck and draws 3 cards
+            const handSize = opponent.hand.length;
+            opponent.hand.forEach(card => opponent.deck.push(card));
+            opponent.hand = [];
+            game.shuffleDeck(opponentNum);
+            game.drawCards(opponentNum, 3);
+            game.log(`Opponent shuffled ${handSize} cards into deck and drew 3 new cards`, 'info');
             break;
 
         // Board manipulation
@@ -1415,39 +1805,26 @@ function executeItemEffect(card) {
             }
             break;
 
-        case 'Ice skates':
-            if (opponent.active && opponent.bench.some(c => c)) {
-                showOpponentSwitchModal(opponent);
+        case 'Ice Skates':
+            // Switch YOUR active character with one of YOUR benched characters
+            if (player.active && player.bench.some(c => c)) {
+                showPlayerSwitchModal(player);
                 return true; // Wait for modal
             } else {
-                game.log('Cannot switch opponent (no bench)', 'info');
+                game.log('Cannot switch (no bench)', 'info');
             }
             break;
 
-        // Damage modifiers
-        case 'Folding stand':
-            if (!game.attackModifiers[game.currentPlayer].damageBonus) {
-                game.attackModifiers[game.currentPlayer].damageBonus = 0;
-            }
-            game.attackModifiers[game.currentPlayer].damageBonus += 10;
-            game.log('Active character does +10 damage this turn', 'info');
-            break;
+        // Energy manipulation
+        case 'Folding Stand':
+            // Shuffle up to 3 energy cards from discard pile into deck
+            showFoldingStandModal(player);
+            return true; // Wait for modal
 
-        case 'BUO stand':
-            if (player.active && player.active.attachedEnergy && player.active.attachedEnergy.length > 0) {
-                const discardedEnergy = player.active.attachedEnergy.pop();
-                player.discard.push(discardedEnergy);
-                game.log(`Discarded ${discardedEnergy.name} from active`, 'info');
-
-                if (!game.attackModifiers[game.currentPlayer].damageBonus) {
-                    game.attackModifiers[game.currentPlayer].damageBonus = 0;
-                }
-                game.attackModifiers[game.currentPlayer].damageBonus += 20;
-                game.log('Active character does +20 damage this turn', 'info');
-            } else {
-                game.log('No energy to discard from active character', 'info');
-            }
-            break;
+        case 'BUO Stand':
+            // Put one energy on top of deck and one on bottom
+            showBUOStandModal(player);
+            return true; // Wait for modal
 
         // Draw items
         case 'Concert ticket':
@@ -1473,9 +1850,9 @@ function executeItemEffect(card) {
             break;
 
         // Search items
-        case 'SE concert roster':
-            // Search for low health character
-            showCharacterSearchModal(player, 'low-hp');
+        case 'Concert Roster':
+            // Search deck for a specific character and place it onto your bench
+            showConcertRosterModal(player);
             return true; // Wait for modal
 
         // Stadium removal
@@ -2133,6 +2510,312 @@ function selectSearchedCharacter(charId) {
 
     // Discard the SE concert roster card
     const rosterCard = player.hand.find(c => c.name === 'SE concert roster');
+    if (rosterCard) {
+        player.hand = player.hand.filter(c => c.id !== rosterCard.id);
+        player.discard.push(rosterCard);
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+// Strawberry Matcha Latte: Heal selection modal
+function showHealSelectionModal(player, healAmount) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Strawberry Matcha Latte</h2>`;
+    html += `<p>Choose a character to heal ${healAmount} HP</p>`;
+    html += `<div class="target-selection">`;
+
+    if (player.active) {
+        html += `<div class="target-option" onclick="healSelectedCharacter('active', ${healAmount})">
+            ${player.active.name} (${player.active.damage || 0} damage)
+        </div>`;
+    }
+
+    player.bench.forEach((char, idx) => {
+        if (char) {
+            html += `<div class="target-option" onclick="healSelectedCharacter(${idx}, ${healAmount})">
+                ${char.name} (${char.damage || 0} damage)
+            </div>`;
+        }
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function healSelectedCharacter(target, healAmount) {
+    const player = game.players[game.currentPlayer];
+    const character = target === 'active' ? player.active : player.bench[target];
+
+    if (character) {
+        character.damage = Math.max(0, (character.damage || 0) - healAmount);
+        game.log(`${character.name} healed ${healAmount} HP`, 'heal');
+    }
+
+    // Discard the Strawberry Matcha Latte card
+    const matchaCard = player.hand.find(c => c.name === 'Strawberry Matcha Latte');
+    if (matchaCard) {
+        player.hand = player.hand.filter(c => c.id !== matchaCard.id);
+        player.discard.push(matchaCard);
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+// Folding Stand: Energy shuffle modal
+function showFoldingStandModal(player) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    const energyCards = player.discard.filter(c => c.cardType === 'energy');
+    if (energyCards.length === 0) {
+        game.log('No energy cards in discard pile', 'info');
+        const foldingStand = player.hand.find(c => c.name === 'Folding Stand');
+        if (foldingStand) {
+            player.hand = player.hand.filter(c => c.id !== foldingStand.id);
+            player.discard.push(foldingStand);
+        }
+        updateUI();
+        return;
+    }
+
+    if (!game.tempSelections) game.tempSelections = {};
+    game.tempSelections.foldingStandSelected = [];
+
+    let html = `<h2>Folding Stand</h2>`;
+    html += `<p>Select up to 3 energy cards to shuffle into your deck</p>`;
+    html += `<div id="folding-stand-selection">`;
+
+    energyCards.forEach(card => {
+        html += `<div class="target-option" id="folding-${card.id}" onclick="toggleFoldingStandCard('${card.id}')">
+            ${card.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="confirmFoldingStand()">Confirm Selection</button>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function toggleFoldingStandCard(cardId) {
+    if (!game.tempSelections.foldingStandSelected) game.tempSelections.foldingStandSelected = [];
+
+    const index = game.tempSelections.foldingStandSelected.indexOf(cardId);
+    const element = document.getElementById(`folding-${cardId}`);
+
+    if (index === -1 && game.tempSelections.foldingStandSelected.length < 3) {
+        game.tempSelections.foldingStandSelected.push(cardId);
+        element.classList.add('selected');
+    } else if (index !== -1) {
+        game.tempSelections.foldingStandSelected.splice(index, 1);
+        element.classList.remove('selected');
+    }
+}
+
+function confirmFoldingStand() {
+    const player = game.players[game.currentPlayer];
+    const selected = game.tempSelections.foldingStandSelected || [];
+
+    selected.forEach(cardId => {
+        const card = player.discard.find(c => c.id === cardId);
+        if (card) {
+            player.discard = player.discard.filter(c => c.id !== cardId);
+            player.deck.push(card);
+            game.log(`Shuffled ${card.name} into deck`, 'info');
+        }
+    });
+
+    game.shuffleDeck(game.currentPlayer);
+
+    // Discard Folding Stand
+    const foldingStand = player.hand.find(c => c.name === 'Folding Stand');
+    if (foldingStand) {
+        player.hand = player.hand.filter(c => c.id !== foldingStand.id);
+        player.discard.push(foldingStand);
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+// BUO Stand: Energy placement modal
+function showBUOStandModal(player) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    if (!game.tempSelections) game.tempSelections = {};
+    game.tempSelections.buoStandTop = null;
+    game.tempSelections.buoStandBottom = null;
+    game.tempSelections.buoStandStage = 'top'; // 'top' or 'bottom'
+
+    let html = `<h2>BUO Stand</h2>`;
+    html += `<p id="buo-instruction">Select one energy from hand to put on TOP of deck</p>`;
+    html += `<div id="buo-stand-selection">`;
+
+    player.hand.filter(c => c.cardType === 'energy').forEach(card => {
+        html += `<div class="target-option" onclick="selectBUOStandCard('${card.id}')">
+            ${card.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function selectBUOStandCard(cardId) {
+    const player = game.players[game.currentPlayer];
+
+    if (game.tempSelections.buoStandStage === 'top') {
+        game.tempSelections.buoStandTop = cardId;
+        game.tempSelections.buoStandStage = 'bottom';
+
+        // Update modal for bottom selection
+        const instruction = document.getElementById('buo-instruction');
+        instruction.textContent = 'Select one energy from hand to put on BOTTOM of deck';
+
+        const selection = document.getElementById('buo-stand-selection');
+        let html = '';
+        player.hand.filter(c => c.cardType === 'energy' && c.id !== cardId).forEach(card => {
+            html += `<div class="target-option" onclick="selectBUOStandCard('${card.id}')">
+                ${card.name}
+            </div>`;
+        });
+        selection.innerHTML = html;
+    } else {
+        // Bottom card selected, execute the effect
+        game.tempSelections.buoStandBottom = cardId;
+
+        const topCard = player.hand.find(c => c.id === game.tempSelections.buoStandTop);
+        const bottomCard = player.hand.find(c => c.id === game.tempSelections.buoStandBottom);
+
+        if (topCard && bottomCard) {
+            player.hand = player.hand.filter(c => c.id !== topCard.id && c.id !== bottomCard.id);
+            player.deck.unshift(topCard); // Add to top
+            player.deck.push(bottomCard); // Add to bottom
+            game.log(`Put ${topCard.name} on top and ${bottomCard.name} on bottom of deck`, 'info');
+        }
+
+        // Discard BUO Stand
+        const buoStand = player.hand.find(c => c.name === 'BUO Stand');
+        if (buoStand) {
+            player.hand = player.hand.filter(c => c.id !== buoStand.id);
+            player.discard.push(buoStand);
+        }
+
+        closeModal('action-modal');
+        updateUI();
+    }
+}
+
+// Ice Skates: Player switch modal
+function showPlayerSwitchModal(player) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Ice Skates</h2>`;
+    html += `<p>Select a benched character to switch with your active</p>`;
+    html += `<div class="target-selection">`;
+
+    player.bench.forEach((char, idx) => {
+        if (char) {
+            html += `<div class="target-option" onclick="switchWithBench(${idx})">
+                ${char.name}
+            </div>`;
+        }
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function switchWithBench(benchIndex) {
+    const player = game.players[game.currentPlayer];
+
+    if (player.active && player.bench[benchIndex]) {
+        const temp = player.active;
+        player.active = player.bench[benchIndex];
+        player.bench[benchIndex] = temp;
+        game.log(`Switched ${player.active.name} into active slot`, 'info');
+    }
+
+    // Discard Ice Skates
+    const iceSkates = player.hand.find(c => c.name === 'Ice Skates');
+    if (iceSkates) {
+        player.hand = player.hand.filter(c => c.id !== iceSkates.id);
+        player.discard.push(iceSkates);
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+// Concert Roster: Character search and bench modal
+function showConcertRosterModal(player) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    const characters = player.deck.filter(c => c.cardType === 'character');
+    if (characters.length === 0) {
+        game.log('No characters in deck', 'info');
+        const rosterCard = player.hand.find(c => c.name === 'Concert Roster');
+        if (rosterCard) {
+            player.hand = player.hand.filter(c => c.id !== rosterCard.id);
+            player.discard.push(rosterCard);
+        }
+        updateUI();
+        return;
+    }
+
+    let html = `<h2>Concert Roster</h2>`;
+    html += `<p>Search for a character to place on your bench</p>`;
+    html += `<div class="target-selection">`;
+
+    characters.forEach(char => {
+        html += `<div class="target-option" onclick="selectConcertRosterCharacter('${char.id}')">
+            ${char.name} (${char.type.join('/')}) - ${char.hp} HP
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function selectConcertRosterCharacter(charId) {
+    const player = game.players[game.currentPlayer];
+    const char = player.deck.find(c => c.id === charId);
+
+    if (char) {
+        const emptyBenchSlot = player.bench.indexOf(null);
+        if (emptyBenchSlot !== -1) {
+            player.bench[emptyBenchSlot] = char;
+            player.deck = player.deck.filter(c => c.id !== charId);
+            game.log(`Placed ${char.name} on bench from deck`, 'info');
+        } else {
+            game.log('No empty bench slots', 'error');
+        }
+    }
+
+    // Discard Concert Roster
+    const rosterCard = player.hand.find(c => c.name === 'Concert Roster');
     if (rosterCard) {
         player.hand = player.hand.filter(c => c.id !== rosterCard.id);
         player.discard.push(rosterCard);
@@ -2847,11 +3530,23 @@ function showAttackMenu(cardId) {
     html += `<div class="action-buttons">`;
 
     // Show available moves
-    if (attacker.moves && attacker.moves.length > 0) {
-        attacker.moves.forEach((move, idx) => {
+    let allMoves = attacker.moves ? [...attacker.moves] : [];
+
+    // Ross Williams' I Am Become Ross - Active can use Ross's moves from bench
+    const rossOnBench = player.bench.find(c => c && c.name === 'Ross Williams');
+    if (rossOnBench && rossOnBench.moves) {
+        html += `<p style="color: #4CAF50; font-style: italic;">+ Ross's moves available (I Am Become Ross)</p>`;
+        rossOnBench.moves.forEach(move => {
+            allMoves.push({...move, isRossMove: true});
+        });
+    }
+
+    if (allMoves.length > 0) {
+        allMoves.forEach((move, idx) => {
             const canUse = canUseMove(attacker, move);
             const disabled = canUse ? '' : 'disabled';
-            html += `<button class="action-btn" ${disabled} onclick="selectMove('${cardId}', ${idx})">${move.name} [${move.cost ? move.cost.join('') : ''}] - ${move.damage || 0} dmg</button>`;
+            const rossLabel = move.isRossMove ? ' (Ross)' : '';
+            html += `<button class="action-btn" ${disabled} onclick="selectMove('${cardId}', ${idx})">${move.name}${rossLabel} [${move.cost ? move.cost.join('') : ''}] - ${move.damage || 0} dmg</button>`;
         });
     } else {
         html += `<p>No moves available</p>`;
@@ -2902,7 +3597,17 @@ function canUseMove(character, move) {
 function selectMove(cardId, moveIndex) {
     const player = game.players[game.currentPlayer];
     const attacker = player.active;
-    const move = attacker.moves[moveIndex];
+
+    // Build combined move list (including Ross's moves if applicable)
+    let allMoves = attacker.moves ? [...attacker.moves] : [];
+    const rossOnBench = player.bench.find(c => c && c.name === 'Ross Williams');
+    if (rossOnBench && rossOnBench.moves) {
+        rossOnBench.moves.forEach(move => {
+            allMoves.push({...move, isRossMove: true});
+        });
+    }
+
+    const move = allMoves[moveIndex];
 
     closeModal('action-modal');
 
@@ -3162,10 +3867,10 @@ function executeAttack(attackerId, moveName, targetId) {
             break;
 
         case 'Percussion Ensemble':
-            // Search deck for 3 percussion instruments and attach to any percussionist
+            // Search deck for 2 percussion energies and attach to any percussionist
             const percussionEnergy = player.deck.filter(c =>
                 c.cardType === 'energy' && c.energyType === TYPES.PERCUSSION
-            ).slice(0, 3);
+            ).slice(0, 2);
 
             const percussionists = [player.active, ...player.bench].filter(c =>
                 c && c.type.includes(TYPES.PERCUSSION)
@@ -3241,22 +3946,32 @@ function executeAttack(attackerId, moveName, targetId) {
             }
             break;
 
+        case 'Triple Stop':
         case 'Triple Stops':
             // Flip 3 coins, 30 damage per heads
             let heads = 0;
             for (let i = 0; i < 3; i++) {
                 if (Math.random() < 0.5) {
                     heads++;
-                    game.log('Triple Stops: Heads!');
+                    game.log('Triple Stop: Heads!');
                 } else {
-                    game.log('Triple Stops: Tails');
+                    game.log('Triple Stop: Tails');
                 }
             }
             if (heads > 0) {
                 const tripleStopsDamage = heads * 30;
                 const tripleStopsFinal = calculateDamage(attacker, target, tripleStopsDamage, move);
                 game.dealDamage(target, tripleStopsFinal);
-                game.log(`Triple Stops: ${heads} heads for ${tripleStopsFinal} damage!`, 'damage');
+                game.log(`Triple Stop: ${heads} heads for ${tripleStopsFinal} damage!`, 'damage');
+            }
+            break;
+
+        case 'Four Mallets':
+            // Four individual attacks of 10 damage each
+            for (let i = 0; i < 4; i++) {
+                const fourMalletsDamage = calculateDamage(attacker, target, 10, move);
+                game.dealDamage(target, fourMalletsDamage);
+                game.log(`Four Mallets hit ${i + 1}: ${fourMalletsDamage} damage`);
             }
             break;
 
@@ -3273,14 +3988,14 @@ function executeAttack(attackerId, moveName, targetId) {
             break;
 
         case 'Ragebaited':
-            // 40 damage, +20 when below 50% HP, double when below 20% HP
-            let ragebaseDamage = 40;
+            // 10 damage, +20 when below 50% HP, +60 when below 20% HP
+            let ragebaseDamage = 10;
             const currentHP = attacker.hp - (attacker.damage || 0);
             const hpPercent = currentHP / attacker.hp;
 
             if (hpPercent <= 0.2) {
-                ragebaseDamage *= 2;
-                game.log('Ragebaited: Doubled damage (below 20% HP)!');
+                ragebaseDamage += 60;
+                game.log('Ragebaited: +60 damage (below 20% HP)!');
             } else if (hpPercent <= 0.5) {
                 ragebaseDamage += 20;
                 game.log('Ragebaited: +20 damage (below 50% HP)!');
@@ -3291,14 +4006,74 @@ function executeAttack(attackerId, moveName, targetId) {
             game.log(`${attacker.name} used Ragebaited for ${rageFinal} damage!`, 'damage');
             break;
 
+        case 'Rimshot':
+            // Roll d6, if 1-4 do 60 damage
+            const rimshotRoll = Math.floor(Math.random() * 6) + 1;
+            game.log(`Rimshot: Rolled ${rimshotRoll}`);
+            if (rimshotRoll >= 1 && rimshotRoll <= 4) {
+                const rimshotDamage = calculateDamage(attacker, target, 60, move);
+                game.dealDamage(target, rimshotDamage);
+                game.log(`Rimshot hit for ${rimshotDamage} damage!`, 'damage');
+            } else {
+                game.log('Rimshot missed!');
+            }
+            break;
+
+        case 'Screech!':
+            // Roll d6, damage = 10 + (10 * number)
+            const screechRoll = Math.floor(Math.random() * 6) + 1;
+            const screechDamage = 10 + (10 * screechRoll);
+            const screechFinal = calculateDamage(attacker, target, screechDamage, move);
+            game.dealDamage(target, screechFinal);
+            game.log(`Screech!: Rolled ${screechRoll} for ${screechFinal} damage!`, 'damage');
+            break;
+
+        case 'Double Tongue':
+            // Two individual attacks of 10 damage each
+            for (let i = 0; i < 2; i++) {
+                const doubleTongueDamage = calculateDamage(attacker, target, 10, move);
+                game.dealDamage(target, doubleTongueDamage);
+                game.log(`Double Tongue hit ${i + 1}: ${doubleTongueDamage} damage`);
+            }
+            break;
+
+        case 'Harmonics':
+            // Flip 2 coins, if both heads do 80 damage
+            const coin1 = Math.random() < 0.5;
+            const coin2 = Math.random() < 0.5;
+            game.log(`Harmonics: Coin 1 - ${coin1 ? 'Heads' : 'Tails'}, Coin 2 - ${coin2 ? 'Heads' : 'Tails'}`);
+            if (coin1 && coin2) {
+                const harmonicsDamage = calculateDamage(attacker, target, 80, move);
+                game.dealDamage(target, harmonicsDamage);
+                game.log(`Harmonics: Both heads! ${harmonicsDamage} damage!`, 'damage');
+            } else {
+                game.log('Harmonics: No damage');
+            }
+            break;
+
+        case 'Four Hands':
+            // 30 damage, +30 if another piano on bench
+            let fourHandsDamage = 30;
+            const otherPianos = player.bench.filter(char =>
+                char && char.type.includes(TYPES.PIANO) && char.id !== attacker.id
+            );
+            if (otherPianos.length > 0) {
+                fourHandsDamage += 30;
+                game.log('Four Hands: +30 damage from another piano on bench!');
+            }
+            const fourHandsFinal = calculateDamage(attacker, target, fourHandsDamage, move);
+            game.dealDamage(target, fourHandsFinal);
+            game.log(`Four Hands: ${fourHandsFinal} damage!`, 'damage');
+            break;
+
         case 'Excused Absence':
-            // Heal all other characters in play
-            const allOtherChars = [player.active, ...player.bench].filter(c => c && c.id !== attacker.id);
-            allOtherChars.forEach(char => {
+            // Heal 30 damage from each of your characters
+            const allCharsForHeal = [player.active, ...player.bench].filter(c => c);
+            allCharsForHeal.forEach(char => {
                 if (char.damage > 0) {
-                    const healAmount = char.damage;
-                    char.damage = 0;
-                    game.log(`${char.name} fully healed (${healAmount} damage removed)!`, 'heal');
+                    const healAmount = Math.min(30, char.damage);
+                    char.damage -= healAmount;
+                    game.log(`${char.name} healed ${healAmount} damage!`, 'heal');
                 }
             });
             break;
@@ -3406,7 +4181,7 @@ function executeAttack(attackerId, moveName, targetId) {
             break;
 
         case 'Guitar Shredding':
-            // 100 damage, must discard all guitar energy attached
+            // 10 damage, discard all guitar energy, discard 2 cards per energy from opponent's deck
             const guitarEnergy = attacker.attachedEnergy.filter(e => e.energyType === TYPES.GUITAR);
 
             if (guitarEnergy.length > 0) {
@@ -3416,11 +4191,621 @@ function executeAttack(attackerId, moveName, targetId) {
                 });
                 game.log(`Guitar Shredding: Discarded ${guitarEnergy.length} guitar energy`);
 
-                const shreddingFinal = calculateDamage(attacker, target, 100, move);
+                // Discard 2 cards from opponent's deck per energy
+                const cardsToDiscard = guitarEnergy.length * 2;
+                for (let i = 0; i < cardsToDiscard && opponent.deck.length > 0; i++) {
+                    const discarded = opponent.deck.shift();
+                    opponent.discard.push(discarded);
+                }
+                game.log(`Guitar Shredding: Opponent discarded ${Math.min(cardsToDiscard, opponent.deck.length)} cards from deck`);
+
+                const shreddingFinal = calculateDamage(attacker, target, 10, move);
                 game.dealDamage(target, shreddingFinal);
                 game.log(`${attacker.name} used Guitar Shredding for ${shreddingFinal} damage!`, 'damage');
             } else {
                 game.log('Guitar Shredding: No guitar energy to discard!');
+            }
+            break;
+
+        case 'Snap Pizz':
+            // 20 damage, discard 2 energy from opponent's character
+            executeDamageAttack(attacker, target, move);
+            if (target.attachedEnergy && target.attachedEnergy.length >= 2) {
+                for (let i = 0; i < 2; i++) {
+                    const discardedEnergy = target.attachedEnergy.pop();
+                    opponent.discard.push(discardedEnergy);
+                }
+                game.log('Snap Pizz: Discarded 2 energy from opponent!');
+            } else if (target.attachedEnergy && target.attachedEnergy.length > 0) {
+                const discardedEnergy = target.attachedEnergy.pop();
+                opponent.discard.push(discardedEnergy);
+                game.log('Snap Pizz: Discarded 1 energy from opponent (only had 1)');
+            }
+            break;
+
+        case 'Grand Piano':
+            // 60 damage, only usable if stadium is a performance stadium
+            if (game.stadium && game.isPerformanceSpace(game.stadium.name)) {
+                executeDamageAttack(attacker, target, move);
+            } else {
+                game.log('Grand Piano can only be used in a performance stadium!');
+            }
+            break;
+
+        case 'Damper Pedal':
+            // 20 damage, opponent's next attack is halved
+            executeDamageAttack(attacker, target, move);
+            game.nextTurnEffects[opponentNum].damperPedal = true;
+            game.log('Damper Pedal: Opponent\'s next attack will be halved!');
+            break;
+
+        case 'Glissando':
+            // 30 damage, can't use this attack next turn
+            executeDamageAttack(attacker, target, move);
+            attacker.cantUseGlissando = true;
+            game.log('Glissando: Can\'t use this attack next turn');
+            break;
+
+        case 'Stick Trick':
+            // 10 damage, swap with benched character for free
+            executeDamageAttack(attacker, target, move);
+            const stickTrickBench = player.bench.filter(c => c);
+            if (stickTrickBench.length > 0) {
+                game.log('Stick Trick: Select benched character to swap with');
+                showStickTrickSwapModal(player, stickTrickBench);
+            } else {
+                game.log('Stick Trick: No benched characters to swap with');
+            }
+            break;
+
+        // ===== BRASS MOVES =====
+        case 'Fanfare':
+            // Not affected by weakness, resistance, or immunities
+            const fanfareDamage = move.damage || 0;
+            game.dealDamage(target, fanfareDamage); // Direct damage, bypass calculateDamage
+            game.log(`${attacker.name} used Fanfare for ${fanfareDamage} damage (ignores resistance/weakness)!`, 'damage');
+            break;
+
+        case 'Drain':
+            // Heal benched character for damage dealt
+            const drainDamage = calculateDamage(attacker, target, move.damage, move);
+            game.dealDamage(target, drainDamage);
+            game.log(`${attacker.name} used Drain for ${drainDamage} damage!`, 'damage');
+
+            const benchedForDrain = player.bench.filter(c => c && c.damage > 0);
+            if (benchedForDrain.length > 0) {
+                showDrainHealSelection(player, benchedForDrain, drainDamage);
+            }
+            break;
+
+        case 'Embouchure':
+            // Move energy among characters
+            showEmbouchureSelection(player);
+            break;
+
+        case 'Echoing Blast':
+            // 40 damage + 10 to each bench
+            executeDamageAttack(attacker, target, move);
+            opponent.bench.filter(c => c).forEach(benchChar => {
+                const benchDamage = calculateDamage(attacker, benchChar, 10, move);
+                game.dealDamage(benchChar, benchDamage);
+                game.log(`Echoing Blast: ${benchChar.name} takes ${benchDamage} bench damage`);
+            });
+            break;
+
+        case 'Concert Pitch':
+            // 20 damage, +20 per brass if only brass on bench
+            let concertPitchDamage = 20;
+            const benchTypes = player.bench.filter(c => c).map(c => c.type).flat();
+            const onlyBrass = player.bench.filter(c => c).every(c => !c || c.type.includes(TYPES.BRASS));
+
+            if (onlyBrass && player.bench.some(c => c)) {
+                const brassCount = player.bench.filter(c => c && c.type.includes(TYPES.BRASS)).length;
+                concertPitchDamage += 20 * brassCount;
+                game.log(`Concert Pitch: +${20 * brassCount} damage (${brassCount} brass on bench)!`);
+            }
+
+            const concertPitchFinal = calculateDamage(attacker, target, concertPitchDamage, move);
+            game.dealDamage(target, concertPitchFinal);
+            game.log(`${attacker.name} used Concert Pitch for ${concertPitchFinal} damage!`, 'damage');
+            break;
+
+        case 'Heart of the Cards':
+            // Name card, draw, if match deal 60 damage
+            const cardName = prompt('Heart of the Cards: Name a card:');
+            if (cardName && player.deck.length > 0) {
+                const drawnCard = player.deck.shift();
+                player.hand.push(drawnCard);
+                game.log(`Heart of the Cards: Drew ${drawnCard.name}`);
+
+                if (drawnCard.name.toLowerCase() === cardName.toLowerCase()) {
+                    const heartDamage = calculateDamage(attacker, target, 60, move);
+                    game.dealDamage(target, heartDamage);
+                    game.log(`Heart of the Cards: Match! ${heartDamage} damage!`, 'damage');
+                } else {
+                    game.log('Heart of the Cards: No match, no damage');
+                }
+            }
+            break;
+
+        // ===== CHOIR MOVES =====
+        case 'Full Force':
+            // 30 damage + 10 to each bench
+            executeDamageAttack(attacker, target, move);
+            opponent.bench.filter(c => c).forEach(benchChar => {
+                const benchDamage = calculateDamage(attacker, benchChar, 10, move);
+                game.dealDamage(benchChar, benchDamage);
+                game.log(`Full Force: ${benchChar.name} takes ${benchDamage} bench damage`);
+            });
+            break;
+
+        case 'Ross Attack!':
+            // If Ross on your bench: draw 2. If Ross on opp bench: 50 damage. If both: nothing
+            const rossOnYourBench = player.bench.some(c => c && c.name === 'Ross Williams');
+            const rossOnOppBench = opponent.bench.some(c => c && c.name === 'Ross Williams');
+
+            if (rossOnYourBench && rossOnOppBench) {
+                game.log('Ross Attack!: Ross on both benches - nothing happens!');
+            } else if (rossOnYourBench) {
+                game.drawCards(game.currentPlayer, 2);
+                game.log('Ross Attack!: Drew 2 cards (Ross on your bench)!');
+            } else if (rossOnOppBench) {
+                // Choose target from opponent's characters
+                showTargetSelection([opponent.active, ...opponent.bench].filter(c => c), (selectedTarget) => {
+                    const rossDamage = calculateDamage(attacker, selectedTarget, 50, move);
+                    game.dealDamage(selectedTarget, rossDamage);
+                    game.log(`Ross Attack!: ${selectedTarget.name} takes ${rossDamage} damage!`, 'damage');
+                }, 'Ross Attack! - Choose target');
+                return; // Wait for selection
+            } else {
+                game.log('Ross Attack!: No Ross on any bench - no effect');
+            }
+            break;
+
+        case 'Tabemono King':
+            // Heal all yours 30, opponent's 10, discard energy
+            [player.active, ...player.bench].filter(c => c).forEach(char => {
+                if (char.damage > 0) {
+                    const healAmount = Math.min(30, char.damage);
+                    char.damage -= healAmount;
+                    game.log(`${char.name} healed ${healAmount} damage!`, 'heal');
+                }
+            });
+            [opponent.active, ...opponent.bench].filter(c => c).forEach(char => {
+                if (char.damage > 0) {
+                    const healAmount = Math.min(10, char.damage);
+                    char.damage -= healAmount;
+                    game.log(`Opponent's ${char.name} healed ${healAmount} damage!`, 'heal');
+                }
+            });
+            // Discard all energy from attacker
+            if (attacker.attachedEnergy.length > 0) {
+                const discardedCount = attacker.attachedEnergy.length;
+                attacker.attachedEnergy.forEach(e => player.discard.push(e));
+                attacker.attachedEnergy = [];
+                game.log(`Tabemono King: Discarded ${discardedCount} energy`);
+            }
+            break;
+
+        case 'Chorus':
+            // 20 damage + 10 per benched character
+            const chorusBenchCount = player.bench.filter(c => c).length;
+            const chorusDamage = 20 + (10 * chorusBenchCount);
+            const chorusFinal = calculateDamage(attacker, target, chorusDamage, move);
+            game.dealDamage(target, chorusFinal);
+            game.log(`${attacker.name} used Chorus for ${chorusFinal} damage (${chorusBenchCount} benched)!`, 'damage');
+            break;
+
+        // ===== GUITAR MOVES =====
+        case 'Domain Expansion':
+            // Discard all energy, 40 damage to all opponents
+            const guitarEnergyCount = attacker.attachedEnergy.length;
+            attacker.attachedEnergy.forEach(e => player.discard.push(e));
+            attacker.attachedEnergy = [];
+            game.log(`Domain Expansion: Discarded ${guitarEnergyCount} energy`);
+
+            [opponent.active, ...opponent.bench].filter(c => c).forEach(oppChar => {
+                const domainDamage = calculateDamage(attacker, oppChar, 40, move);
+                game.dealDamage(oppChar, domainDamage);
+                game.log(`Domain Expansion: ${oppChar.name} takes ${domainDamage} damage!`, 'damage');
+            });
+            break;
+
+        case 'Power Chord':
+            // 70 damage, discard 2 energy
+            executeDamageAttack(attacker, target, move);
+            const powerChordEnergy = Math.min(2, attacker.attachedEnergy.length);
+            for (let i = 0; i < powerChordEnergy; i++) {
+                const discarded = attacker.attachedEnergy.pop();
+                player.discard.push(discarded);
+            }
+            game.log(`Power Chord: Discarded ${powerChordEnergy} energy`);
+            // Mark that Power Chord was used
+            attacker.usedPowerChordLastTurn = true;
+            break;
+
+        case 'Fingerstyle':
+            // Only if didn't use Power Chord last turn, flip 8 coins
+            if (attacker.usedPowerChordLastTurn) {
+                game.log('Fingerstyle: Cannot use after Power Chord!', 'warning');
+            } else {
+                let fingerstyleHeads = 0;
+                for (let i = 0; i < 8; i++) {
+                    if (flipCoin()) {
+                        fingerstyleHeads++;
+                    }
+                }
+                const fingerstyleDamage = fingerstyleHeads * 10;
+                const fingerstyleFinal = calculateDamage(attacker, target, fingerstyleDamage, move);
+                game.dealDamage(target, fingerstyleFinal);
+                game.log(`Fingerstyle: ${fingerstyleHeads} heads for ${fingerstyleFinal} damage!`, 'damage');
+            }
+            // Clear Power Chord flag
+            attacker.usedPowerChordLastTurn = false;
+            break;
+
+        case 'Packet Loss':
+            // Flip coin per energy, discard on tails
+            if (target.attachedEnergy && target.attachedEnergy.length > 0) {
+                const energyCount = target.attachedEnergy.length;
+                let discarded = 0;
+                for (let i = energyCount - 1; i >= 0; i--) {
+                    if (!flipCoin()) { // Tails
+                        const energy = target.attachedEnergy.splice(i, 1)[0];
+                        opponent.discard.push(energy);
+                        discarded++;
+                    }
+                }
+                game.log(`Packet Loss: Discarded ${discarded} of ${energyCount} energy`);
+            }
+            break;
+
+        case 'Distortion':
+            // 30 damage, plucked strings +40 next turn
+            executeDamageAttack(attacker, target, move);
+            if (!game.nextTurnEffects[game.currentPlayer].distortionBonus) {
+                game.nextTurnEffects[game.currentPlayer].distortionBonus = 0;
+            }
+            game.nextTurnEffects[game.currentPlayer].distortionBonus += 40;
+            game.log('Distortion: Next turn bonus +40 damage set!');
+            break;
+
+        case 'Surprise Delivery':
+            // Look top 3, attach energies, damage per energy
+            const topThreeCards = player.deck.splice(0, 3);
+            let attachedCount = 0;
+            topThreeCards.forEach(card => {
+                if (card.cardType === 'energy' && attacker.attachedEnergy) {
+                    attacker.attachedEnergy.push(card);
+                    attachedCount++;
+                    game.log(`Surprise Delivery: Attached ${card.name}`);
+                } else {
+                    player.deck.push(card);
+                }
+            });
+            game.shuffleDeck(game.currentPlayer);
+
+            if (attachedCount > 0) {
+                const surpriseDamage = attachedCount * 20;
+                const surpriseFinal = calculateDamage(attacker, target, surpriseDamage, move);
+                game.dealDamage(target, surpriseFinal);
+                game.log(`Surprise Delivery: ${attachedCount} energies for ${surpriseFinal} damage!`, 'damage');
+            }
+            break;
+
+        // ===== PERCUSSION MOVES =====
+        case 'Snowball Effect':
+            // Roll d6 until 6, damage = 10 × non-6 rolls
+            let snowballRolls = 0;
+            let roll;
+            do {
+                roll = rollD6();
+                game.log(`Snowball Effect: Rolled ${roll}`);
+                if (roll !== 6) snowballRolls++;
+            } while (roll !== 6);
+
+            const snowballDamage = snowballRolls * 10;
+            const snowballFinal = calculateDamage(attacker, target, snowballDamage, move);
+            game.dealDamage(target, snowballFinal);
+            game.log(`Snowball Effect: ${snowballRolls} non-6 rolls for ${snowballFinal} damage!`, 'damage');
+            break;
+
+        case 'Ominous Chimes':
+            // Shuffle self back, 50 damage at end of opponent's turn
+            game.nextTurnEffects[opponentNum].ominousChimesDamage = 50;
+            game.nextTurnEffects[opponentNum].ominousChimesTarget = target.id;
+
+            // Shuffle attacker back into deck
+            player.active = null;
+            attacker.damage = 0; // Reset damage
+            attacker.attachedEnergy = []; // Clear energy
+            attacker.attachedTools = []; // Clear tools
+            player.deck.push(attacker);
+            game.shuffleDeck(game.currentPlayer);
+            game.log(`Ominous Chimes: ${attacker.name} shuffled back into deck. 50 damage will be dealt at end of opponent's turn!`);
+            break;
+
+        case 'Stickshot':
+            // Roll d6, if 1-4 roll again, damage = 10 × highest
+            let stickshotRoll1 = rollD6();
+            game.log(`Stickshot: First roll ${stickshotRoll1}`);
+            let stickshotFinal = stickshotRoll1;
+
+            if (stickshotRoll1 <= 4) {
+                const stickshotRoll2 = rollD6();
+                game.log(`Stickshot: Second roll ${stickshotRoll2}`);
+                stickshotFinal = Math.max(stickshotRoll1, stickshotRoll2);
+            }
+
+            const stickshotDamage = stickshotFinal * 10;
+            const stickshotDamageFinal = calculateDamage(attacker, target, stickshotDamage, move);
+            game.dealDamage(target, stickshotDamageFinal);
+            game.log(`Stickshot: ${stickshotDamageFinal} damage (highest roll: ${stickshotFinal})!`, 'damage');
+            break;
+
+        case 'Drum Kid Workshop':
+            // Copy another percussion's attack
+            const percussionChars = [player.active, ...player.bench, opponent.active, ...opponent.bench]
+                .filter(c => c && c.type.includes(TYPES.PERCUSSION) && c.id !== attacker.id);
+
+            if (percussionChars.length > 0) {
+                showDrumKidWorkshopSelection(percussionChars, attacker, target);
+            } else {
+                game.log('Drum Kid Workshop: No other percussion characters in play');
+            }
+            break;
+
+        case 'Tricky Rhythms':
+            // Complex energy discard and damage
+            showTrickyRhythmsModal(attacker, target, move);
+            break;
+
+        case 'Rudiments':
+            // 10 damage to chosen opponent character (should already exist but adding for completeness)
+            if (!target) {
+                game.log('Rudiments: Select a target');
+            } else {
+                executeDamageAttack(attacker, target, move);
+            }
+            break;
+
+        // ===== PIANO MOVES =====
+        case 'Nullify':
+            // Benched this turn → opponent abilities no effect
+            if (attacker.wasJustBenched) {
+                game.nextTurnEffects[opponentNum].abilitiesDisabled = true;
+                game.log('Nullify: Opponent abilities disabled next turn!');
+            } else {
+                game.log('Nullify: Can only use if this character was benched this turn', 'warning');
+            }
+            break;
+
+        case 'Separate Hands':
+            // 0 damage, next turn 40 damage
+            game.log('Separate Hands: Next turn will deal 40 damage');
+            attacker.separateHandsActive = true;
+            break;
+
+        case 'Inventory Management':
+            // Flip coin per hand card, 10 damage each heads
+            const handSize = player.hand.length;
+            let inventoryHeads = 0;
+            for (let i = 0; i < handSize; i++) {
+                if (flipCoin()) {
+                    inventoryHeads++;
+                }
+            }
+            const inventoryDamage = inventoryHeads * 10;
+            const inventoryFinal = calculateDamage(attacker, target, inventoryDamage, move);
+            game.dealDamage(target, inventoryFinal);
+            game.log(`Inventory Management: ${inventoryHeads} heads from ${handSize} cards for ${inventoryFinal} damage!`, 'damage');
+            break;
+
+        case 'Racket Smash':
+            // 10 damage, discard energy from bench
+            executeDamageAttack(attacker, target, move);
+            const benchWithEnergy = player.bench.filter(c => c && c.attachedEnergy && c.attachedEnergy.length > 0);
+            if (benchWithEnergy.length > 0) {
+                showRacketSmashSelection(player, benchWithEnergy);
+            }
+            break;
+
+        // ===== STRINGS MOVES =====
+        case 'Borrow':
+            // Move energy from another string to this
+            const stringChars = [player.active, ...player.bench].filter(c =>
+                c && c.type.includes(TYPES.STRINGS) && c.id !== attacker.id && c.attachedEnergy && c.attachedEnergy.length > 0
+            );
+            if (stringChars.length > 0) {
+                showBorrowSelection(player, stringChars, attacker);
+            } else {
+                game.log('Borrow: No other strings with energy to borrow from');
+            }
+            break;
+
+        case 'Foresight':
+            // Rearrange top 3 of opponent's deck
+            if (opponent.deck.length > 0) {
+                const topThreeOpponent = opponent.deck.splice(0, Math.min(3, opponent.deck.length));
+                showForesightModal(opponent, topThreeOpponent);
+            }
+            break;
+
+        case 'Open Strings':
+            // 10 damage, draw card, if energy attach it
+            executeDamageAttack(attacker, target, move);
+            if (player.deck.length > 0) {
+                const drawnCard = player.deck.shift();
+                player.hand.push(drawnCard);
+                game.log(`Open Strings: Drew ${drawnCard.name}`);
+
+                if (drawnCard.cardType === 'energy') {
+                    attacker.attachedEnergy.push(drawnCard);
+                    player.hand = player.hand.filter(c => c.id !== drawnCard.id);
+                    game.log(`Open Strings: Attached ${drawnCard.name} to ${attacker.name}`);
+                }
+            }
+            break;
+
+        case 'VocaRock!!':
+            // 20 damage, +50 if Miku Otamatone attached
+            let vocaRockDamage = 20;
+            if (attacker.attachedTools && attacker.attachedTools.some(t => t.name === 'Miku Otamatone')) {
+                vocaRockDamage += 50;
+                game.log('VocaRock!!: +50 damage from Miku Otamatone!');
+            }
+            const vocaRockFinal = calculateDamage(attacker, target, vocaRockDamage, move);
+            game.dealDamage(target, vocaRockFinal);
+            game.log(`${attacker.name} used VocaRock!! for ${vocaRockFinal} damage!`, 'damage');
+            break;
+
+        case 'Midday Nap':
+            // Heal 20 damage
+            if (attacker.damage > 0) {
+                const healAmount = Math.min(20, attacker.damage);
+                attacker.damage -= healAmount;
+                game.log(`${attacker.name} healed ${healAmount} damage!`, 'heal');
+            } else {
+                game.log('Midday Nap: Already at full HP');
+            }
+            break;
+
+        case 'Gacha Gaming':
+            // Draw cards taking damage, complex mechanics
+            showGachaGamingModal(player, attacker);
+            break;
+
+        case 'Song Voting':
+            // Updated: Reveal opponent's hand, choose card type, damage based on count
+            showSongVotingModal(opponent, attacker, target, move);
+            break;
+
+        // ===== WOODWINDS MOVES =====
+        case 'Overblow':
+            // 40 damage, 10 recoil
+            executeDamageAttack(attacker, target, move);
+            game.dealDamage(attacker, 10);
+            game.log('Overblow: 10 recoil damage', 'damage');
+            break;
+
+        case 'Analysis Paralysis':
+            // Reveal hand, shuffle one back
+            game.log(`Analysis Paralysis: Your hand is ${player.hand.map(c => c.name).join(', ')}`);
+            if (player.hand.length > 0) {
+                showAnalysisParalysisModal(player);
+            }
+            break;
+
+        case 'Speedrun Central':
+            // 20 damage, +40 if came off bench this turn
+            let speedrunDamage = 20;
+            if (attacker.cameOffBenchThisTurn) {
+                speedrunDamage += 40;
+                game.log('Speedrun Central: +40 damage (came off bench this turn)!');
+            }
+            const speedrunFinal = calculateDamage(attacker, target, speedrunDamage, move);
+            game.dealDamage(target, speedrunFinal);
+            game.log(`${attacker.name} used Speedrun Central for ${speedrunFinal} damage!`, 'damage');
+            break;
+
+        case 'Trickster':
+            // Complex turn-delayed damage
+            const tricksterDamage = move.damage || 30;
+            game.nextTurnEffects[opponentNum].tricksterDamage = tricksterDamage;
+            game.nextTurnEffects[opponentNum].tricksterTarget = opponent.active ? opponent.active.id : null;
+            game.log(`Trickster: ${tricksterDamage} damage will be dealt at start of opponent's next turn`);
+            break;
+
+        case 'Sparkling run':
+            // 20 damage, heal 20
+            executeDamageAttack(attacker, target, move);
+            if (attacker.damage > 0) {
+                const healAmount = Math.min(20, attacker.damage);
+                attacker.damage -= healAmount;
+                game.log(`Sparkling run: ${attacker.name} healed ${healAmount} damage!`, 'heal');
+            }
+            break;
+
+        case 'Banana Bread for Everyone!':
+            // Heal 30 all, discard energy
+            [player.active, ...player.bench].filter(c => c).forEach(char => {
+                if (char.damage > 0) {
+                    const healAmount = Math.min(30, char.damage);
+                    char.damage -= healAmount;
+                    game.log(`${char.name} healed ${healAmount} damage!`, 'heal');
+                }
+            });
+            if (attacker.attachedEnergy.length > 0) {
+                const discarded = attacker.attachedEnergy.pop();
+                player.discard.push(discarded);
+                game.log('Banana Bread: Discarded 1 energy');
+            }
+            break;
+
+        case 'Wipeout':
+            // 60 damage to 3 different (including self)
+            showWipeoutSelection(player, opponent, attacker);
+            break;
+
+        case 'Clarinet Solo':
+        case 'Piccolo Solo':
+            // 80 damage if only WW in play
+            const allCharsForSolo = [
+                game.players[1].active, ...game.players[1].bench,
+                game.players[2].active, ...game.players[2].bench
+            ].filter(c => c);
+
+            const woodwindCharsForSolo = allCharsForSolo.filter(c => c.type.includes(TYPES.WOODWINDS));
+            let soloDamage = move.damage || 30;
+
+            if (woodwindCharsForSolo.length === 1 && woodwindCharsForSolo[0].id === attacker.id) {
+                soloDamage = 80;
+                game.log(`${move.name}: Only WW in play, 80 damage!`);
+            }
+
+            const soloFinal = calculateDamage(attacker, target, soloDamage, move);
+            game.dealDamage(target, soloFinal);
+            game.log(`${attacker.name} used ${move.name} for ${soloFinal} damage!`, 'damage');
+            break;
+
+        case 'SN2':
+            // 20 damage, shuffle bench back (if bench not full)
+            executeDamageAttack(attacker, target, move);
+            const benchNotFull = player.bench.some(slot => slot === null);
+            if (benchNotFull) {
+                const benchToShuffle = player.bench.filter(c => c);
+                if (benchToShuffle.length > 0) {
+                    showSN2ShuffleSelection(player, benchToShuffle);
+                }
+            } else {
+                game.log('SN2: Bench is full, cannot shuffle back');
+            }
+            break;
+
+        case 'Outreach':
+            // Search for character, put on top of deck
+            const charactersInDeck = player.deck.filter(c => c.cardType === 'character');
+            if (charactersInDeck.length > 0) {
+                showOutreachSelection(player, charactersInDeck);
+            } else {
+                game.log('Outreach: No characters in deck');
+            }
+            break;
+
+        case 'SE lord':
+            // Heal opponent's bench, damage active by that amount
+            let totalHealed = 0;
+            opponent.bench.filter(c => c && c.damage > 0).forEach(char => {
+                const healAmount = Math.min(30, char.damage);
+                char.damage -= healAmount;
+                totalHealed += healAmount;
+                game.log(`SE lord: Healed ${char.name} for ${healAmount}`, 'heal');
+            });
+
+            if (totalHealed > 0 && opponent.active) {
+                const seLordDamage = calculateDamage(attacker, opponent.active, totalHealed, move);
+                game.dealDamage(opponent.active, seLordDamage);
+                game.log(`SE lord: Dealt ${seLordDamage} damage to opponent's active!`, 'damage');
             }
             break;
 
@@ -3447,7 +4832,7 @@ function executeDamageAttack(attacker, target, move) {
     }
 
     const finalDamage = calculateDamage(attacker, target, baseDamage, move);
-    game.dealDamage(target, finalDamage);
+    game.dealDamage(target, finalDamage, attacker);
     game.log(`${attacker.name} used ${move.name} on ${target.name} for ${finalDamage} damage!`, 'damage');
 }
 
@@ -3547,31 +4932,65 @@ function calculateDamage(attacker, defender, baseDamage, move) {
         game.log(`Turn Up! bonus: +${game.nextTurnEffects[game.currentPlayer].turnUpBonus} damage`);
     }
 
-    // Ash's Instagram Viral
-    if (attacker.name === 'Ash') {
+    // Ashley Toby's Instagram Viral
+    if (attacker.name === 'Ashley Toby' || attacker.name === 'Ash') {
         const bothBenchesFull = currentPlayer.bench.every(slot => slot !== null) &&
                                  opponent.bench.every(slot => slot !== null);
         if (bothBenchesFull) {
             damage *= 2;
-            game.log('Ash\'s Instagram Viral: 2x damage!');
+            game.log('Ashley Toby\'s Instagram Viral: 2x damage!');
         }
     }
 
-    // Cavin's "Wait no... I'm not into femboys–" - +10 damage per maid in play
-    if (attacker.name === 'Cavin') {
+    // Cavin's "Wait no... I'm not into femboys–" - +20 damage per maid in play
+    if (attacker.name === 'Cavin Xue' || attacker.name === 'Cavin') {
         const allChars = [currentPlayer.active, ...currentPlayer.bench, opponent.active, ...opponent.bench].filter(c => c);
         const maidCount = allChars.filter(char => char.status && char.status.includes('Maid')).length;
         if (maidCount > 0) {
-            damage += 10 * maidCount;
-            game.log(`Cavin ability: +${10 * maidCount} damage (${maidCount} maids in play)`);
+            damage += 20 * maidCount;
+            game.log(`Cavin ability: +${20 * maidCount} damage (${maidCount} maids in play)`);
         }
     }
 
-    // Loang's "Moe moe kyun~!" - All your maids do +10 damage
-    const hasLoang = [currentPlayer.active, ...currentPlayer.bench].some(char => char && char.name === 'Loang');
-    if (hasLoang && attacker.status && attacker.status.includes('Maid')) {
-        damage += 10;
-        game.log('Loang ability: +10 damage (maid bonus)');
+    // Ryan Li's "Moe moe kyun~!" - All your maids do +20 damage
+    const hasRyanLi = [currentPlayer.active, ...currentPlayer.bench].some(char => char && char.name === 'Ryan Li');
+    if (hasRyanLi && attacker.status && attacker.status.includes('Maid')) {
+        damage += 20;
+        game.log('Ryan Li ability: +20 damage (maid bonus)');
+    }
+
+    // Juan Burgos's "Baking Buff" - While on bench, brass active does +20 damage
+    const hasJuanOnBench = currentPlayer.bench.some(char => char && char.name === 'Juan Burgos');
+    if (hasJuanOnBench && currentPlayer.active && currentPlayer.active === attacker && attacker.type.includes(TYPES.BRASS)) {
+        damage += 20;
+        game.log('Juan Burgos bench ability: +20 damage to brass');
+    }
+
+    // Daniel Yang's "Delicate Ears" - If no brass in play, +20 damage
+    if (attacker.name === 'Daniel Yang') {
+        const allChars = [
+            game.players[1].active, ...game.players[1].bench,
+            game.players[2].active, ...game.players[2].bench
+        ].filter(c => c);
+        const hasBrass = allChars.some(char => char.type.includes(TYPES.BRASS));
+        if (!hasBrass) {
+            damage += 20;
+            game.log('Daniel Yang ability: +20 damage (no brass in play)');
+        }
+    }
+
+    // Carolyn Zheng's "Procrastinate" - +40 damage if didn't attack last turn (stacks)
+    if (attacker.name === 'Carolyn Zheng') {
+        if (!attacker.attackedLastTurn) {
+            if (!attacker.procrastinateStacks) attacker.procrastinateStacks = 1;
+            else attacker.procrastinateStacks++;
+
+            damage += 40 * attacker.procrastinateStacks;
+            game.log(`Carolyn Zheng Procrastinate: +${40 * attacker.procrastinateStacks} damage (${attacker.procrastinateStacks} stacks)`);
+        } else {
+            attacker.procrastinateStacks = 0;
+        }
+        attacker.attackedLastTurn = true;
     }
 
     // Poppet status (Extension Cord): +20 damage if NOT in a performance space
@@ -3612,6 +5031,60 @@ function calculateDamage(attacker, defender, baseDamage, move) {
         damage *= 2;
         game.log(`Cavin's SCP: 2x damage from ${attacker.name}!`);
     }
+
+    // Yanwan Zhu's Bass Boost - If has 2 Guitar energy, draw after attack
+    if (attacker.name === 'Yanwan Zhu') {
+        const guitarEnergyCount = attacker.attachedEnergy.filter(e => e.energyType === TYPES.GUITAR).length;
+        if (guitarEnergyCount >= 2) {
+            attacker.shouldDrawFromBassBoost = true;
+        }
+    }
+
+    // Ross Williams's I Am Become Ross - Active can use Ross's attacks from bench
+    const rossOnBench = currentPlayer.bench.find(c => c && c.name === 'Ross Williams');
+    if (rossOnBench && currentPlayer.active && move && move.name) {
+        // This is handled in the attack selection UI - Ross's moves are added to active's move list
+    }
+
+    // Distortion bonus - applies to plucked string attacks (guitar and strings types)
+    if (game.nextTurnEffects[game.currentPlayer].distortionBonus) {
+        const isPluckedString = attacker.type && (attacker.type.includes(TYPES.GUITAR) || attacker.type.includes(TYPES.STRINGS));
+        if (isPluckedString) {
+            damage += game.nextTurnEffects[game.currentPlayer].distortionBonus;
+            game.log(`Distortion bonus: +${game.nextTurnEffects[game.currentPlayer].distortionBonus} damage`);
+            game.nextTurnEffects[game.currentPlayer].distortionBonus = 0;
+        }
+    }
+
+    // Separate Hands delayed damage
+    if (attacker.separateHandsActive) {
+        damage += 40;
+        game.log('Separate Hands: +40 damage!');
+        attacker.separateHandsActive = false;
+    }
+
+    // Anna Brown's Do Not Disturb - On bench, reduce damage by 30
+    const defenderPlayer = game.findPlayerWithCharacter(defender);
+    const defenderPlayerObj = game.players[defenderPlayer];
+    const annaOnBench = defenderPlayerObj && defenderPlayerObj.bench.some(c => c && c.name === 'Anna Brown');
+    if (annaOnBench && defenderPlayerObj.bench.includes(defender)) {
+        damage = Math.max(0, damage - 30);
+        game.log('Anna Brown\'s Do Not Disturb: -30 damage to benched characters');
+    }
+
+    // Damper Pedal effect
+    if (game.nextTurnEffects[game.currentPlayer].damperPedal) {
+        damage = Math.floor(damage / 2);
+        game.log('Damper Pedal: Attack halved!');
+        game.nextTurnEffects[game.currentPlayer].damperPedal = false;
+    }
+
+    // Bokai Bi's Algorithm - Opponent plays duplicate → 50 damage (handled elsewhere)
+    // This is checked when opponents play characters, not in damage calculation
+
+    // Felix Chen's Synesthesia - One Woodwind energy as any type
+    // This needs to be handled in move cost checking logic (complex UI change)
+    // For now, this is noted as needing special implementation in energy validation
 
     return Math.max(0, damage);
 }
@@ -3834,9 +5307,27 @@ function useActivatedAbility(cardId, abilitySlot) {
             break;
 
         case 'Reverse Heist':
-            // David: Put used item back on top of deck
-            alert('Use this ability right after playing an item card to put it back on top of your deck.');
-            closeModal('action-modal');
+            // David Man: Shuffle discard, randomly choose 3, put items/tools on top of deck
+            if (player.discard.length < 3) {
+                alert('Need at least 3 cards in discard pile!');
+                closeModal('action-modal');
+                break;
+            }
+
+            // Shuffle discard
+            const shuffledDiscard = [...player.discard].sort(() => Math.random() - 0.5);
+            // Pick random 3
+            const randomThree = shuffledDiscard.slice(0, 3);
+            // Filter for items/tools
+            const itemsAndTools = randomThree.filter(c => c.cardType === 'item' || c.cardType === 'tool');
+
+            if (itemsAndTools.length > 0) {
+                // Show modal to arrange order
+                showReverseHeistModal(player, itemsAndTools);
+            } else {
+                game.log(`Reverse Heist: Drew ${randomThree.map(c => c.name).join(', ')} - no items/tools!`);
+                closeModal('action-modal');
+            }
             break;
 
         case 'Information Advantage':
@@ -3852,11 +5343,68 @@ function useActivatedAbility(cardId, abilitySlot) {
             }
             break;
 
+        case 'Cleric Spell':
+            // Jessica Jung: Shuffle one discard back to deck
+            if (player.discard.length > 0) {
+                showClericSpellModal(player);
+            } else {
+                alert('No cards in discard pile!');
+                closeModal('action-modal');
+            }
+            break;
+
+        case 'Borrow':
+            // Ina Ma: Move energy from another string (passive implementation in move, this is activated version)
+            const stringCharsForBorrow = [player.active, ...player.bench].filter(c =>
+                c && c.type.includes(TYPES.STRINGS) && c.id !== card.id && c.attachedEnergy && c.attachedEnergy.length > 0
+            );
+            if (stringCharsForBorrow.length > 0) {
+                showBorrowSelection(player, stringCharsForBorrow, card);
+            } else {
+                alert('No other strings with energy to borrow from!');
+                closeModal('action-modal');
+            }
+            break;
+
         default:
             game.log(`${ability.name} effect not yet implemented`);
             closeModal('action-modal');
             break;
     }
+}
+
+function showClericSpellModal(player) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Cleric Spell: Shuffle Card Back</h2>`;
+    html += `<p>Select card from discard pile to shuffle back into deck:</p>`;
+    html += `<div class="target-selection">`;
+
+    player.discard.forEach((card, idx) => {
+        html += `<div class="target-option" onclick="executeClericSpell(${idx})">
+            ${card.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeClericSpell(cardIdx) {
+    const player = game.players[game.currentPlayer];
+
+    if (player.discard[cardIdx]) {
+        const card = player.discard.splice(cardIdx, 1)[0];
+        player.deck.push(card);
+        game.shuffleDeck(game.currentPlayer);
+        game.log(`Cleric Spell: Shuffled ${card.name} back into deck`);
+    }
+
+    closeModal('action-modal');
+    updateUI();
 }
 
 function showToolSelectionForDiscard(card) {
@@ -4297,6 +5845,653 @@ function deleteDeck(deckName) {
         loadSavedDecks();
         loadCustomDecksIntoDropdown();
     }
+}
+
+// ===== HELPER FUNCTIONS FOR MOVES =====
+
+function flipCoin() {
+    // Check for Jayden Brown's Four-leaf Clover ability
+    const player = game.players[game.currentPlayer];
+    const hasJayden = [player.active, ...player.bench].some(char => char && char.name === 'Jayden Brown');
+
+    if (hasJayden && !game.usedFourLeafClover) {
+        game.usedFourLeafClover = true;
+        game.log('Jayden Brown\'s Four-leaf Clover: Choose first coin flip result!');
+        const choice = confirm('Choose heads? (OK = Heads, Cancel = Tails)');
+        return choice; // true = heads, false = tails
+    }
+
+    return Math.random() < 0.5;
+}
+
+function rollD6() {
+    return Math.floor(Math.random() * 6) + 1;
+}
+
+// ===== MODAL FUNCTIONS FOR NEW MOVES =====
+
+function showDrainHealSelection(player, benchedChars, healAmount) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Drain: Heal Benched Character</h2>`;
+    html += `<p>Select a benched character to heal ${healAmount} damage:</p>`;
+    html += `<div class="target-selection">`;
+
+    benchedChars.forEach(char => {
+        html += `<div class="target-option" onclick="applyDrainHeal('${char.id}', ${healAmount})">
+            ${char.name} - ${char.hp - (char.damage || 0)}/${char.hp} HP
+        </div>`;
+    });
+
+    html += `</div>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function applyDrainHeal(charId, healAmount) {
+    const player = game.players[game.currentPlayer];
+    const char = [player.active, ...player.bench].find(c => c && c.id === charId);
+
+    if (char && char.damage > 0) {
+        const actualHeal = Math.min(healAmount, char.damage);
+        char.damage -= actualHeal;
+        game.log(`Drain: ${char.name} healed ${actualHeal} damage!`, 'heal');
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showEmbouchureSelection(player) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    const charsWithEnergy = [player.active, ...player.bench].filter(c => c && c.attachedEnergy && c.attachedEnergy.length > 0);
+
+    if (charsWithEnergy.length === 0) {
+        alert('No characters have energy to move!');
+        closeModal('action-modal');
+        return;
+    }
+
+    let html = `<h2>Embouchure: Move Energy</h2>`;
+    html += `<p>Select source character:</p>`;
+    html += `<div class="target-selection">`;
+
+    charsWithEnergy.forEach(char => {
+        html += `<div class="target-option" onclick="selectEmbouchureSource('${char.id}')">
+            ${char.name} - ${char.attachedEnergy.length} energy
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function selectEmbouchureSource(sourceId) {
+    const player = game.players[game.currentPlayer];
+    const source = [player.active, ...player.bench].find(c => c && c.id === sourceId);
+
+    if (!source) return;
+
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Embouchure: Select Energy</h2>`;
+    html += `<p>Select energy from ${source.name}:</p>`;
+    html += `<div class="target-selection">`;
+
+    source.attachedEnergy.forEach((energy, idx) => {
+        html += `<div class="target-option" onclick="selectEmbouchureEnergy('${sourceId}', ${idx})">
+            ${energy.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function selectEmbouchureEnergy(sourceId, energyIdx) {
+    const player = game.players[game.currentPlayer];
+    const source = [player.active, ...player.bench].find(c => c && c.id === sourceId);
+
+    if (!source) return;
+
+    game.tempSelections = game.tempSelections || {};
+    game.tempSelections.embouchureSource = source;
+    game.tempSelections.embouchureEnergyIdx = energyIdx;
+
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    const targets = [player.active, ...player.bench].filter(c => c && c.id !== sourceId);
+
+    let html = `<h2>Embouchure: Select Target</h2>`;
+    html += `<p>Select character to receive energy:</p>`;
+    html += `<div class="target-selection">`;
+
+    targets.forEach(char => {
+        html += `<div class="target-option" onclick="completeEmbouchure('${char.id}')">
+            ${char.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function completeEmbouchure(targetId) {
+    const player = game.players[game.currentPlayer];
+    const source = game.tempSelections.embouchureSource;
+    const energyIdx = game.tempSelections.embouchureEnergyIdx;
+    const target = [player.active, ...player.bench].find(c => c && c.id === targetId);
+
+    if (source && target && source.attachedEnergy[energyIdx]) {
+        const energy = source.attachedEnergy.splice(energyIdx, 1)[0];
+        target.attachedEnergy.push(energy);
+        game.log(`Embouchure: Moved energy from ${source.name} to ${target.name}`);
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showDrumKidWorkshopSelection(percussionChars, attacker, target) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Drum Kid Workshop: Copy Attack</h2>`;
+    html += `<p>Select a percussion character to copy their first attack:</p>`;
+    html += `<div class="target-selection">`;
+
+    percussionChars.forEach(char => {
+        const firstMove = char.moves && char.moves[0] ? char.moves[0] : null;
+        if (firstMove) {
+            html += `<div class="target-option" onclick="executeDrumKidWorkshop('${char.id}', '${attacker.id}', '${target.id}')">
+                ${char.name} - ${firstMove.name}
+            </div>`;
+        }
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeDrumKidWorkshop(sourceId, attackerId, targetId) {
+    const allChars = [
+        ...game.players[1].active ? [game.players[1].active] : [],
+        ...game.players[1].bench.filter(c => c),
+        ...game.players[2].active ? [game.players[2].active] : [],
+        ...game.players[2].bench.filter(c => c)
+    ];
+
+    const source = allChars.find(c => c.id === sourceId);
+    const attacker = allChars.find(c => c.id === attackerId);
+    const target = allChars.find(c => c.id === targetId);
+
+    if (source && source.moves && source.moves[0] && attacker && target) {
+        const copiedMove = source.moves[0];
+        game.log(`Drum Kid Workshop: Copying ${copiedMove.name} from ${source.name}`);
+
+        // Execute the copied move
+        if (copiedMove.damage > 0) {
+            const damage = calculateDamage(attacker, target, copiedMove.damage, copiedMove);
+            game.dealDamage(target, damage);
+            game.log(`Drum Kid Workshop: ${damage} damage!`, 'damage');
+        }
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showTrickyRhythmsModal(attacker, target, move) {
+    const player = game.players[game.currentPlayer];
+    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const opponent = game.players[opponentNum];
+
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Tricky Rhythms</h2>`;
+    html += `<p>Choose number of energy to discard from opponent (0-3):</p>`;
+    html += `<div class="target-selection">`;
+
+    for (let i = 0; i <= 3; i++) {
+        html += `<div class="target-option" onclick="executeTrickyRhythms(${i}, '${target.id}')">
+            Discard ${i} energy
+        </div>`;
+    }
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeTrickyRhythms(discardCount, targetId) {
+    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const opponent = game.players[opponentNum];
+    const player = game.players[game.currentPlayer];
+    const attacker = player.active;
+    const target = [opponent.active, ...opponent.bench].find(c => c && c.id === targetId);
+
+    if (!target) return;
+
+    // Discard energy from opponent
+    for (let i = 0; i < discardCount && target.attachedEnergy && target.attachedEnergy.length > 0; i++) {
+        const energy = target.attachedEnergy.pop();
+        opponent.discard.push(energy);
+    }
+
+    // Damage = 10 × (3 - discarded)
+    const damage = 10 * (3 - discardCount);
+    if (damage > 0) {
+        const finalDamage = calculateDamage(attacker, target, damage, { name: 'Tricky Rhythms' });
+        game.dealDamage(target, finalDamage);
+        game.log(`Tricky Rhythms: Discarded ${discardCount} energy, ${finalDamage} damage!`, 'damage');
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showRacketSmashSelection(player, benchChars) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Racket Smash: Discard Energy</h2>`;
+    html += `<p>Select benched character to discard energy from:</p>`;
+    html += `<div class="target-selection">`;
+
+    benchChars.forEach(char => {
+        html += `<div class="target-option" onclick="executeRacketSmash('${char.id}')">
+            ${char.name} - ${char.attachedEnergy.length} energy
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeRacketSmash(charId) {
+    const player = game.players[game.currentPlayer];
+    const char = player.bench.find(c => c && c.id === charId);
+
+    if (char && char.attachedEnergy && char.attachedEnergy.length > 0) {
+        const energy = char.attachedEnergy.pop();
+        player.discard.push(energy);
+        game.log(`Racket Smash: Discarded energy from ${char.name}`);
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showBorrowSelection(player, stringChars, attacker) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Borrow: Move Energy</h2>`;
+    html += `<p>Select string character to borrow energy from:</p>`;
+    html += `<div class="target-selection">`;
+
+    stringChars.forEach(char => {
+        html += `<div class="target-option" onclick="executeBorrow('${char.id}', '${attacker.id}')">
+            ${char.name} - ${char.attachedEnergy.length} energy
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeBorrow(sourceId, attackerId) {
+    const player = game.players[game.currentPlayer];
+    const source = [player.active, ...player.bench].find(c => c && c.id === sourceId);
+    const attacker = [player.active, ...player.bench].find(c => c && c.id === attackerId);
+
+    if (source && attacker && source.attachedEnergy && source.attachedEnergy.length > 0) {
+        const energy = source.attachedEnergy.pop();
+        attacker.attachedEnergy.push(energy);
+        game.log(`Borrow: Moved energy from ${source.name} to ${attacker.name}`);
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showForesightModal(opponent, topThree) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    game.tempSelections = game.tempSelections || {};
+    game.tempSelections.foresightCards = topThree;
+    game.tempSelections.foresightOpponent = opponent;
+
+    let html = `<h2>Foresight: Rearrange Opponent's Deck</h2>`;
+    html += `<p>Cards: ${topThree.map(c => c.name).join(', ')}</p>`;
+    html += `<p>Select order (click to reorder):</p>`;
+    html += `<div id="foresight-list" class="target-selection">`;
+
+    topThree.forEach((card, idx) => {
+        html += `<div class="target-option" data-index="${idx}">
+            ${idx + 1}. ${card.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="completeForesight()">Confirm Order</button>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function completeForesight() {
+    // For simplicity, just put cards back in original order
+    // In a full implementation, you'd allow reordering
+    const cards = game.tempSelections.foresightCards;
+    const opponent = game.tempSelections.foresightOpponent;
+
+    cards.reverse().forEach(card => {
+        opponent.deck.unshift(card);
+    });
+
+    game.log('Foresight: Opponent\'s top 3 cards rearranged');
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showGachaGamingModal(player, attacker) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Gacha Gaming</h2>`;
+    html += `<p>Draw cards and take 10 damage each. Choose number (1-3):</p>`;
+    html += `<div class="target-selection">`;
+
+    for (let i = 1; i <= 3; i++) {
+        html += `<div class="target-option" onclick="executeGachaGaming(${i})">
+            Draw ${i} card${i > 1 ? 's' : ''} (${i * 10} damage)
+        </div>`;
+    }
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeGachaGaming(drawCount) {
+    const player = game.players[game.currentPlayer];
+    const attacker = player.active;
+
+    // Draw cards
+    for (let i = 0; i < drawCount && player.deck.length > 0; i++) {
+        const card = player.deck.shift();
+        player.hand.push(card);
+        game.log(`Gacha Gaming: Drew ${card.name}`);
+    }
+
+    // Take damage
+    const damage = drawCount * 10;
+    game.dealDamage(attacker, damage);
+    game.log(`Gacha Gaming: Took ${damage} damage`, 'damage');
+
+    // Heal option: discard cards to heal
+    const handSize = player.hand.length;
+    if (handSize > 0) {
+        setTimeout(() => {
+            const discardCount = parseInt(prompt(`Gacha Gaming: Discard how many cards to heal? (0-${handSize}, 10 HP each)`)) || 0;
+            if (discardCount > 0 && discardCount <= handSize) {
+                for (let i = 0; i < discardCount; i++) {
+                    const card = player.hand.pop();
+                    player.discard.push(card);
+                }
+                const healAmount = Math.min(discardCount * 10, attacker.damage);
+                attacker.damage = Math.max(0, attacker.damage - healAmount);
+                game.log(`Gacha Gaming: Discarded ${discardCount} cards, healed ${healAmount}`, 'heal');
+                updateUI();
+            }
+        }, 100);
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showSongVotingModal(opponent, attacker, target, move) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    const hand = opponent.hand.map(c => c.name).join(', ');
+
+    let html = `<h2>Song Voting</h2>`;
+    html += `<p>Opponent's hand: ${hand}</p>`;
+    html += `<p>Choose card type to count:</p>`;
+    html += `<div class="target-selection">`;
+    html += `<div class="target-option" onclick="executeSongVoting('character', '${target.id}')">Character</div>`;
+    html += `<div class="target-option" onclick="executeSongVoting('energy', '${target.id}')">Energy</div>`;
+    html += `<div class="target-option" onclick="executeSongVoting('item', '${target.id}')">Item</div>`;
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeSongVoting(cardType, targetId) {
+    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const opponent = game.players[opponentNum];
+    const player = game.players[game.currentPlayer];
+    const attacker = player.active;
+    const target = [opponent.active, ...opponent.bench].find(c => c && c.id === targetId);
+
+    const count = opponent.hand.filter(c => c.cardType === cardType).length;
+    const damage = count * 10;
+
+    if (damage > 0) {
+        const finalDamage = calculateDamage(attacker, target, damage, { name: 'Song Voting' });
+        game.dealDamage(target, finalDamage);
+        game.log(`Song Voting: ${count} ${cardType} cards for ${finalDamage} damage!`, 'damage');
+    } else {
+        game.log('Song Voting: No cards of that type');
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showAnalysisParalysisModal(player) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Analysis Paralysis: Shuffle Card Back</h2>`;
+    html += `<p>Select card to shuffle back into deck:</p>`;
+    html += `<div class="target-selection">`;
+
+    player.hand.forEach((card, idx) => {
+        html += `<div class="target-option" onclick="executeAnalysisParalysis(${idx})">
+            ${card.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeAnalysisParalysis(cardIdx) {
+    const player = game.players[game.currentPlayer];
+
+    if (player.hand[cardIdx]) {
+        const card = player.hand.splice(cardIdx, 1)[0];
+        player.deck.push(card);
+        game.shuffleDeck(game.currentPlayer);
+        game.log(`Analysis Paralysis: Shuffled ${card.name} back into deck`);
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showWipeoutSelection(player, opponent, attacker) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    const allTargets = [opponent.active, ...opponent.bench, attacker].filter(c => c);
+
+    game.tempSelections = game.tempSelections || {};
+    game.tempSelections.wipeoutTargets = [];
+    game.tempSelections.wipeoutAttacker = attacker;
+
+    let html = `<h2>Wipeout: Select 3 Targets</h2>`;
+    html += `<p>Select 3 different characters (including yourself if desired):</p>`;
+    html += `<div id="wipeout-targets" class="target-selection">`;
+
+    allTargets.forEach(char => {
+        html += `<div class="target-option" onclick="addWipeoutTarget('${char.id}')">
+            ${char.name}${char.id === attacker.id ? ' (You)' : ''}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<p id="wipeout-selected">Selected: 0/3</p>`;
+    html += `<button class="action-btn" onclick="executeWipeout()">Confirm</button>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function addWipeoutTarget(charId) {
+    const targets = game.tempSelections.wipeoutTargets;
+
+    if (targets.includes(charId)) {
+        // Remove if already selected
+        game.tempSelections.wipeoutTargets = targets.filter(id => id !== charId);
+    } else if (targets.length < 3) {
+        targets.push(charId);
+    }
+
+    document.getElementById('wipeout-selected').textContent = `Selected: ${game.tempSelections.wipeoutTargets.length}/3`;
+}
+
+function executeWipeout() {
+    const targets = game.tempSelections.wipeoutTargets;
+    const attacker = game.tempSelections.wipeoutAttacker;
+
+    if (targets.length !== 3) {
+        alert('Must select exactly 3 targets!');
+        return;
+    }
+
+    const allChars = [
+        ...game.players[1].active ? [game.players[1].active] : [],
+        ...game.players[1].bench.filter(c => c),
+        ...game.players[2].active ? [game.players[2].active] : [],
+        ...game.players[2].bench.filter(c => c)
+    ];
+
+    targets.forEach(targetId => {
+        const target = allChars.find(c => c.id === targetId);
+        if (target) {
+            const damage = calculateDamage(attacker, target, 60, { name: 'Wipeout' });
+            game.dealDamage(target, damage);
+            game.log(`Wipeout: ${target.name} takes ${damage} damage!`, 'damage');
+        }
+    });
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showSN2ShuffleSelection(player, benchChars) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>SN2: Shuffle Benched Character</h2>`;
+    html += `<p>Select benched character to shuffle back into deck:</p>`;
+    html += `<div class="target-selection">`;
+
+    benchChars.forEach(char => {
+        html += `<div class="target-option" onclick="executeSN2('${char.id}')">
+            ${char.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeSN2(charId) {
+    const player = game.players[game.currentPlayer];
+    const benchIndex = player.bench.findIndex(c => c && c.id === charId);
+
+    if (benchIndex !== -1) {
+        const char = player.bench[benchIndex];
+        player.bench[benchIndex] = null;
+
+        // Reset character
+        char.damage = 0;
+        char.attachedEnergy = [];
+        char.attachedTools = [];
+
+        player.deck.push(char);
+        game.shuffleDeck(game.currentPlayer);
+        game.log(`SN2: ${char.name} shuffled back into deck`);
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showOutreachSelection(player, characters) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Outreach: Search for Character</h2>`;
+    html += `<p>Select character to put on top of deck:</p>`;
+    html += `<div class="target-selection">`;
+
+    characters.forEach(char => {
+        html += `<div class="target-option" onclick="executeOutreach('${char.id}')">
+            ${char.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeOutreach(charId) {
+    const player = game.players[game.currentPlayer];
+    const char = player.deck.find(c => c.id === charId);
+
+    if (char) {
+        player.deck = player.deck.filter(c => c.id !== charId);
+        player.deck.unshift(char);
+        game.log(`Outreach: Put ${char.name} on top of deck`);
+    }
+
+    closeModal('action-modal');
+    updateUI();
 }
 
 function loadCustomDecksIntoDropdown() {

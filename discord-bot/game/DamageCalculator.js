@@ -172,8 +172,8 @@ function applyDefenderReductions(defender, damage, attacker, gameState) {
         finalDamage -= 20;
     }
 
-    // Maid status: immune to <=10 damage
-    if (hasStatus(defender, 'Maid') && finalDamage <= 10) {
+    // Maid status: immune to <=20 damage
+    if (hasStatus(defender, 'Maid') && finalDamage <= 20) {
         return 0;
     }
 
