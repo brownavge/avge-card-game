@@ -34,7 +34,7 @@ class GameState {
         this.phase = 'setup'; // setup, main, attack
         this.turn = 1;
         this.isFirstTurn = true; // Track if it's player 1's first turn
-        this.energyPlayedThisTurn = false;
+        this.energyAttachedThisTurn = 0; // Track how many energy attached (Eugenia allows 3)
         this.supporterPlayedThisTurn = false;
         this.attackedThisTurn = false;
         this.helperCardsPlayedThisTurn = 0; // For Main Hall stadium
@@ -82,7 +82,7 @@ class GameState {
         }
 
         this.currentPlayer = this.currentPlayer === 1 ? 2 : 1;
-        this.energyPlayedThisTurn = false;
+        this.energyAttachedThisTurn = 0;
         this.supporterPlayedThisTurn = false;
         this.attackedThisTurn = false;
         this.helperCardsPlayedThisTurn = 0;
@@ -96,11 +96,14 @@ class GameState {
         // Clear attack modifiers from previous player's turn
         this.attackModifiers[previousPlayer] = {};
 
-        // Clear wasJustBenched flags
+        // Clear wasJustBenched flags and other per-turn character flags
         const currentPlayerObj = this.players[this.currentPlayer];
         [currentPlayerObj.active, ...currentPlayerObj.bench].filter(c => c).forEach(char => {
             char.wasJustBenched = false;
             char.cameOffBenchThisTurn = false;
+            char.sophiaTriggeredThisTurn = false; // Reset Sophia Wang's trigger
+            char.usedPowerChordLastTurn = char.usedPowerChord || false; // Track for Fingerstyle
+            char.usedPowerChord = false; // Reset Power Chord flag
         });
 
         this.applyStartOfTurnEffects();
@@ -132,14 +135,15 @@ class GameState {
             }
         });
 
-        // Katie's Nausicaa's heartbeat
+        // Katie Xiang's Nausicaa's Undying Heartbeat - At ≤40 HP, heal 20 from all
         [player.active, ...player.bench].filter(c => c).forEach(char => {
-            if (char.name === 'Katie' && (char.hp - (char.damage || 0)) === 10) {
-                // Heal 10 damage from all your characters
+            if ((char.name === 'Katie Xiang' || char.name === 'Katie') && (char.hp - (char.damage || 0)) <= 40) {
+                // Heal 20 damage from all your characters
                 [player.active, ...player.bench].filter(c => c).forEach(healChar => {
                     if (healChar.damage && healChar.damage > 0) {
-                        healChar.damage = Math.max(0, healChar.damage - 10);
-                        this.log(`Nausicaa's heartbeat: ${healChar.name} healed 10 damage`, 'heal');
+                        const healAmount = Math.min(20, healChar.damage);
+                        healChar.damage -= healAmount;
+                        this.log(`Nausicaa's Undying Heartbeat: ${healChar.name} healed ${healAmount} damage`, 'heal');
                     }
                 });
             }
@@ -393,26 +397,23 @@ class GameState {
         // Weston Poe's Right back at you - Reflect 50+ damage
         playerNum = this.findPlayerWithCharacter(characterCard);
         playerObj = this.players[playerNum];
-        if (characterCard.name === 'Weston Poe' && finalDamage >= 50) {
-            const opponentNum = playerNum === 1 ? 2 : 1;
-            const opponent = this.players[opponentNum];
-            if (opponent.active) {
-                this.dealDamage(opponent.active, finalDamage);
-                this.log(`Weston Poe's Right back at you: Reflected ${finalDamage} damage!`, 'damage');
-            }
-            finalDamage = 0; // Weston takes no damage
+        if (characterCard.name === 'Weston Poe' && finalDamage >= 50 && source) {
+            // Reflect damage to the attacker (source of the damage)
+            this.dealDamage(source, finalDamage, null); // Pass null as source to avoid infinite recursion
+            this.log(`Weston Poe's Right back at you: Reflected ${finalDamage} damage back to ${source.name}!`, 'damage');
+            // Weston still takes the damage (don't set finalDamage to 0)
         }
 
-        // Daniel Zhu's Share the Pain - Redirect up to 20 damage
-        if (characterCard.name === 'Daniel Zhu' && finalDamage > 0) {
-            const redirectAmount = Math.min(20, finalDamage);
-            const benchChars = playerObj.bench.filter(c => c && c.id !== characterCard.id);
-            if (benchChars.length > 0) {
-                // For simplicity, redirect to first benched character
-                const redirectTarget = benchChars[0];
-                this.dealDamage(redirectTarget, redirectAmount);
+        // Daniel Zhu's Share the Pain - If Daniel is in play, redirect up to 20 damage FROM other characters TO Daniel
+        const danielZhu = playerObj && playerObj.bench.find(c => c && c.name === 'Daniel Zhu');
+        if (danielZhu && characterCard.id !== danielZhu.id && finalDamage > 0) {
+            // Check if Daniel can take the damage without being KO'd
+            const danielCurrentHP = danielZhu.hp - (danielZhu.damage || 0);
+            const redirectAmount = Math.min(20, finalDamage, danielCurrentHP - 1); // Don't KO Daniel
+            if (redirectAmount > 0) {
+                this.dealDamage(danielZhu, redirectAmount, null);
                 finalDamage -= redirectAmount;
-                this.log(`Daniel Zhu's Share the Pain: Redirected ${redirectAmount} damage to ${redirectTarget.name}!`);
+                this.log(`Daniel Zhu's Share the Pain: Redirected ${redirectAmount} damage from ${characterCard.name} to Daniel Zhu!`);
             }
         }
 
@@ -461,6 +462,20 @@ class GameState {
         const player = this.players[playerNum];
 
         this.log(`${characterCard.name} was knocked out!`);
+
+        // Arranger status: Search discard for Musescore file when knocked out
+        if (characterCard.status && characterCard.status.includes('Arranger')) {
+            const musescoreFiles = player.discard.filter(c =>
+                c.subtype === 'musescore' || c.name === 'Musescore file' || c.name === 'Standard Musescore File' || c.name === 'Corrupted File'
+            );
+            if (musescoreFiles.length > 0) {
+                this.log(`Arranger status: ${characterCard.name} can retrieve a Musescore file!`, 'info');
+                // Show modal to select Musescore file (if function exists)
+                if (typeof showMusescoreRetrievalModal === 'function') {
+                    showMusescoreRetrievalModal(player, musescoreFiles);
+                }
+            }
+        }
 
         // Move to discard
         player.discard.push(characterCard);
@@ -660,15 +675,15 @@ const DECK_TEMPLATES = {
             createCharacterCard(CHARACTERS.SOPHIA_WANG),
             createCharacterCard(CHARACTERS.ASHLEY_TOBY),
             createCharacterCard(CHARACTERS.FIONA_LI),
-            ...Array(10).fill(null).map(() => createEnergyCard(TYPES.STRINGS)),
             createItemCard(ITEMS.OTAMATONE),
-            createItemCard(ITEMS.FOLDING_STAND),
-            createItemCard(ITEMS.BUO_STAND),
             createItemCard(ITEMS.CONCERT_TICKET),
             createItemCard(ITEMS.ICE_SKATES),
             createItemCard(ITEMS.CONCERT_PROGRAM),
-            createItemCard(ITEMS.VIDEO_CAMERA),
             createItemCard(ITEMS.PRINTED_SCORE),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.MATCHA_LATTE),
+            createItemCard(ITEMS.STRAWBERRY_MATCHA),
+            createItemCard(ITEMS.AVGE_BIRB),
             createToolCard(TOOLS.MAID_OUTFIT),
             createToolCard(TOOLS.KIKI_HEADBAND),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
@@ -683,8 +698,6 @@ const DECK_TEMPLATES = {
             createCharacterCard(CHARACTERS.DAVID_MAN),
             createCharacterCard(CHARACTERS.JENNIE_WANG),
             createCharacterCard(CHARACTERS.HENRY_WANG),
-            ...Array(8).fill(null).map(() => createEnergyCard(TYPES.PIANO)),
-            ...Array(3).fill(null).map(() => createEnergyCard(TYPES.WOODWINDS)),
             createItemCard(ITEMS.MATCHA_LATTE),
             createItemCard(ITEMS.STRAWBERRY_MATCHA),
             createItemCard(ITEMS.CONCERT_TICKET),
@@ -693,8 +706,9 @@ const DECK_TEMPLATES = {
             createItemCard(ITEMS.ICE_SKATES),
             createItemCard(ITEMS.CAMERA),
             createItemCard(ITEMS.REHEARSAL_ROSTER),
-            createToolCard(TOOLS.CONDUCTOR_BATON),
+            createItemCard(ITEMS.CONCERT_PROGRAM),
             createToolCard(TOOLS.MUSESCORE_SUB),
+            createToolCard(TOOLS.KIKI_HEADBAND),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
             ...Array(3).fill(null).map(() => createStadiumCard(STADIUMS.STEINERT_BASEMENT))
         ]
@@ -707,17 +721,16 @@ const DECK_TEMPLATES = {
             createCharacterCard(CHARACTERS.PASCAL_KIM),
             createCharacterCard(CHARACTERS.CAVIN_XUE),
             createCharacterCard(CHARACTERS.LOANG_CHIANG),
-            ...Array(9).fill(null).map(() => createEnergyCard(TYPES.PERCUSSION)),
-            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.BRASS)),
             createItemCard(ITEMS.OTAMATONE),
-            createItemCard(ITEMS.FOLDING_STAND),
-            createItemCard(ITEMS.BUO_STAND),
             createItemCard(ITEMS.CONCERT_PROGRAM),
             createItemCard(ITEMS.REHEARSAL_ROSTER),
             createItemCard(ITEMS.CONCERT_TICKET),
             createItemCard(ITEMS.BAI_EMAIL),
-            createItemCard(ITEMS.VIDEO_CAMERA),
             createItemCard(ITEMS.MUSESCORE_FILE),
+            createItemCard(ITEMS.RAFFLE_TICKET),
+            createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.ICE_SKATES),
+            createItemCard(ITEMS.PRINTED_SCORE),
             createToolCard(TOOLS.BUCKET),
             createToolCard(TOOLS.MAID_OUTFIT),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.MICHELLE)),
@@ -732,18 +745,16 @@ const DECK_TEMPLATES = {
             createCharacterCard(CHARACTERS.ROSS_WILLIAMS),
             createCharacterCard(CHARACTERS.EVELYN_WU),
             createCharacterCard(CHARACTERS.IZZY_CHEN),
-            ...Array(9).fill(null).map(() => createEnergyCard(TYPES.CHOIR)),
-            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.WOODWINDS)),
             createItemCard(ITEMS.MATCHA_LATTE),
             createItemCard(ITEMS.STRAWBERRY_MATCHA),
             createItemCard(ITEMS.RAFFLE_TICKET),
             createItemCard(ITEMS.AVGE_BIRB),
             createItemCard(ITEMS.CONCERT_TICKET),
             createItemCard(ITEMS.CAMERA),
-            createItemCard(ITEMS.VIDEO_CAMERA),
             createItemCard(ITEMS.CONCERT_ROSTER),
             createItemCard(ITEMS.ICE_SKATES),
             createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
             createToolCard(TOOLS.MAID_OUTFIT),
             createToolCard(TOOLS.KIKI_HEADBAND),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.ANGEL)),
@@ -758,18 +769,16 @@ const DECK_TEMPLATES = {
             createCharacterCard(CHARACTERS.FILIP_KAMINSKI),
             createCharacterCard(CHARACTERS.JUAN_BURGOS),
             createCharacterCard(CHARACTERS.VINCENT_CHEN),
-            ...Array(9).fill(null).map(() => createEnergyCard(TYPES.BRASS)),
-            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.PERCUSSION)),
-            createItemCard(ITEMS.BUO_STAND),
-            createItemCard(ITEMS.FOLDING_STAND),
             createItemCard(ITEMS.MIKU_OTAMATONE),
             createItemCard(ITEMS.OTAMATONE),
             createItemCard(ITEMS.CONCERT_TICKET),
-            createItemCard(ITEMS.VIDEO_CAMERA),
             createItemCard(ITEMS.BAI_EMAIL),
             createItemCard(ITEMS.PRINTED_SCORE),
             createItemCard(ITEMS.ICE_SKATES),
             createItemCard(ITEMS.CORRUPTED_FILE),
+            createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
             createToolCard(TOOLS.AVGE_TSHIRT),
             createToolCard(TOOLS.KIKI_HEADBAND),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.WILL)),
@@ -784,18 +793,16 @@ const DECK_TEMPLATES = {
             createCharacterCard(CHARACTERS.ROBERTO_GONZALES),
             createCharacterCard(CHARACTERS.HANLEI_GAO),
             createCharacterCard(CHARACTERS.MEYA_GAO),
-            ...Array(9).fill(null).map(() => createEnergyCard(TYPES.GUITAR)),
-            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.STRINGS)),
             createItemCard(ITEMS.OTAMATONE),
             createItemCard(ITEMS.MIKU_OTAMATONE),
             createItemCard(ITEMS.CONCERT_TICKET),
-            createItemCard(ITEMS.FOLDING_STAND),
-            createItemCard(ITEMS.BUO_STAND),
-            createItemCard(ITEMS.VIDEO_CAMERA),
             createItemCard(ITEMS.CONCERT_PROGRAM),
             createItemCard(ITEMS.ICE_SKATES),
             createItemCard(ITEMS.AVGE_BIRB),
             createItemCard(ITEMS.ANNOTATED_SCORE),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.PRINTED_SCORE),
+            createItemCard(ITEMS.CAMERA),
             createToolCard(TOOLS.MAID_OUTFIT),
             createToolCard(TOOLS.KIKI_HEADBAND),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
@@ -810,17 +817,15 @@ const DECK_TEMPLATES = {
             createCharacterCard(CHARACTERS.GRACE_ZHAO),
             createCharacterCard(CHARACTERS.BOKAI_BI),
             createCharacterCard(CHARACTERS.ROSS_WILLIAMS),
-            ...Array(3).fill(null).map(() => createEnergyCard(TYPES.PIANO)),
-            ...Array(3).fill(null).map(() => createEnergyCard(TYPES.GUITAR)),
-            ...Array(3).fill(null).map(() => createEnergyCard(TYPES.PERCUSSION)),
-            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.CHOIR)),
             createItemCard(ITEMS.CONCERT_TICKET),
             createItemCard(ITEMS.CONCERT_ROSTER),
             createItemCard(ITEMS.CONCERT_PROGRAM),
             createItemCard(ITEMS.ICE_SKATES),
             createItemCard(ITEMS.BAI_EMAIL),
-            createItemCard(ITEMS.VIDEO_CAMERA),
             createItemCard(ITEMS.CAMERA),
+            createItemCard(ITEMS.MATCHA_LATTE),
+            createItemCard(ITEMS.RAFFLE_TICKET),
+            createItemCard(ITEMS.OTAMATONE),
             createToolCard(TOOLS.KIKI_HEADBAND),
             createToolCard(TOOLS.MAID_OUTFIT),
             createToolCard(TOOLS.AVGE_STICKER),
@@ -837,12 +842,14 @@ const DECK_TEMPLATES = {
             createCharacterCard(CHARACTERS.KANA_TAKIZAWA),
             createCharacterCard(CHARACTERS.ANNA_BROWN),
             createCharacterCard(CHARACTERS.DESMOND_ROPER),
-            ...Array(12).fill(null).map(() => createEnergyCard(TYPES.WOODWINDS)),
             createItemCard(ITEMS.MATCHA_LATTE),
             createItemCard(ITEMS.STRAWBERRY_MATCHA),
             createItemCard(ITEMS.CONCERT_TICKET),
             createItemCard(ITEMS.CONCERT_PROGRAM),
-            createItemCard(ITEMS.VIDEO_CAMERA),
+            createItemCard(ITEMS.ICE_SKATES),
+            createItemCard(ITEMS.CAMERA),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.CONCERT_ROSTER),
             createToolCard(TOOLS.MAID_OUTFIT),
             createToolCard(TOOLS.AVGE_STICKER),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
@@ -858,14 +865,16 @@ const DECK_TEMPLATES = {
             createCharacterCard(CHARACTERS.JUAN_BURGOS),
             createCharacterCard(CHARACTERS.VINCENT_CHEN),
             createCharacterCard(CHARACTERS.CAROLYN_ZHENG),
-            ...Array(10).fill(null).map(() => createEnergyCard(TYPES.BRASS)),
-            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.PERCUSSION)),
             createItemCard(ITEMS.MATCHA_LATTE),
             createItemCard(ITEMS.STRAWBERRY_MATCHA),
             createItemCard(ITEMS.CONCERT_TICKET),
             createItemCard(ITEMS.BAI_EMAIL),
-            createItemCard(ITEMS.VIDEO_CAMERA),
-            createToolCard(TOOLS.CONDUCTOR_BATON),
+            createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.ICE_SKATES),
+            createItemCard(ITEMS.PRINTED_SCORE),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createToolCard(TOOLS.AVGE_STICKER),
             createToolCard(TOOLS.MAID_OUTFIT),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.MICHELLE)),
             ...Array(3).fill(null).map(() => createStadiumCard(STADIUMS.LINDEMANN))
@@ -873,19 +882,21 @@ const DECK_TEMPLATES = {
     },
     'guitar-perc-rush': {
         name: 'Rock & Roll',
-        description: 'Owen, Cavin, Ryan Lee, George. Fast aggressive Guitar-Percussion.',
+        description: 'Owen, Cavin, Ryan Lee, Kevin. Fast aggressive Guitar-Percussion.',
         build: () => [
             createCharacterCard(CHARACTERS.OWEN_LANDRY),
             createCharacterCard(CHARACTERS.CAVIN_XUE),
             createCharacterCard(CHARACTERS.RYAN_LEE),
-            createCharacterCard(CHARACTERS.GEORGE_CHUDLEY),
-            ...Array(6).fill(null).map(() => createEnergyCard(TYPES.GUITAR)),
-            ...Array(6).fill(null).map(() => createEnergyCard(TYPES.PERCUSSION)),
+            createCharacterCard(CHARACTERS.KEVIN_YANG),
             createItemCard(ITEMS.OTAMATONE),
             createItemCard(ITEMS.MIKU_OTAMATONE),
             createItemCard(ITEMS.PRINTED_SCORE),
             createItemCard(ITEMS.ANNOTATED_SCORE),
             createItemCard(ITEMS.CONCERT_TICKET),
+            createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.ICE_SKATES),
+            createItemCard(ITEMS.AVGE_BIRB),
+            createItemCard(ITEMS.CONCERT_ROSTER),
             createToolCard(TOOLS.MAID_OUTFIT),
             createToolCard(TOOLS.BUCKET),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.ANGEL)),
@@ -900,14 +911,16 @@ const DECK_TEMPLATES = {
             createCharacterCard(CHARACTERS.LUKE_XU),
             createCharacterCard(CHARACTERS.RACHEL_CHEN),
             createCharacterCard(CHARACTERS.ROSS_WILLIAMS),
-            ...Array(6).fill(null).map(() => createEnergyCard(TYPES.PIANO)),
-            ...Array(6).fill(null).map(() => createEnergyCard(TYPES.CHOIR)),
             createItemCard(ITEMS.MATCHA_LATTE),
             createItemCard(ITEMS.STRAWBERRY_MATCHA),
             createItemCard(ITEMS.CONCERT_TICKET),
             createItemCard(ITEMS.CONCERT_PROGRAM),
             createItemCard(ITEMS.CAMERA),
-            createToolCard(TOOLS.CONDUCTOR_BATON),
+            createItemCard(ITEMS.ICE_SKATES),
+            createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.AVGE_BIRB),
+            createToolCard(TOOLS.BUCKET),
             createToolCard(TOOLS.MUSESCORE_SUB),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
             createStadiumCard(STADIUMS.FRIEDMAN),
@@ -923,13 +936,15 @@ const DECK_TEMPLATES = {
             createCharacterCard(CHARACTERS.EMILY_WANG),
             createCharacterCard(CHARACTERS.ALICE_WANG),
             createCharacterCard(CHARACTERS.WESTON_POE),
-            ...Array(8).fill(null).map(() => createEnergyCard(TYPES.STRINGS)),
-            ...Array(4).fill(null).map(() => createEnergyCard(TYPES.WOODWINDS)),
             createItemCard(ITEMS.OTAMATONE),
             createItemCard(ITEMS.MIKU_OTAMATONE),
             createItemCard(ITEMS.CONCERT_TICKET),
             createItemCard(ITEMS.ICE_SKATES),
-            createItemCard(ITEMS.VIDEO_CAMERA),
+            createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.MATCHA_LATTE),
+            createItemCard(ITEMS.STRAWBERRY_MATCHA),
+            createItemCard(ITEMS.AVGE_BIRB),
+            createItemCard(ITEMS.CONCERT_ROSTER),
             createToolCard(TOOLS.MAID_OUTFIT),
             createToolCard(TOOLS.KIKI_HEADBAND),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
@@ -947,18 +962,17 @@ const DECK_TEMPLATES = {
             createCharacterCard(CHARACTERS.LUKE_XU),
             createCharacterCard(CHARACTERS.EMILY_WANG),
             createCharacterCard(CHARACTERS.FELIX_CHEN),
-            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.BRASS)),
-            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.CHOIR)),
-            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.GUITAR)),
-            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.PERCUSSION)),
-            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.PIANO)),
-            createEnergyCard(TYPES.STRINGS),
             createItemCard(ITEMS.CONCERT_TICKET),
             createItemCard(ITEMS.ICE_SKATES),
             createItemCard(ITEMS.BAI_EMAIL),
+            createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.MATCHA_LATTE),
+            createItemCard(ITEMS.OTAMATONE),
             createToolCard(TOOLS.BUCKET),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LUCAS)),
-            ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.MAIN_HALL))
+            ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.MAIN_HALL)),
+            createStadiumCard(STADIUMS.ALUMNAE_HALL)
         ]
     },
     'boss-battle': {
@@ -970,16 +984,16 @@ const DECK_TEMPLATES = {
             createCharacterCard(CHARACTERS.EDWARD_WIBOWO),
             createCharacterCard(CHARACTERS.KEI_WATANABE),
             createCharacterCard(CHARACTERS.RYAN_LI),
-            ...Array(3).fill(null).map(() => createEnergyCard(TYPES.BRASS)),
-            ...Array(3).fill(null).map(() => createEnergyCard(TYPES.CHOIR)),
-            ...Array(3).fill(null).map(() => createEnergyCard(TYPES.GUITAR)),
-            ...Array(2).fill(null).map(() => createEnergyCard(TYPES.PERCUSSION)),
             createItemCard(ITEMS.MATCHA_LATTE),
             createItemCard(ITEMS.STRAWBERRY_MATCHA),
             createItemCard(ITEMS.CONCERT_TICKET),
-            createItemCard(ITEMS.VIDEO_CAMERA),
             createItemCard(ITEMS.CAMERA),
-            createToolCard(TOOLS.CONDUCTOR_BATON),
+            createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.ICE_SKATES),
+            createItemCard(ITEMS.AVGE_BIRB),
+            createItemCard(ITEMS.RAFFLE_TICKET),
+            createToolCard(TOOLS.AVGE_TSHIRT),
             createToolCard(TOOLS.MAID_OUTFIT),
             ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.RICHARD)),
             ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.LINDEMANN))
@@ -1027,7 +1041,9 @@ function buildDeckFromName(deckName) {
                     }
                     return createCharacterCard(originalChar);
                 case 'energy':
-                    return createEnergyCard(card.energyType);
+                    // Energy cards no longer exist - skip
+                    console.log('Skipping energy card (no longer used):', card.name);
+                    return null;
                 case 'item':
                     // Look up original item data
                     const originalItem = Object.values(ITEMS).find(i => i.name === card.name);
@@ -1091,14 +1107,7 @@ function createCharacterCard(characterData) {
     };
 }
 
-function createEnergyCard(energyType) {
-    return {
-        name: `${energyType} Energy`,
-        cardType: 'energy',
-        energyType: energyType,
-        id: generateCardId()
-    };
-}
+// Energy cards removed - energy is now attached for free each turn
 
 function createItemCard(itemData) {
     return {
@@ -1159,7 +1168,12 @@ function updateUI() {
     // Update turn info
     document.getElementById('current-turn').textContent = `Player ${game.currentPlayer}'s Turn`;
     document.getElementById('phase-info').textContent = `${game.phase.charAt(0).toUpperCase() + game.phase.slice(1)} Phase`;
-    document.getElementById('energy-status').textContent = game.energyPlayedThisTurn ? 'Yes' : 'No';
+
+    // Show energy attached count (normal is 1, Eugenia allows 3)
+    const player = game.players[game.currentPlayer];
+    const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo') ? 3 : 1;
+    document.getElementById('energy-status').textContent = `${game.energyAttachedThisTurn}/${maxEnergy}`;
+
     document.getElementById('supporter-status').textContent = game.supporterPlayedThisTurn ? 'Yes' : 'No';
     document.getElementById('attacked-status').textContent = game.attackedThisTurn ? 'Yes' : 'No';
 
@@ -1266,10 +1280,16 @@ function renderCard(card) {
         }
 
         if (card.attachedEnergy && card.attachedEnergy.length > 0) {
-            html += `<div class="card-energy-attached">`;
+            html += `<div class="card-energy-attached" style="display: flex; gap: 2px; flex-wrap: wrap; margin-top: 3px;">`;
             card.attachedEnergy.forEach(energy => {
-                const typeInitial = getCostSymbol(energy.energyType);
-                html += `<span class="energy-icon type-${energy.energyType.toLowerCase().replace(' ', '-')}">${typeInitial}</span>`;
+                if (energy.generic) {
+                    // Generic energy - show with a lightning bolt symbol
+                    html += `<span class="energy-icon generic-energy" style="background: linear-gradient(135deg, #FFD700, #FFA500); color: white; padding: 2px 4px; border-radius: 3px; font-size: 10px; font-weight: bold; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">⚡</span>`;
+                } else {
+                    // Typed energy (old system, might still exist)
+                    const typeInitial = getCostSymbol(energy.energyType);
+                    html += `<span class="energy-icon type-${energy.energyType.toLowerCase().replace(' ', '-')}">${typeInitial}</span>`;
+                }
             });
             html += `</div>`;
         }
@@ -1287,7 +1307,8 @@ function renderCard(card) {
         if (card.moves && card.moves.length > 0) {
             html += `<div class="card-moves">`;
             card.moves.forEach(move => {
-                html += `<div class="move"><span class="move-cost">${move.cost ? move.cost.join('') : ''}</span> ${move.name}</div>`;
+                const costStr = move.cost ? (Array.isArray(move.cost) ? move.cost.join('') : move.cost.toString()) : '';
+                html += `<div class="move"><span class="move-cost">${costStr}</span> ${move.name}</div>`;
             });
             html += `</div>`;
         }
@@ -1383,13 +1404,8 @@ function showCardActions(card) {
         // Show attached energy
         if (card.attachedEnergy && card.attachedEnergy.length > 0) {
             html += `<div style="margin-top: 8px;">`;
-            html += `<p><strong>Attached Energy (${card.attachedEnergy.length}):</strong> `;
-            const energyCounts = {};
-            card.attachedEnergy.forEach(e => {
-                energyCounts[e.energyType] = (energyCounts[e.energyType] || 0) + 1;
-            });
-            html += Object.entries(energyCounts).map(([type, count]) => `${count}x ${type}`).join(', ');
-            html += `</p></div>`;
+            html += `<p><strong>⚡ Attached Energy:</strong> ${card.attachedEnergy.length}</p>`;
+            html += `</div>`;
         }
 
         // Show moves/attacks
@@ -1397,7 +1413,7 @@ function showCardActions(card) {
             html += `<div style="margin-top: 8px;"><strong>Moves:</strong></div>`;
             card.moves.forEach(move => {
                 html += `<div style="margin: 5px 0; padding: 5px; background: #fff3e0; border-radius: 3px;">`;
-                html += `<p><strong>${move.name}</strong> [${move.cost ? move.cost.join('') : ''}] - ${move.damage || 0} damage</p>`;
+                html += `<p><strong>${move.name}</strong> [${move.cost || 0} energy] - ${move.damage || 0} damage</p>`;
                 if (move.effect) {
                     html += `<p style="font-size: 11px; color: #666;">${move.effect}</p>`;
                 }
@@ -1434,6 +1450,14 @@ function showCardActions(card) {
             html += `<button class="action-btn" ${attackDisabled} onclick="showAttackMenu('${card.id}')">Attack${attackLabel}</button>`;
             html += `<button class="action-btn" onclick="showRetreatMenu('${card.id}')">Retreat</button>`;
 
+            // Show attach energy button (only during main phase)
+            if (game.phase === 'main') {
+                const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo') ? 3 : 1;
+                const energyDisabled = (game.energyAttachedThisTurn >= maxEnergy) ? 'disabled' : '';
+                const energyLabel = (game.energyAttachedThisTurn >= maxEnergy) ? ' (Max Reached)' : ` (${game.energyAttachedThisTurn}/${maxEnergy})`;
+                html += `<button class="action-btn" ${energyDisabled} onclick="attachEnergy('active')">⚡ Attach Energy${energyLabel}</button>`;
+            }
+
             // Show activated abilities for active character
             if (card.ability && card.ability.type === 'activated') {
                 html += `<button class="action-btn" onclick="useActivatedAbility('${card.id}', 'ability')">Use ${card.ability.name}</button>`;
@@ -1443,7 +1467,16 @@ function showCardActions(card) {
             }
         }
         if (player.bench.includes(card)) {
+            const benchIndex = player.bench.indexOf(card);
             html += `<button class="action-btn" onclick="switchToActive('${card.id}')">Switch to Active</button>`;
+
+            // Show attach energy button for bench (only during main phase)
+            if (game.phase === 'main') {
+                const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo') ? 3 : 1;
+                const energyDisabled = (game.energyAttachedThisTurn >= maxEnergy) ? 'disabled' : '';
+                const energyLabel = (game.energyAttachedThisTurn >= maxEnergy) ? ' (Max Reached)' : ` (${game.energyAttachedThisTurn}/${maxEnergy})`;
+                html += `<button class="action-btn" ${energyDisabled} onclick="attachEnergy(${benchIndex})">⚡ Attach Energy${energyLabel}</button>`;
+            }
 
             // Show bench-activated abilities
             if (card.ability && card.ability.type === 'activated') {
@@ -1454,18 +1487,8 @@ function showCardActions(card) {
             }
         }
     } else if (card.cardType === 'energy') {
-        if (game.phase === 'main') {
-            if (!game.energyPlayedThisTurn && player.active) {
-                html += `<button class="action-btn" onclick="attachEnergy('${card.id}', 'active')">Attach to Active</button>`;
-            }
-            player.bench.forEach((benchChar, idx) => {
-                if (benchChar && !game.energyPlayedThisTurn) {
-                    html += `<button class="action-btn" onclick="attachEnergy('${card.id}', ${idx})">Attach to Bench ${idx + 1}</button>`;
-                }
-            });
-        } else {
-            html += `<p style="color: red;">Can only attach energy during Main Phase</p>`;
-        }
+        // Energy cards no longer exist - energy is attached for free via button
+        html += `<p style="color: gray;">Energy cards are no longer used.</p>`;
     } else if (card.cardType === 'item' || card.cardType === 'tool') {
         if (game.phase === 'main') {
             html += `<button class="action-btn" onclick="playItem('${card.id}')">Play Item</button>`;
@@ -1546,69 +1569,70 @@ function playCharacterToBench(cardId, slotIndex) {
             game.log(`Bokai Bi's Algorithm: ${card.name} takes 50 damage for being a duplicate!`, 'damage');
         }
 
+        // Ben Cherek's Loudmouth - Free switch when first played
+        if (card.name === 'Ben Cherek' && player.active) {
+            const shouldSwitch = confirm(`Ben Cherek's Loudmouth: Switch ${card.name} with your active character ${player.active.name} for free?`);
+            if (shouldSwitch) {
+                const benchIndex = player.bench.indexOf(card);
+                const temp = player.active;
+                player.active = card;
+                player.bench[benchIndex] = temp;
+                game.log(`Loudmouth: ${card.name} switched with ${temp.name} for free!`);
+            }
+        }
+
         closeModal('action-modal');
         updateUI();
     }
 }
 
-function attachEnergy(cardId, target) {
+// New energy system: attach generic energy counters for free
+function attachEnergy(target) {
     const player = game.players[game.currentPlayer];
     const opponentNum = game.currentPlayer === 1 ? 2 : 1;
     const opponent = game.players[opponentNum];
-    const energyCard = player.hand.find(c => c.id === cardId);
 
-    if (!energyCard || game.energyPlayedThisTurn) return;
+    // Check if we've already attached max energy this turn
+    const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo') ? 3 : 1;
+    if (game.energyAttachedThisTurn >= maxEnergy) {
+        alert(`You've already attached ${game.energyAttachedThisTurn} energy this turn!`);
+        return;
+    }
 
     let targetChar;
     if (target === 'active') {
         targetChar = player.active;
-    } else {
+    } else if (typeof target === 'number') {
         targetChar = player.bench[target];
     }
 
-    if (targetChar) {
-        // Check for Barron Lee's Get Served - Opponent's active can't have more than 3 energy
-        // If opponent has Barron on their bench, you cannot attach to your active if it has 3+ energy
-        const barronOnOppSide = opponent.bench.some(c => c && (c.name === 'Barron Lee' || c.name === 'Barron'));
-        if (barronOnOppSide && targetChar === player.active && targetChar.attachedEnergy.length >= 3) {
-            game.log('Barron Lee\'s Get Served: Your active character cannot have more than 3 energy!', 'warning');
-            closeModal('action-modal');
-            return;
-        }
-
-        // Check for Eugenia Ampofo's Fermentation - attach 3 energy instead of 1
-        let attachCount = 1;
-        if (targetChar.name === 'Eugenia Ampofo' || targetChar.name === 'Eugenia') {
-            attachCount = 3;
-            game.log('Eugenia\'s Fermentation: Attaching 3 energy instead of 1!');
-        }
-
-        // Attach energies (up to how many are in hand)
-        for (let i = 0; i < attachCount; i++) {
-            const energyToAttach = player.hand.find(c => c.cardType === 'energy' && c.energyType === energyCard.energyType);
-            if (energyToAttach) {
-                targetChar.attachedEnergy.push(energyToAttach);
-                player.hand = player.hand.filter(c => c.id !== energyToAttach.id);
-                game.log(`Attached ${energyToAttach.name} to ${targetChar.name}`);
-            } else {
-                break; // No more energy of this type
-            }
-        }
-
-        game.energyPlayedThisTurn = true;
-
-        // Sophia Wang's Original is Better - first energy attach each turn → opponent discards
-        const sophiaInPlay = [player.active, ...player.bench].some(c => c && (c.name === 'Sophia Wang' || c.name === 'Sophia'));
-        if (sophiaInPlay && targetChar.name === 'Sophia Wang' && opponent.hand.length > 0 && !targetChar.sophiaTriggeredThisTurn) {
-            const discarded = opponent.hand.pop();
-            opponent.discard.push(discarded);
-            game.log(`Sophia Wang's Original is Better: Opponent discarded ${discarded.name}!`);
-            targetChar.sophiaTriggeredThisTurn = true;
-        }
-
-        closeModal('action-modal');
-        updateUI();
+    if (!targetChar) {
+        alert('Invalid target for energy attachment!');
+        return;
     }
+
+    // Check for Barron Lee's Get Served - Opponent's active can't have more than 3 energy
+    const barronOnOppSide = opponent.bench.some(c => c && c.name === 'Barron Lee');
+    if (barronOnOppSide && targetChar === player.active && targetChar.attachedEnergy.length >= 3) {
+        game.log('Barron Lee\'s Get Served: Your active character cannot have more than 3 energy!', 'warning');
+        alert('Barron Lee\'s Get Served prevents your active from having more than 3 energy!');
+        return;
+    }
+
+    // Add generic energy counter (just a simple object)
+    targetChar.attachedEnergy.push({ generic: true });
+    game.energyAttachedThisTurn++;
+    game.log(`Attached energy to ${targetChar.name} (${targetChar.attachedEnergy.length} total)`);
+
+    // Sophia Wang's Original is Better - first energy attach each turn → opponent discards
+    if (game.energyAttachedThisTurn === 1 && targetChar.name === 'Sophia Wang' && opponent.deck.length > 0) {
+        const discarded = opponent.deck.shift();
+        opponent.discard.push(discarded);
+        game.log(`Sophia Wang's Original is Better: Opponent discarded top card of deck!`);
+    }
+
+    closeModal('card-modal');
+    updateUI();
 }
 
 function playItem(cardId) {
@@ -1674,7 +1698,6 @@ function executeItemEffect(card) {
     switch(card.name) {
         // Tool items - these attach to characters
         case 'Maid Outfit':
-        case 'Conductor Baton':
         case "Kiki's Headband":
         case 'Bucket':
         case 'AVGE T-Shirt':
@@ -1685,9 +1708,17 @@ function executeItemEffect(card) {
 
         // Healing items
         case 'Matcha Latte':
-            // Heals ALL your characters (active + bench) by 10
+            // Heals ALL your characters (active + bench) by 10 (+10 for Maids)
             [player.active, ...player.bench].filter(c => c).forEach(char => {
-                const healAmount = 10;
+                let healAmount = 10;
+                // Maid status bonus: +10 healing
+                if (char.status && char.status.includes('Maid')) {
+                    healAmount += 10;
+                }
+                // Petteruti Lounge/Matcha Maid Cafe bonus: +10 healing
+                if (game.stadium && game.stadium.name === 'Petteruti Lounge') {
+                    healAmount += 10;
+                }
                 char.damage = Math.max(0, (char.damage || 0) - healAmount);
                 game.log(`${char.name} healed ${healAmount} HP`, 'heal');
             });
@@ -1727,32 +1758,31 @@ function executeItemEffect(card) {
 
         case 'Dress Rehearsal Roster':
             showDeckSelection(player, 3, 1);
-            break;
+            return true; // Wait for modal, will discard after selection
 
         case 'Printed Score':
-            // Active character does +10 damage this turn
-            if (!game.attackModifiers[game.currentPlayer].damageBonus) {
-                game.attackModifiers[game.currentPlayer].damageBonus = 0;
+            // Opponent reveals their entire hand
+            if (opponent.hand.length > 0) {
+                const handNames = opponent.hand.map(c => c.name).join(', ');
+                alert(`Opponent's hand (${opponent.hand.length} cards): ${handNames}`);
+                game.log(`Printed Score: Opponent revealed entire hand: ${handNames}`, 'info');
+            } else {
+                game.log('Printed Score: Opponent has no cards in hand', 'info');
             }
-            game.attackModifiers[game.currentPlayer].damageBonus += 10;
-            game.log('Active character does +10 damage this turn', 'info');
             break;
 
         case 'Annotated Score':
-            // Active character does +20 damage this turn, discard 1 energy from active
-            if (player.active && player.active.attachedEnergy && player.active.attachedEnergy.length > 0) {
-                const discardedEnergy = player.active.attachedEnergy.pop();
-                player.discard.push(discardedEnergy);
-                game.log(`Discarded ${discardedEnergy.name} from active`, 'info');
-
-                if (!game.attackModifiers[game.currentPlayer].damageBonus) {
-                    game.attackModifiers[game.currentPlayer].damageBonus = 0;
-                }
-                game.attackModifiers[game.currentPlayer].damageBonus += 20;
-                game.log('Active character does +20 damage this turn', 'info');
+            // Opponent reveals 2 cards from hand; choose one to discard
+            if (opponent.hand.length >= 2) {
+                showHandRevealModal(opponent, 2, true); // true = discard one
+                return true; // Wait for modal
+            } else if (opponent.hand.length === 1) {
+                // Only 1 card, force discard it
+                const discarded = opponent.hand.pop();
+                opponent.discard.push(discarded);
+                game.log(`Annotated Score: Opponent discarded ${discarded.name}`, 'info');
             } else {
-                game.log('No energy to discard from active character - Annotated Score has no effect', 'error');
-                return false;
+                game.log('Annotated Score: Opponent has no cards to discard', 'info');
             }
             break;
 
@@ -1849,6 +1879,76 @@ function executeItemEffect(card) {
             }
             break;
 
+        case 'Standard Musescore File':
+            // Can only play if active character is an Arranger
+            if (player.active && player.active.status && player.active.status.includes('Arranger')) {
+                // Draw 2 cards from top of deck
+                const drawCount = Math.min(2, player.deck.length);
+                for (let i = 0; i < drawCount; i++) {
+                    const card = player.deck.shift();
+                    player.hand.push(card);
+                }
+                game.log(`Standard Musescore File: Drew ${drawCount} cards from top of deck`, 'info');
+            } else {
+                alert('Can only play this if your active character has Arranger status!');
+                return false; // Don't discard the card
+            }
+            break;
+
+        case 'Corrupted Musescore File':
+            // Can only play if active character is an Arranger
+            if (player.active && player.active.status && player.active.status.includes('Arranger')) {
+                // Draw 2 cards from bottom of deck
+                const drawCount = Math.min(2, player.deck.length);
+                for (let i = 0; i < drawCount; i++) {
+                    const card = player.deck.pop(); // Pop from end instead of shift from start
+                    player.hand.push(card);
+                }
+                game.log(`Corrupted Musescore File: Drew ${drawCount} cards from bottom of deck`, 'info');
+            } else {
+                alert('Can only play this if your active character has Arranger status!');
+                return false; // Don't discard the card
+            }
+            break;
+
+        case 'Cast Reserve':
+            // Flip a coin. Heads: you choose opponent's bench to shuffle. Tails: opponent chooses their bench to shuffle.
+            const castReserveBench = opponent.bench.filter(c => c);
+            if (castReserveBench.length === 0) {
+                game.log('Cast Reserve: Opponent has no benched characters', 'info');
+                break;
+            }
+
+            const castReserveCoin = Math.random() < 0.5 ? 'Heads' : 'Tails';
+            game.log(`Cast Reserve: Flipped ${castReserveCoin}!`, 'info');
+
+            if (castReserveCoin === 'Heads') {
+                // You choose
+                game.log('Cast Reserve: You choose which of opponent\'s benched characters to shuffle into deck', 'info');
+                const targetName = prompt(`Choose opponent's benched character to shuffle into deck:\n${castReserveBench.map(c => c.name).join(', ')}`);
+                const target = castReserveBench.find(c => c.name === targetName);
+                if (target) {
+                    const benchIndex = opponent.bench.indexOf(target);
+                    opponent.deck.push(target);
+                    opponent.bench[benchIndex] = null;
+                    game.shuffleDeck(opponentNum);
+                    game.log(`Cast Reserve: Shuffled ${target.name} into opponent's deck`, 'info');
+                }
+            } else {
+                // Opponent chooses which benched character to shuffle
+                game.log('Cast Reserve: Opponent chooses which benched character to shuffle into deck', 'info');
+                const targetName = prompt(`Opponent chooses which benched character to shuffle into deck:\n${castReserveBench.map(c => c.name).join(', ')}`);
+                const target = castReserveBench.find(c => c.name === targetName);
+                if (target) {
+                    const benchIndex = opponent.bench.indexOf(target);
+                    opponent.deck.push(target);
+                    opponent.bench[benchIndex] = null;
+                    game.shuffleDeck(opponentNum);
+                    game.log(`Cast Reserve: Opponent shuffled ${target.name} into their deck`, 'info');
+                }
+            }
+            break;
+
         // Search items
         case 'Concert Roster':
             // Search deck for a specific character and place it onto your bench
@@ -1864,6 +1964,10 @@ function executeItemEffect(card) {
             } else {
                 game.log('No stadium in play', 'info');
             }
+            // Opponent cannot play stadium next turn
+            const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+            game.nextTurnEffects[opponentNum].cannotPlayStadium = true;
+            game.log('BAI Email: Opponent cannot play stadiums on their next turn', 'info');
             break;
 
         // Tool removal
@@ -1885,26 +1989,33 @@ function executeItemEffect(card) {
                 game.log(`Removed ${toolsRemoved} tool(s)`, 'info');
             }
 
-            // Next turn penalty
+            // Next turn penalty - active takes +20 damage from attacks
             if (!game.nextTurnEffects[game.currentPlayer].avgebBirbPenalty) {
                 game.nextTurnEffects[game.currentPlayer].avgebBirbPenalty = 0;
             }
-            game.nextTurnEffects[game.currentPlayer].avgebBirbPenalty = 30;
-            game.log('Next turn: Active takes +30 damage from attacks', 'info');
+            game.nextTurnEffects[game.currentPlayer].avgebBirbPenalty = 20;
+            game.log('Next turn: Active takes +20 damage from attacks', 'info');
             break;
 
         // Discard retrieval
         case 'Camera':
-            selectFromDiscard(player, 'supporter', () => {
-                // After selection, discard the Camera
-                const cameraCard = player.hand.find(c => c.name === 'Camera');
-                if (cameraCard) {
-                    player.hand = player.hand.filter(c => c.id !== cameraCard.id);
-                    player.discard.push(cameraCard);
-                }
-                updateUI();
-            });
-            return true; // Wait for modal
+            // Shuffle up to 2 supporters from discard into deck
+            const supportersInDiscard = player.discard.filter(c => c.cardType === 'supporter');
+            if (supportersInDiscard.length === 0) {
+                game.log('Camera: No supporters in discard pile', 'info');
+            } else if (supportersInDiscard.length === 1) {
+                // Only 1 supporter, shuffle it
+                const supporter = supportersInDiscard[0];
+                player.deck.push(supporter);
+                player.discard = player.discard.filter(c => c.id !== supporter.id);
+                game.shuffleDeck(game.currentPlayer);
+                game.log(`Camera: Shuffled ${supporter.name} into deck`, 'info');
+            } else {
+                // 2+ supporters, let player choose up to 2
+                showCameraModal(player, supportersInDiscard);
+                return true; // Wait for modal
+            }
+            break;
 
         case 'Video Camera':
             selectMultipleFromDiscard(player, 'energy', 2, () => {
@@ -1933,19 +2044,65 @@ function showTopCards(player, count) {
 
 function showDeckSelection(player, viewCount, selectCount) {
     const topCards = player.deck.slice(0, Math.min(viewCount, player.deck.length));
-    // For now, just auto-select first card and discard rest
-    if (topCards.length > 0) {
-        const selected = topCards[0];
+
+    if (topCards.length === 0) {
+        game.log('No cards in deck to view', 'info');
+        return;
+    }
+
+    // Show modal to let player choose
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Dress Rehearsal Roster</h2>`;
+    html += `<p>Choose 1 card to keep, the rest will be discarded:</p>`;
+    html += `<div class="target-selection">`;
+
+    topCards.forEach(card => {
+        html += `<div class="target-option" onclick="selectDeckCard('${card.id}')">
+            ${card.name} (${card.cardType})
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function selectDeckCard(cardId) {
+    const player = game.players[game.currentPlayer];
+
+    // Find the card in the top 3
+    const topCards = player.deck.slice(0, 3);
+    const selected = topCards.find(c => c.id === cardId);
+
+    if (selected) {
+        // Add selected to hand
         player.hand.push(selected);
         player.deck = player.deck.filter(c => c.id !== selected.id);
 
-        topCards.slice(1).forEach(c => {
-            player.discard.push(c);
-            player.deck = player.deck.filter(card => card.id !== c.id);
+        // Discard the rest of the top 3
+        topCards.forEach(c => {
+            if (c.id !== cardId) {
+                player.discard.push(c);
+                player.deck = player.deck.filter(card => card.id !== c.id);
+            }
         });
 
-        game.log(`Selected ${selected.name}, discarded ${topCards.length - 1} cards`, 'info');
+        game.log(`Dress Rehearsal Roster: Kept ${selected.name}, discarded ${topCards.length - 1} card(s)`, 'info');
     }
+
+    // Discard the Dress Rehearsal Roster card
+    const rosterCard = player.hand.find(c => c.name === 'Dress Rehearsal Roster');
+    if (rosterCard) {
+        player.hand = player.hand.filter(c => c.id !== rosterCard.id);
+        player.discard.push(rosterCard);
+    }
+
+    closeModal('action-modal');
+    updateUI();
 }
 
 function selectFromDiscard(player, cardType, callback) {
@@ -2114,13 +2271,6 @@ function attachTool(toolId, target) {
             character.type.push(toolCard.addType);
         }
     }
-
-    // Conductor Baton: +30 HP
-    if (toolCard.name === 'Conductor Baton') {
-        character.hp += 30;
-        game.log(`${character.name} gained 30 HP from Conductor Baton (now ${character.hp} HP)`, 'info');
-    }
-
     player.hand = player.hand.filter(c => c.id !== toolId);
     game.log(`Attached ${toolCard.name} to ${character.name}`, 'info');
 
@@ -2140,12 +2290,6 @@ function removeToolEffects(character, tool) {
     // Remove type added by tool
     if (tool.addType && character.type) {
         character.type = character.type.filter(t => t !== tool.addType);
-    }
-
-    // Conductor Baton: Remove +30 HP
-    if (tool.name === 'Conductor Baton') {
-        character.hp -= 30;
-        game.log(`${character.name} lost 30 HP from Conductor Baton removal (now ${character.hp} HP)`, 'info');
     }
 }
 
@@ -2191,6 +2335,100 @@ function discardOpponentCard(cardId) {
         player.hand = player.hand.filter(c => c.id !== musescoreCard.id);
         player.discard.push(musescoreCard);
     }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+// Show modal for opponent to choose which cards to discard from their own hand
+function showOpponentDiscardChoice(opponentNum, discardCount, callback) {
+    const opponent = game.players[opponentNum];
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    if (!game.tempSelections) game.tempSelections = {};
+    game.tempSelections.opponentDiscardCards = [];
+    game.tempSelections.opponentDiscardCount = discardCount;
+    game.tempSelections.opponentNum = opponentNum;
+    game.tempSelections.opponentDiscardCallback = callback;
+
+    let html = `<h2>Choose ${discardCount} card${discardCount > 1 ? 's' : ''} to discard</h2>`;
+    html += `<p>Selected: <span id="opponent-discard-count">0</span> / ${discardCount}</p>`;
+    html += `<div class="target-selection">`;
+
+    opponent.hand.forEach(card => {
+        html += `<div class="target-option" id="opp-discard-${card.id}" onclick="toggleOpponentDiscardCard('${card.id}')">
+            ${card.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="confirmOpponentDiscard()">Confirm Discard</button>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function toggleOpponentDiscardCard(cardId) {
+    if (!game.tempSelections) return;
+
+    const selectedCards = game.tempSelections.opponentDiscardCards;
+    const maxCount = game.tempSelections.opponentDiscardCount;
+    const cardElement = document.getElementById(`opp-discard-${cardId}`);
+
+    if (selectedCards.includes(cardId)) {
+        // Deselect
+        game.tempSelections.opponentDiscardCards = selectedCards.filter(id => id !== cardId);
+        cardElement.classList.remove('selected');
+    } else {
+        // Select if under limit
+        if (selectedCards.length < maxCount) {
+            game.tempSelections.opponentDiscardCards.push(cardId);
+            cardElement.classList.add('selected');
+        } else {
+            alert(`You can only select ${maxCount} card${maxCount > 1 ? 's' : ''}.`);
+        }
+    }
+
+    // Update counter
+    const counter = document.getElementById('opponent-discard-count');
+    if (counter) {
+        counter.textContent = game.tempSelections.opponentDiscardCards.length;
+    }
+}
+
+function confirmOpponentDiscard() {
+    if (!game.tempSelections) return;
+
+    const selectedCardIds = game.tempSelections.opponentDiscardCards;
+    const requiredCount = game.tempSelections.opponentDiscardCount;
+    const opponentNum = game.tempSelections.opponentNum;
+    const opponent = game.players[opponentNum];
+
+    if (selectedCardIds.length !== requiredCount) {
+        alert(`Please select exactly ${requiredCount} card${requiredCount > 1 ? 's' : ''} to discard.`);
+        return;
+    }
+
+    // Discard selected cards
+    selectedCardIds.forEach(cardId => {
+        const card = opponent.hand.find(c => c.id === cardId);
+        if (card) {
+            opponent.discard.push(card);
+            opponent.hand = opponent.hand.filter(c => c.id !== cardId);
+        }
+    });
+
+    game.log(`Opponent discarded ${selectedCardIds.length} card${selectedCardIds.length > 1 ? 's' : ''}`, 'info');
+
+    // Call callback if provided
+    if (game.tempSelections.opponentDiscardCallback) {
+        game.tempSelections.opponentDiscardCallback();
+    }
+
+    // Clean up
+    game.tempSelections = {};
 
     closeModal('action-modal');
     updateUI();
@@ -2465,6 +2703,81 @@ function fullHealCharacter(target) {
     updateUI();
 }
 
+// Camera: Choose up to 2 supporters from discard to shuffle into deck
+function showCameraModal(player, supporters) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    if (!game.tempSelections) game.tempSelections = {};
+    if (!game.tempSelections.cameraSelections) game.tempSelections.cameraSelections = [];
+
+    let html = `<h2>Camera</h2>`;
+    html += `<p>Choose up to 2 supporters to shuffle into deck (${game.tempSelections.cameraSelections.length}/2 selected)</p>`;
+    html += `<div class="target-selection">`;
+
+    supporters.forEach((supporter, idx) => {
+        const isSelected = game.tempSelections.cameraSelections.includes(supporter.id);
+        const selectedClass = isSelected ? 'selected' : '';
+        html += `<div class="target-option ${selectedClass}" onclick="toggleCameraSelection('${supporter.id}')">
+            ${supporter.name} ${isSelected ? '✓' : ''}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="confirmCameraSelection()">Confirm</button>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function toggleCameraSelection(supporterId) {
+    if (!game.tempSelections.cameraSelections) game.tempSelections.cameraSelections = [];
+
+    const index = game.tempSelections.cameraSelections.indexOf(supporterId);
+    if (index !== -1) {
+        // Deselect
+        game.tempSelections.cameraSelections.splice(index, 1);
+    } else if (game.tempSelections.cameraSelections.length < 2) {
+        // Select (max 2)
+        game.tempSelections.cameraSelections.push(supporterId);
+    }
+
+    // Refresh modal
+    const player = game.players[game.currentPlayer];
+    const supporters = player.discard.filter(c => c.cardType === 'supporter');
+    showCameraModal(player, supporters);
+}
+
+function confirmCameraSelection() {
+    const player = game.players[game.currentPlayer];
+
+    if (game.tempSelections.cameraSelections && game.tempSelections.cameraSelections.length > 0) {
+        game.tempSelections.cameraSelections.forEach(supporterId => {
+            const supporter = player.discard.find(c => c.id === supporterId);
+            if (supporter) {
+                player.deck.push(supporter);
+                player.discard = player.discard.filter(c => c.id !== supporterId);
+            }
+        });
+        game.shuffleDeck(game.currentPlayer);
+        game.log(`Camera: Shuffled ${game.tempSelections.cameraSelections.length} supporter(s) into deck`, 'info');
+    }
+
+    // Clean up
+    game.tempSelections.cameraSelections = [];
+
+    // Discard Camera card
+    const cameraCard = player.hand.find(c => c.name === 'Camera');
+    if (cameraCard) {
+        player.hand = player.hand.filter(c => c.id !== cameraCard.id);
+        player.discard.push(cameraCard);
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
 // Character search modal
 function showCharacterSearchModal(player, searchType) {
     const modal = document.getElementById('action-modal');
@@ -2554,8 +2867,17 @@ function healSelectedCharacter(target, healAmount) {
     const character = target === 'active' ? player.active : player.bench[target];
 
     if (character) {
-        character.damage = Math.max(0, (character.damage || 0) - healAmount);
-        game.log(`${character.name} healed ${healAmount} HP`, 'heal');
+        let finalHealAmount = healAmount;
+        // Maid status bonus: +10 healing
+        if (character.status && character.status.includes('Maid')) {
+            finalHealAmount += 10;
+        }
+        // Petteruti Lounge/Matcha Maid Cafe bonus: +10 healing
+        if (game.stadium && game.stadium.name === 'Petteruti Lounge') {
+            finalHealAmount += 10;
+        }
+        character.damage = Math.max(0, (character.damage || 0) - finalHealAmount);
+        game.log(`${character.name} healed ${finalHealAmount} HP`, 'heal');
     }
 
     // Discard the Strawberry Matcha Latte card
@@ -2964,6 +3286,143 @@ function confirmVictoriaSelection() {
     updateUI();
 }
 
+// Lucas: Small Ensemble - Select up to 2 characters of different types
+function showLucasSelectionModal(player) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    // Get types currently on board (active + bench)
+    const boardTypes = new Set();
+    if (player.active) {
+        player.active.type.forEach(t => boardTypes.add(t));
+    }
+    player.bench.forEach(char => {
+        if (char) {
+            char.type.forEach(t => boardTypes.add(t));
+        }
+    });
+
+    // Find eligible characters (no shared types with board)
+    const eligibleChars = player.deck.filter(c => {
+        if (c.cardType !== 'character') return false;
+        // Check if this character shares any type with board
+        return !c.type.some(t => boardTypes.has(t));
+    });
+
+    if (eligibleChars.length === 0) {
+        game.log('No eligible characters in deck (all share types with board)', 'info');
+        const lucasCard = player.hand.find(c => c.name === 'Lucas');
+        if (lucasCard) {
+            player.hand = player.hand.filter(c => c.id !== lucasCard.id);
+            player.discard.push(lucasCard);
+        }
+        game.supporterPlayedThisTurn = true;
+        updateUI();
+        return;
+    }
+
+    if (!game.tempSelections) game.tempSelections = {};
+    game.tempSelections.lucasSelected = [];
+
+    let html = `<h2>Lucas - Small Ensemble</h2>`;
+    html += `<p>Choose up to 2 characters of different types (${game.tempSelections.lucasSelected.length}/2 selected)</p>`;
+    html += `<div class="target-selection">`;
+
+    eligibleChars.forEach(char => {
+        html += `<div class="target-option" id="lucas-char-${char.id}" onclick="toggleLucasCharacter('${char.id}')">
+            ${char.name} (${char.type.join('/')}) - HP: ${char.hp}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<div class="action-buttons">`;
+    html += `<button class="action-btn" onclick="confirmLucasSelection()">Confirm Selection</button>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    html += `</div>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function toggleLucasCharacter(charId) {
+    const player = game.players[game.currentPlayer];
+    const char = player.deck.find(c => c.id === charId);
+    const element = document.getElementById(`lucas-char-${charId}`);
+
+    if (!game.tempSelections.lucasSelected) game.tempSelections.lucasSelected = [];
+
+    const index = game.tempSelections.lucasSelected.findIndex(id => id === charId);
+    if (index > -1) {
+        // Deselect
+        game.tempSelections.lucasSelected.splice(index, 1);
+        element.classList.remove('selected');
+    } else {
+        // Check if we can select (max 2, and must be different type)
+        if (game.tempSelections.lucasSelected.length >= 2) {
+            game.log('Maximum 2 characters can be selected', 'info');
+            return;
+        }
+
+        // Check if this type is already selected
+        const selectedTypes = new Set();
+        game.tempSelections.lucasSelected.forEach(id => {
+            const selectedChar = player.deck.find(c => c.id === id);
+            if (selectedChar) {
+                selectedChar.type.forEach(t => selectedTypes.add(t));
+            }
+        });
+
+        const sharesType = char.type.some(t => selectedTypes.has(t));
+        if (sharesType) {
+            game.log('Selected characters must be of different types', 'info');
+            return;
+        }
+
+        // Select
+        game.tempSelections.lucasSelected.push(charId);
+        element.classList.add('selected');
+    }
+
+    // Refresh modal
+    showLucasSelectionModal(player);
+}
+
+function confirmLucasSelection() {
+    const player = game.players[game.currentPlayer];
+
+    if (!game.tempSelections.lucasSelected || game.tempSelections.lucasSelected.length === 0) {
+        game.log('No characters selected', 'info');
+    } else {
+        // Place selected characters on bench
+        game.tempSelections.lucasSelected.forEach(charId => {
+            const char = player.deck.find(c => c.id === charId);
+            if (char) {
+                const emptyBenchSlot = player.bench.indexOf(null);
+                if (emptyBenchSlot !== -1) {
+                    player.bench[emptyBenchSlot] = char;
+                    player.deck = player.deck.filter(c => c.id !== charId);
+                    game.log(`Lucas: Placed ${char.name} on bench`, 'info');
+                } else {
+                    game.log('No empty bench slots', 'error');
+                }
+            }
+        });
+    }
+
+    delete game.tempSelections.lucasSelected;
+
+    // Discard the Lucas supporter card
+    const lucasCard = player.hand.find(c => c.name === 'Lucas');
+    if (lucasCard) {
+        player.hand = player.hand.filter(c => c.id !== lucasCard.id);
+        player.discard.push(lucasCard);
+    }
+    game.supporterPlayedThisTurn = true;
+
+    closeModal('action-modal');
+    updateUI();
+}
+
 // Energy selection from hand modal (for Vocal warmups, 440 Hz, etc.)
 function showHandEnergySelectionModal(player, targetChar, energyCards) {
     const modal = document.getElementById('action-modal');
@@ -3357,17 +3816,15 @@ function executeSupporterEffect(card) {
             break;
 
         case 'Michelle':
-            // Shuffle all discard into deck, end turn
-            const discardCount = player.discard.length;
-            player.deck.push(...player.discard);
-            player.discard = [];
-            game.shuffleDeck(game.currentPlayer);
-            game.log(`Shuffled ${discardCount} cards from discard into deck. Turn ends.`, 'info');
-            setTimeout(() => {
-                game.switchPlayer();
-                game.drawCards(game.currentPlayer, 1);
-                updateUI();
-            }, 1000);
+            // Discord Announcement: Opponent discards down to 2 cards in hand
+            if (opponent.hand.length > 2) {
+                const discardCount = opponent.hand.length - 2;
+                const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+                showOpponentDiscardChoice(opponentNum, discardCount);
+                return true; // Wait for modal
+            } else {
+                game.log(`Michelle's Discord Announcement: Opponent already has 2 or fewer cards in hand`, 'info');
+            }
             break;
 
         case 'Will':
@@ -3382,30 +3839,9 @@ function executeSupporterEffect(card) {
             break;
 
         case 'Lucas':
-            // Bench must be empty - search for 3 different type characters
-            if (player.bench.every(slot => slot === null)) {
-                // For now, auto-select first 3 characters of different types
-                const characters = player.deck.filter(c => c.cardType === 'character');
-                const selectedTypes = new Set();
-                const selected = [];
-
-                for (const char of characters) {
-                    const charType = char.type[0]; // First type
-                    if (!selectedTypes.has(charType) && selected.length < 3) {
-                        selected.push(char);
-                        selectedTypes.add(charType);
-                    }
-                }
-
-                selected.forEach((char, idx) => {
-                    player.bench[idx] = char;
-                    player.deck = player.deck.filter(c => c.id !== char.id);
-                    game.log(`Placed ${char.name} on bench`, 'info');
-                });
-            } else {
-                game.log('Bench must be empty to use Lucas!', 'info');
-            }
-            break;
+            // Small Ensemble: Search for up to 2 characters of different types that share no types with board
+            showLucasSelectionModal(player);
+            return true; // Wait for modal
 
         case 'Angel':
             // Give active goon status
@@ -3427,16 +3863,20 @@ function executeSupporterEffect(card) {
             break;
 
         case 'Emma':
-            // Switch opponent's active with benched
+            // Switch opponent's active with one of their benched characters
             if (opponent.bench.some(slot => slot !== null)) {
-                // For now, auto-select first benched
-                const benchIndex = opponent.bench.findIndex(slot => slot !== null);
-                if (benchIndex !== -1) {
+                const benchedChars = opponent.bench.filter(c => c);
+                const targetName = prompt(`Choose which of opponent's benched characters to switch with their active:\n${benchedChars.map(c => c.name).join(', ')}`);
+                const target = benchedChars.find(c => c.name === targetName);
+                if (target) {
+                    const benchIndex = opponent.bench.indexOf(target);
                     const temp = opponent.active;
                     opponent.active = opponent.bench[benchIndex];
                     opponent.bench[benchIndex] = temp;
-                    game.log(`Opponent's ${opponent.active.name} switched to active`, 'info');
+                    game.log(`Emma: Switched opponent's ${opponent.active.name} to active`, 'info');
                 }
+            } else {
+                game.log('Emma: Opponent has no benched characters', 'info');
             }
             break;
 
@@ -3457,6 +3897,13 @@ function playStadium(cardId) {
     const card = player.hand.find(c => c.id === cardId);
 
     if (!card) return;
+
+    // Check if BAI Email prevents playing stadiums this turn
+    if (game.nextTurnEffects[game.currentPlayer].cannotPlayStadium) {
+        alert('Cannot play stadiums this turn (BAI Email effect)');
+        game.log('Cannot play stadiums this turn (BAI Email effect)', 'error');
+        return;
+    }
 
     // Discard old stadium if exists
     if (game.stadium) {
@@ -3546,7 +3993,8 @@ function showAttackMenu(cardId) {
             const canUse = canUseMove(attacker, move);
             const disabled = canUse ? '' : 'disabled';
             const rossLabel = move.isRossMove ? ' (Ross)' : '';
-            html += `<button class="action-btn" ${disabled} onclick="selectMove('${cardId}', ${idx})">${move.name}${rossLabel} [${move.cost ? move.cost.join('') : ''}] - ${move.damage || 0} dmg</button>`;
+            const costStr = move.cost ? (Array.isArray(move.cost) ? move.cost.join('') : move.cost.toString()) : '';
+            html += `<button class="action-btn" ${disabled} onclick="selectMove('${cardId}', ${idx})">${move.name}${rossLabel} [${costStr}] - ${move.damage || 0} dmg</button>`;
         });
     } else {
         html += `<p>No moves available</p>`;
@@ -3559,39 +4007,38 @@ function showAttackMenu(cardId) {
     modal.classList.remove('hidden');
 }
 
+function getEffectiveRetreatCost(character) {
+    let cost = character.retreatCost || 0;
+
+    // Kiki's Headband: -1 retreat cost
+    if (character.attachedTools && character.attachedTools.some(t => t.name === "Kiki's Headband")) {
+        cost = Math.max(0, cost - 1);
+    }
+
+    // Conductor status: double retreat cost
+    if (character.status && character.status.includes('Conductor')) {
+        cost *= 2;
+    }
+
+    return cost;
+}
+
 function canUseMove(character, move) {
-    if (!move.cost || move.cost.length === 0) return true;
+    // Move cost is now just a number representing total energy needed
+    if (!move.cost || move.cost === 0) return true;
 
-    const energyCount = {};
-    character.attachedEnergy.forEach(energy => {
-        energyCount[energy.energyType] = (energyCount[energy.energyType] || 0) + 1;
-    });
+    // Count attached energy
+    const attachedEnergy = character.attachedEnergy ? character.attachedEnergy.length : 0;
 
-    // Add Otamatone bonus energy (typeless)
+    // Add Otamatone bonus energy
     let bonusEnergy = 0;
     if (game.attackModifiers[game.currentPlayer].otamatoneBonus) {
         bonusEnergy = game.attackModifiers[game.currentPlayer].otamatoneBonus;
     }
 
-    let colorlessNeeded = 0;
-    for (const costSymbol of move.cost) {
-        if (costSymbol === 'X') {
-            colorlessNeeded++;
-        } else {
-            // Find matching type using the helper function
-            const typeNeeded = getTypeFromSymbol(costSymbol);
-            if (typeNeeded) {
-                if (!energyCount[typeNeeded] || energyCount[typeNeeded] === 0) {
-                    return false;
-                }
-                energyCount[typeNeeded]--;
-            }
-        }
-    }
-
-    // Check if we have enough total energy for colorless costs (including bonus)
-    const totalEnergy = Object.values(energyCount).reduce((sum, val) => sum + val, 0) + bonusEnergy;
-    return totalEnergy >= colorlessNeeded;
+    // Check if we have enough total energy (including bonus)
+    const totalEnergy = attachedEnergy + bonusEnergy;
+    return totalEnergy >= move.cost;
 }
 
 function selectMove(cardId, moveIndex) {
@@ -3608,6 +4055,13 @@ function selectMove(cardId, moveIndex) {
     }
 
     const move = allMoves[moveIndex];
+
+    // Validate energy cost
+    if (!canUseMove(attacker, move)) {
+        alert(`Not enough energy! This move requires ${move.cost || 0} energy (you have ${attacker.attachedEnergy.length})`);
+        closeModal('action-modal');
+        return;
+    }
 
     closeModal('action-modal');
 
@@ -3766,10 +4220,10 @@ function executeAttack(attackerId, moveName, targetId) {
             break;
 
         case 'Feedback Loop':
-            // 40 damage to target, each guitar takes 10 damage
+            // 40 damage to target, each string character takes 10 damage
             executeDamageAttack(attacker, target, move);
-            const guitarChars = [player.active, ...player.bench].filter(c => c && c.type.includes(TYPES.GUITAR));
-            guitarChars.forEach(char => {
+            const feedbackLoopChars = [player.active, ...player.bench].filter(c => c && c.type.includes(TYPES.STRINGS));
+            feedbackLoopChars.forEach(char => {
                 game.dealDamage(char, 10);
                 game.log(`Feedback Loop: ${char.name} took 10 recoil damage`);
             });
@@ -3782,10 +4236,10 @@ function executeAttack(attackerId, moveName, targetId) {
                 .filter(c => c)
                 .forEach(c => c.type.forEach(t => uniqueTypes.add(t)));
             const damageAmount = uniqueTypes.size * 10;
-            const finalDamage = calculateDamage(attacker, target, damageAmount, move);
-            game.dealDamage(target, finalDamage);
+            const songVotingDamage = calculateDamage(attacker, target, damageAmount, move);
+            game.dealDamage(target, songVotingDamage);
             game.dealDamage(attacker, 40);
-            game.log(`Song voting: ${uniqueTypes.size} unique types for ${finalDamage} damage, 40 recoil`, 'damage');
+            game.log(`Song voting: ${uniqueTypes.size} unique types for ${songVotingDamage} damage, 40 recoil`, 'damage');
             break;
 
         case 'Diabolical arrangement':
@@ -3867,20 +4321,26 @@ function executeAttack(attackerId, moveName, targetId) {
             break;
 
         case 'Percussion Ensemble':
-            // Search deck for 2 percussion energies and attach to any percussionist
-            const percussionEnergy = player.deck.filter(c =>
-                c.cardType === 'energy' && c.energyType === TYPES.PERCUSSION
-            ).slice(0, 2);
+            // Attach up to 2 energy to one benched Percussion type
+            const benchedPercussionists = player.bench.filter(c => c && c.type.includes(TYPES.PERCUSSION));
 
-            const percussionists = [player.active, ...player.bench].filter(c =>
-                c && c.type.includes(TYPES.PERCUSSION)
-            );
+            if (benchedPercussionists.length > 0) {
+                // Let player choose which benched percussionist
+                const targetName = prompt(`Choose benched Percussion character: ${benchedPercussionists.map(c => c.name).join(', ')}`);
+                const targetPercussionist = benchedPercussionists.find(c => c.name === targetName);
 
-            if (percussionEnergy.length > 0 && percussionists.length > 0) {
-                game.log(`Percussion Ensemble: Found ${percussionEnergy.length} percussion energy`);
-                showPercussionEnsembleModal(player, percussionEnergy, percussionists);
+                if (targetPercussionist) {
+                    // Attach up to 2 energy
+                    const numEnergy = parseInt(prompt('Attach how many energy? (1 or 2)'));
+                    if (numEnergy === 1 || numEnergy === 2) {
+                        for (let i = 0; i < numEnergy; i++) {
+                            targetPercussionist.attachedEnergy.push({ generic: true });
+                        }
+                        game.log(`Percussion Ensemble: Attached ${numEnergy} energy to ${targetPercussionist.name}`);
+                    }
+                }
             } else {
-                game.log('No percussion energy in deck or no percussionists in play');
+                game.log('No benched Percussion characters available');
             }
             break;
 
@@ -3895,7 +4355,7 @@ function executeAttack(attackerId, moveName, targetId) {
             break;
 
         case 'Improv':
-            // Discard top 3 of opponent deck, 40 damage per item card
+            // Discard top 3 of opponent deck, 50 base damage + 20 per item card
             const topThree = opponent.deck.splice(0, 3);
             let itemsDiscarded = 0;
             topThree.forEach(card => {
@@ -3905,12 +4365,10 @@ function executeAttack(attackerId, moveName, targetId) {
                 }
                 game.log(`Opponent discarded ${card.name}`);
             });
-            if (itemsDiscarded > 0) {
-                const totalDamage = itemsDiscarded * 40;
-                const finalDamage = calculateDamage(attacker, target, totalDamage, move);
-                game.dealDamage(target, finalDamage);
-                game.log(`Improv: ${itemsDiscarded} items for ${finalDamage} damage!`, 'damage');
-            }
+            const improvBaseDamage = 50 + (itemsDiscarded * 20);
+            const improvFinalDamage = calculateDamage(attacker, target, improvBaseDamage, move);
+            game.dealDamage(target, improvFinalDamage);
+            game.log(`Improv: ${itemsDiscarded} items for ${improvFinalDamage} damage!`, 'damage');
             break;
 
         case 'Conducting':
@@ -4224,12 +4682,15 @@ function executeAttack(attackerId, moveName, targetId) {
             break;
 
         case 'Grand Piano':
-            // 60 damage, only usable if stadium is a performance stadium
+            // 40 damage, +20 if stadium is a performance hall
+            let grandPianoDamage = move.damage;
             if (game.stadium && game.isPerformanceSpace(game.stadium.name)) {
-                executeDamageAttack(attacker, target, move);
-            } else {
-                game.log('Grand Piano can only be used in a performance stadium!');
+                grandPianoDamage += 20;
+                game.log('Grand Piano: +20 damage in performance hall!');
             }
+            const grandPianoFinal = calculateDamage(attacker, target, grandPianoDamage, move);
+            game.dealDamage(target, grandPianoFinal);
+            game.log(`${attacker.name} used ${move.name} for ${grandPianoFinal} damage!`, 'damage');
             break;
 
         case 'Damper Pedal':
@@ -4425,7 +4886,7 @@ function executeAttack(attackerId, moveName, targetId) {
             break;
 
         case 'Fingerstyle':
-            // Only if didn't use Power Chord last turn, flip 8 coins
+            // Only if didn't use Power Chord last turn, flip 8 coins, 20 damage per heads
             if (attacker.usedPowerChordLastTurn) {
                 game.log('Fingerstyle: Cannot use after Power Chord!', 'warning');
             } else {
@@ -4435,7 +4896,7 @@ function executeAttack(attackerId, moveName, targetId) {
                         fingerstyleHeads++;
                     }
                 }
-                const fingerstyleDamage = fingerstyleHeads * 10;
+                const fingerstyleDamage = fingerstyleHeads * 20;
                 const fingerstyleFinal = calculateDamage(attacker, target, fingerstyleDamage, move);
                 game.dealDamage(target, fingerstyleFinal);
                 game.log(`Fingerstyle: ${fingerstyleHeads} heads for ${fingerstyleFinal} damage!`, 'damage');
@@ -4613,11 +5074,11 @@ function executeAttack(attackerId, moveName, targetId) {
         // ===== STRINGS MOVES =====
         case 'Borrow':
             // Move energy from another string to this
-            const stringChars = [player.active, ...player.bench].filter(c =>
+            const borrowStringChars = [player.active, ...player.bench].filter(c =>
                 c && c.type.includes(TYPES.STRINGS) && c.id !== attacker.id && c.attachedEnergy && c.attachedEnergy.length > 0
             );
-            if (stringChars.length > 0) {
-                showBorrowSelection(player, stringChars, attacker);
+            if (borrowStringChars.length > 0) {
+                showBorrowSelection(player, borrowStringChars, attacker);
             } else {
                 game.log('Borrow: No other strings with energy to borrow from');
             }
@@ -4809,6 +5270,203 @@ function executeAttack(attackerId, moveName, targetId) {
             }
             break;
 
+        case 'Blast':
+            // Standard 50 damage attack
+            executeDamageAttack(attacker, target, move);
+            break;
+
+        case 'Strum':
+            // Standard 20 damage attack
+            executeDamageAttack(attacker, target, move);
+            break;
+
+        case 'Seal Attack':
+            // Standard 30 damage attack
+            executeDamageAttack(attacker, target, move);
+            break;
+
+        case 'Sparkling Run':
+        case 'Sparkling run':
+            // 20 damage and heal 20
+            executeDamageAttack(attacker, target, move);
+            game.dealDamage(attacker, -20); // Negative damage = healing
+            game.log(`${attacker.name} healed 20 damage!`);
+            break;
+
+        case 'Synchro Summon':
+            // Reveal cards until character found
+            let revealedCards = [];
+            let characterFound = null;
+
+            while (player.deck.length > 0 && !characterFound) {
+                const card = player.deck.shift();
+                revealedCards.push(card);
+                if (card.cardType === 'character') {
+                    characterFound = card;
+                }
+            }
+
+            if (characterFound) {
+                const isStringType = characterFound.type && characterFound.type.includes(TYPES.STRINGS);
+                if (!isStringType) {
+                    const synchDamage = calculateDamage(attacker, target, 20, move);
+                    game.dealDamage(target, synchDamage);
+                    game.log(`Synchro Summon: Found non-String character, dealt ${synchDamage} damage!`);
+                }
+                player.hand.push(characterFound);
+                game.log(`${characterFound.name} added to hand!`);
+
+                // Shuffle other revealed cards back
+                revealedCards = revealedCards.filter(c => c !== characterFound);
+                player.deck.push(...revealedCards);
+                game.shuffleDeck(game.currentPlayer);
+            } else {
+                // No character found, shuffle all back
+                player.deck.push(...revealedCards);
+                game.shuffleDeck(game.currentPlayer);
+                game.log('Synchro Summon: No character found');
+            }
+            break;
+
+        case 'Spike':
+            // 10 damage, discard 1 energy from each opponent benched character
+            executeDamageAttack(attacker, target, move);
+            opponent.bench.filter(c => c).forEach(benchChar => {
+                if (benchChar.attachedEnergy && benchChar.attachedEnergy.length > 0) {
+                    benchChar.attachedEnergy.pop();
+                    game.log(`Spike: Discarded energy from ${benchChar.name}`);
+                }
+            });
+            break;
+
+        case 'Photograph':
+            // Look at opponent's hand, use an Item card effect
+            if (opponent.hand.length > 0) {
+                const itemCards = opponent.hand.filter(c => c.cardType === 'item');
+                if (itemCards.length > 0) {
+                    const itemNames = itemCards.map(c => c.name).join(', ');
+                    const chosenName = prompt(`Photograph: Choose an item card from opponent's hand to copy:\n${itemNames}`);
+                    const chosenItem = itemCards.find(c => c.name === chosenName);
+                    if (chosenItem) {
+                        game.log(`Photograph: Copying ${chosenItem.name} effect`, 'info');
+                        // Temporarily add the item to current player's hand, execute it, then remove it
+                        const tempItem = { ...chosenItem, id: generateCardId() };
+                        player.hand.push(tempItem);
+                        const waitForModal = executeItemEffect(tempItem);
+                        if (!waitForModal) {
+                            // Remove temp item immediately if no modal
+                            player.hand = player.hand.filter(c => c.id !== tempItem.id);
+                        }
+                        // Note: If modal is shown, the item will be removed when modal closes
+                    }
+                } else {
+                    game.log('Photograph: No items in opponent hand');
+                }
+            } else {
+                game.log('Photograph: Opponent has no cards in hand');
+            }
+            break;
+
+        case 'Small Ensemble Committee':
+            // Count small ensemble members, deal damage accordingly
+            const ensembleMembers = ['Katie Xiang', 'Jennie Wang', 'Luke Xu', 'Henry Wang', 'David Man'];
+            const membersInPlay = [player.active, ...player.bench, opponent.active, ...opponent.bench]
+                .filter(c => c && ensembleMembers.includes(c.name)).length;
+
+            if (membersInPlay >= 1) {
+                const ensembleDamage = membersInPlay >= 3 ? 30 : 10;
+                [opponent.active, ...opponent.bench].filter(c => c).forEach(oppChar => {
+                    const dmg = calculateDamage(attacker, oppChar, ensembleDamage, move);
+                    game.dealDamage(oppChar, dmg);
+                    game.log(`Small Ensemble Committee: ${dmg} damage to ${oppChar.name}`);
+                });
+            } else {
+                game.log('No ensemble members in play');
+            }
+            break;
+
+        case 'Hands separately':
+            // 0 damage this turn, 40 next turn
+            if (!attacker.handsSeperatelyPrimed) {
+                attacker.handsSeperatelyPrimed = true;
+                game.log('Hands separately primed - next turn will do 40 damage!');
+            } else {
+                const handsDamage = calculateDamage(attacker, target, 40, move);
+                game.dealDamage(target, handsDamage);
+                attacker.handsSeperatelyPrimed = false;
+                game.log(`Hands separately: ${handsDamage} damage!`, 'damage');
+            }
+            break;
+
+        case 'Multiphonics':
+            // Flip 2 coins - both heads = 40 to each bench, both tails = 80 to active
+            const multiCoin1 = Math.random() < 0.5;
+            const multiCoin2 = Math.random() < 0.5;
+            game.log(`Multiphonics: Flipped ${multiCoin1 ? 'heads' : 'tails'} and ${multiCoin2 ? 'heads' : 'tails'}`);
+
+            if (multiCoin1 && multiCoin2) {
+                // Both heads - 40 to each benched
+                opponent.bench.filter(c => c).forEach(benchChar => {
+                    const benchDmg = calculateDamage(attacker, benchChar, 40, move);
+                    game.dealDamage(benchChar, benchDmg);
+                    game.log(`Multiphonics: ${benchDmg} damage to ${benchChar.name}`, 'damage');
+                });
+            } else if (!multiCoin1 && !multiCoin2) {
+                // Both tails - 80 to active
+                const activeDmg = calculateDamage(attacker, opponent.active, 80, move);
+                game.dealDamage(opponent.active, activeDmg);
+                game.log(`Multiphonics: ${activeDmg} damage to ${opponent.active.name}!`, 'damage');
+            } else {
+                game.log('Multiphonics: Mixed results, no damage');
+            }
+            break;
+
+        case 'Four Hands Piano':
+            // 30 damage, +30 if piano on bench
+            let fourHandsBaseDamage = 30;
+            const hasPianoOnBench = player.bench.some(c => c && c.type.includes(TYPES.PIANO));
+            if (hasPianoOnBench) {
+                fourHandsBaseDamage += 30;
+                game.log('Four Hands Piano: +30 damage for piano on bench!');
+            }
+            const fourHandsPianoDamage = calculateDamage(attacker, target, fourHandsBaseDamage, move);
+            game.dealDamage(target, fourHandsPianoDamage);
+            game.log(`Four Hands Piano: ${fourHandsPianoDamage} damage!`, 'damage');
+            break;
+
+        case 'E2 Reaction':
+            // Only works if opponent has 2+ benched
+            const benchedCount = opponent.bench.filter(c => c).length;
+            if (benchedCount >= 2) {
+                executeDamageAttack(attacker, target, move);
+                // Let player choose which benched character to shuffle
+                const benchedChars = opponent.bench.filter(c => c);
+                const targetName = prompt(`E2 Reaction: Choose opponent's benched character to shuffle back into deck:\n${benchedChars.map(c => c.name).join(', ')}`);
+                const benchTarget = benchedChars.find(c => c.name === targetName);
+                if (benchTarget) {
+                    opponent.bench[opponent.bench.indexOf(benchTarget)] = null;
+                    opponent.deck.push(benchTarget);
+                    game.shuffleDeck(3 - game.currentPlayer);
+                    game.log(`E2 Reaction: Shuffled ${benchTarget.name} back into deck`);
+                }
+            } else {
+                game.log('E2 Reaction: Opponent needs at least 2 benched characters');
+            }
+            break;
+
+        case 'Cherry Flavored Valve Oil':
+            // 30 damage, heal one benched character for same amount dealt
+            const cherryDamage = calculateDamage(attacker, target, 30, move);
+            game.dealDamage(target, cherryDamage);
+            game.log(`Cherry Flavored Valve Oil: ${cherryDamage} damage dealt!`, 'damage');
+
+            const benchToHeal = player.bench.find(c => c);
+            if (benchToHeal) {
+                game.dealDamage(benchToHeal, -cherryDamage);
+                game.log(`Healed ${benchToHeal.name} for ${cherryDamage}!`);
+            }
+            break;
+
         default:
             // Standard damage attack for unlisted moves
             if (move.damage > 0) {
@@ -4839,11 +5497,11 @@ function executeDamageAttack(attacker, target, move) {
 function calculateDamage(attacker, defender, baseDamage, move) {
     let damage = baseDamage;
 
-    // Apply type resistance
+    // Apply type super effectiveness (2x damage)
     attacker.type.forEach(attackerType => {
-        if (RESISTANCE_CHAIN[attackerType] && defender.type.includes(RESISTANCE_CHAIN[attackerType])) {
-            damage = Math.floor(damage * 0.5); // Resisted damage is halved
-            game.log(`${defender.name} resists ${attackerType} type!`);
+        if (SUPER_EFFECTIVE_CHAIN[attackerType] && defender.type.includes(SUPER_EFFECTIVE_CHAIN[attackerType])) {
+            damage = Math.floor(damage * 2);
+            game.log(`It's super effective! ${attackerType} is strong against ${SUPER_EFFECTIVE_CHAIN[attackerType]}!`);
         }
     });
 
@@ -4872,13 +5530,6 @@ function calculateDamage(attacker, defender, baseDamage, move) {
             if (attacker.type.includes(TYPES.CHOIR)) {
                 damage += 10;
             }
-        } else if (game.stadium.name === 'Riley Hall') {
-            if (attacker.type.includes(TYPES.STRINGS)) {
-                damage += 10;
-            }
-        } else if (game.stadium.name === 'Main Hall') {
-            // All attacks do +10 damage
-            damage += 10;
         } else if (game.stadium.name === 'Salomon DECI') {
             // Roll a die and modify damage for Guitar, Piano, Percussion
             if (attacker.type.includes(TYPES.GUITAR) ||
@@ -5082,9 +5733,27 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     // Bokai Bi's Algorithm - Opponent plays duplicate → 50 damage (handled elsewhere)
     // This is checked when opponents play characters, not in damage calculation
 
-    // Felix Chen's Synesthesia - One Woodwind energy as any type
-    // This needs to be handled in move cost checking logic (complex UI change)
-    // For now, this is noted as needing special implementation in energy validation
+    // Felix Chen's Synesthesia - If all characters in play are different types, -10 damage
+    const defenderPlayerNum = attacker === game.players[1].active || game.players[1].bench.includes(attacker) ? 2 : 1;
+    const defenderSide = game.players[defenderPlayerNum];
+    const felixInPlay = [defenderSide.active, ...defenderSide.bench].some(c => c && c.name === 'Felix Chen');
+
+    if (felixInPlay) {
+        // Check if all characters in play are of different types
+        const charsInPlay = [defenderSide.active, ...defenderSide.bench].filter(c => c);
+
+        // All different types means each character has no type overlap with any other character
+        const allDifferentTypes = charsInPlay.every(char1 => {
+            return !charsInPlay.some(char2 =>
+                char1.id !== char2.id && char1.type.some(t => char2.type.includes(t))
+            );
+        });
+
+        if (allDifferentTypes && charsInPlay.length > 1) {
+            damage = Math.max(0, damage - 10);
+            game.log('Felix Chen\'s Synesthesia: All characters are different types, -10 damage!');
+        }
+    }
 
     return Math.max(0, damage);
 }
@@ -5096,7 +5765,7 @@ function showRetreatMenu(cardId) {
 
     if (!active || active.id !== cardId) return;
 
-    const retreatCost = active.retreatCost || 1;
+    const retreatCost = getEffectiveRetreatCost(active);
     const energyCount = active.attachedEnergy ? active.attachedEnergy.length : 0;
 
     if (energyCount < retreatCost) {
@@ -5164,7 +5833,7 @@ function switchToActive(cardId) {
     } else {
         // Manual switch requires retreat cost from active pokemon
         const active = player.active;
-        const retreatCost = active.retreatCost || 1;
+        const retreatCost = getEffectiveRetreatCost(active);
         const energyCount = active.attachedEnergy ? active.attachedEnergy.length : 0;
 
         if (energyCount < retreatCost) {
@@ -5318,14 +5987,49 @@ function useActivatedAbility(cardId, abilitySlot) {
             const shuffledDiscard = [...player.discard].sort(() => Math.random() - 0.5);
             // Pick random 3
             const randomThree = shuffledDiscard.slice(0, 3);
+            // Remove these 3 from discard
+            randomThree.forEach(card => {
+                const idx = player.discard.indexOf(card);
+                if (idx > -1) player.discard.splice(idx, 1);
+            });
             // Filter for items/tools
             const itemsAndTools = randomThree.filter(c => c.cardType === 'item' || c.cardType === 'tool');
+            // Non-items go to bottom of deck
+            const nonItems = randomThree.filter(c => c.cardType !== 'item' && c.cardType !== 'tool');
+            player.deck.push(...nonItems);
 
             if (itemsAndTools.length > 0) {
-                // Show modal to arrange order
-                showReverseHeistModal(player, itemsAndTools);
+                // Put items/tools on top of deck in order
+                player.deck.unshift(...itemsAndTools);
+                game.log(`Reverse Heist: Found ${itemsAndTools.length} items/tools and placed on top!`);
             } else {
                 game.log(`Reverse Heist: Drew ${randomThree.map(c => c.name).join(', ')} - no items/tools!`);
+            }
+            closeModal('action-modal');
+            break;
+
+        case 'Category Theory':
+            // Joshua Kou: If all cards in hand are items (at least 2), reveal, shuffle to deck, draw 3
+            if (player.hand.length < 2) {
+                alert('Need at least 2 cards in hand!');
+                closeModal('action-modal');
+                break;
+            }
+
+            const allItems = player.hand.every(c => c.cardType === 'item');
+            if (allItems) {
+                game.log(`Category Theory: Revealing ${player.hand.length} items: ${player.hand.map(c => c.name).join(', ')}`);
+                // Shuffle hand into deck
+                player.deck.push(...player.hand);
+                player.hand = [];
+                game.shuffleDeck(game.currentPlayer);
+                // Draw 3 cards
+                game.drawCards(game.currentPlayer, 3);
+                game.log('Category Theory: Shuffled items into deck and drew 3 cards!');
+                closeModal('action-modal');
+                updateUI();
+            } else {
+                alert('All cards in hand must be Items to use Category Theory!');
                 closeModal('action-modal');
             }
             break;
@@ -5353,7 +6057,7 @@ function useActivatedAbility(cardId, abilitySlot) {
             }
             break;
 
-        case 'Borrow':
+        case 'Borrow a Bow':
             // Ina Ma: Move energy from another string (passive implementation in move, this is activated version)
             const stringCharsForBorrow = [player.active, ...player.bench].filter(c =>
                 c && c.type.includes(TYPES.STRINGS) && c.id !== card.id && c.attachedEnergy && c.attachedEnergy.length > 0
@@ -5449,7 +6153,12 @@ function setupEventListeners() {
     // End turn button
     document.getElementById('end-turn-btn').addEventListener('click', () => {
         game.switchPlayer();
-        game.drawCards(game.currentPlayer, 1);
+
+        // Don't auto-draw if Friedman Hall is active (it handles its own draw)
+        if (!game.stadium || game.stadium.name !== 'Friedman Hall') {
+            game.drawCards(game.currentPlayer, 1);
+        }
+
         updateUI();
     });
 
@@ -5576,9 +6285,13 @@ function setupDeckBuilderListeners() {
     // Save and Clear buttons
     const saveBtn = document.getElementById('save-deck-btn');
     const clearBtn = document.getElementById('clear-deck-btn');
+    const exportBtn = document.getElementById('export-deck-btn');
+    const importBtn = document.getElementById('import-deck-btn');
 
     if (saveBtn) saveBtn.onclick = saveDeck;
     if (clearBtn) clearBtn.onclick = clearDeck;
+    if (exportBtn) exportBtn.onclick = exportDeck;
+    if (importBtn) importBtn.onclick = importDeck;
 }
 
 function switchCardTab(cardType) {
@@ -5606,7 +6319,8 @@ function displayCardPool(cardType) {
             cards = Object.values(CHARACTERS);
             break;
         case 'energy':
-            cards = Object.values(ENERGY_TYPES);
+            // Energy cards no longer exist
+            cards = [];
             break;
         case 'item':
             cards = Object.values(ITEMS);
@@ -5675,8 +6389,8 @@ function createPoolCardElement(card, type) {
 
 function addCardToDeck(card, cardCategory) {
     // Check if deck is full
-    if (currentDeck.length >= 30) {
-        alert('Deck is full! Maximum 30 cards.');
+    if (currentDeck.length >= 20) {
+        alert('Deck is full! Maximum 20 cards.');
         return;
     }
 
@@ -5712,7 +6426,7 @@ function updateDeckDisplay() {
     deckCount.textContent = currentDeck.length;
 
     // Enable save button if deck is valid
-    const isValid = currentDeck.length === 30 && deckNameInput.value.trim().length > 0;
+    const isValid = currentDeck.length === 20 && deckNameInput.value.trim().length > 0;
     saveBtn.disabled = !isValid;
 
     // Group cards by name
@@ -5765,8 +6479,8 @@ function saveDeck() {
         return;
     }
 
-    if (currentDeck.length !== 30) {
-        alert('Deck must have exactly 30 cards.');
+    if (currentDeck.length !== 20) {
+        alert('Deck must have exactly 20 cards.');
         return;
     }
 
@@ -5845,6 +6559,199 @@ function deleteDeck(deckName) {
         loadSavedDecks();
         loadCustomDecksIntoDropdown();
     }
+}
+
+// ===== DECK IMPORT/EXPORT FUNCTIONS =====
+
+function exportDeck() {
+    if (currentDeck.length === 0) {
+        alert('No deck to export! Add cards to your deck first.');
+        return;
+    }
+
+    // Get deck name
+    const deckName = document.getElementById('custom-deck-name').value.trim() || 'Unnamed Deck';
+
+    // Create export data
+    const exportData = {
+        name: deckName,
+        cards: currentDeck.map(card => ({
+            name: card.name,
+            cardCategory: card.cardCategory, // character, energy, item, tool, supporter, stadium
+            energyType: card.energyType // Only for energy cards
+        }))
+    };
+
+    // Convert to JSON and Base64 encode
+    const jsonString = JSON.stringify(exportData);
+    const base64Code = btoa(jsonString);
+
+    // Show export modal
+    showExportModal(base64Code, deckName);
+}
+
+function showExportModal(code, deckName) {
+    const modal = document.getElementById('deck-code-modal');
+    const content = document.getElementById('deck-code-content');
+
+    let html = `<h2>Export Deck: ${deckName}</h2>`;
+    html += `<p>Share this code with others to import your deck:</p>`;
+    html += `<textarea id="deck-export-code" readonly style="width: 100%; height: 150px; font-family: monospace; padding: 10px;">${code}</textarea>`;
+    html += `<div class="action-buttons" style="margin-top: 10px;">`;
+    html += `<button class="action-btn" onclick="copyDeckCode()">Copy to Clipboard</button>`;
+    html += `<button class="action-btn" onclick="closeModal('deck-code-modal')">Close</button>`;
+    html += `</div>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+
+    // Auto-select the code for easy copying
+    setTimeout(() => {
+        const textarea = document.getElementById('deck-export-code');
+        if (textarea) textarea.select();
+    }, 100);
+}
+
+function copyDeckCode() {
+    const textarea = document.getElementById('deck-export-code');
+    if (textarea) {
+        const code = textarea.value;
+
+        // Use modern Clipboard API if available, fall back to execCommand
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(code).then(() => {
+                alert('Deck code copied to clipboard!');
+            }).catch(() => {
+                // Fallback: select and copy manually
+                textarea.select();
+                document.execCommand('copy');
+                alert('Deck code copied to clipboard!');
+            });
+        } else {
+            // Fallback for older browsers
+            textarea.select();
+            document.execCommand('copy');
+            alert('Deck code copied to clipboard!');
+        }
+    }
+}
+
+function importDeck() {
+    const modal = document.getElementById('deck-code-modal');
+    const content = document.getElementById('deck-code-content');
+
+    let html = `<h2>Import Deck</h2>`;
+    html += `<p>Paste a deck code to import:</p>`;
+    html += `<textarea id="deck-import-code" placeholder="Paste deck code here..." style="width: 100%; height: 150px; font-family: monospace; padding: 10px;"></textarea>`;
+    html += `<div class="action-buttons" style="margin-top: 10px;">`;
+    html += `<button class="action-btn" onclick="processDeckImport()">Import</button>`;
+    html += `<button class="action-btn" onclick="closeModal('deck-code-modal')">Cancel</button>`;
+    html += `</div>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+
+    // Focus on textarea
+    setTimeout(() => {
+        const textarea = document.getElementById('deck-import-code');
+        if (textarea) textarea.focus();
+    }, 100);
+}
+
+function processDeckImport() {
+    const textarea = document.getElementById('deck-import-code');
+    const code = textarea.value.trim();
+
+    if (!code) {
+        alert('Please paste a deck code first!');
+        return;
+    }
+
+    try {
+        // Decode Base64 and parse JSON
+        const jsonString = atob(code);
+        const importData = JSON.parse(jsonString);
+
+        if (!importData.cards || !Array.isArray(importData.cards)) {
+            throw new Error('Invalid deck format');
+        }
+
+        // Clear current deck
+        currentDeck = [];
+
+        // Reconstruct cards from card names
+        let failedCards = [];
+        importData.cards.forEach(cardData => {
+            const card = findCardByName(cardData.name, cardData.cardCategory, cardData.energyType);
+            if (card) {
+                // Create a copy with cardCategory property
+                const cardCopy = {
+                    ...card,
+                    cardCategory: cardData.cardCategory
+                };
+                if (cardData.energyType) {
+                    cardCopy.energyType = cardData.energyType;
+                }
+                currentDeck.push(cardCopy);
+            } else {
+                failedCards.push(`${cardData.name} (${cardData.cardCategory})`);
+            }
+        });
+
+        // Set deck name
+        if (importData.name) {
+            document.getElementById('custom-deck-name').value = importData.name;
+            currentDeckName = importData.name;
+        }
+
+        // Update display
+        updateDeckDisplay();
+
+        // Close modal
+        closeModal('deck-code-modal');
+
+        // Show success message with warnings if any cards failed
+        let message = `Deck "${importData.name}" imported successfully!\n\n`;
+        message += `Cards imported: ${currentDeck.length}/${importData.cards.length}`;
+
+        if (failedCards.length > 0) {
+            message += `\n\nWarning: ${failedCards.length} card(s) could not be found:\n`;
+            message += failedCards.join('\n');
+        }
+
+        alert(message);
+    } catch (error) {
+        alert('Invalid deck code! Please check the code and try again.\n\nError: ' + error.message);
+    }
+}
+
+function findCardByName(name, type, energyType) {
+    // Search in appropriate card pool based on type
+    let card = null;
+
+    switch(type) {
+        case 'character':
+            card = Object.values(CHARACTERS).find(c => c.name === name);
+            break;
+        case 'energy':
+            // Energy cards no longer exist
+            card = null;
+            break;
+        case 'item':
+            card = Object.values(ITEMS).find(c => c.name === name);
+            break;
+        case 'tool':
+            card = Object.values(TOOLS).find(c => c.name === name);
+            break;
+        case 'supporter':
+            card = Object.values(SUPPORTERS).find(c => c.name === name);
+            break;
+        case 'stadium':
+            card = Object.values(STADIUMS).find(c => c.name === name);
+            break;
+    }
+
+    return card;
 }
 
 // ===== HELPER FUNCTIONS FOR MOVES =====

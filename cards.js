@@ -10,15 +10,15 @@ const TYPES = {
     BRASS: 'Brass'
 };
 
-// Type resistance chain: Str → piano → perc → guitar → brass → choir → ww → str
-const RESISTANCE_CHAIN = {
-    [TYPES.STRINGS]: TYPES.PIANO,
-    [TYPES.PIANO]: TYPES.PERCUSSION,
-    [TYPES.PERCUSSION]: TYPES.GUITAR,
-    [TYPES.GUITAR]: TYPES.BRASS,
-    [TYPES.BRASS]: TYPES.CHOIR,
-    [TYPES.CHOIR]: TYPES.WOODWINDS,
-    [TYPES.WOODWINDS]: TYPES.STRINGS
+// Type super effectiveness chain: Strings → Brass → Piano → Choir → Perc → WW → Guitar → Strings (2x damage)
+const SUPER_EFFECTIVE_CHAIN = {
+    [TYPES.STRINGS]: TYPES.BRASS,
+    [TYPES.BRASS]: TYPES.PIANO,
+    [TYPES.PIANO]: TYPES.CHOIR,
+    [TYPES.CHOIR]: TYPES.PERCUSSION,
+    [TYPES.PERCUSSION]: TYPES.WOODWINDS,
+    [TYPES.WOODWINDS]: TYPES.GUITAR,
+    [TYPES.GUITAR]: TYPES.STRINGS
 };
 
 // Character Cards
@@ -27,10 +27,10 @@ const CHARACTERS = {
     VINCENT_CHEN: {
         name: 'Vincent Chen',
         type: [TYPES.BRASS],
-        hp: 140,
+        hp: 130,
         moves: [
-            { name: 'Fanfare', cost: ['B'], damage: 20, effect: 'Not affected by weakness, resistance, or immunities.' },
-            { name: 'Drain', cost: ['B', 'B', 'X'], damage: 30, effect: 'Heal one benched character for the same amount of damage you dealt this turn.' }
+            { name: 'Fanfare', cost: 1, damage: 20, effect: 'Not affected by weakness, resistance, or immunities.' },
+            { name: 'Cherry Flavored Valve Oil', cost: 3, damage: 30, effect: 'Heal one benched character for the same amount of damage you dealt this turn.' }
         ],
         retreatCost: 3
     },
@@ -40,25 +40,25 @@ const CHARACTERS = {
         hp: 100,
         ability: {
             name: 'Get Served',
-            description: 'Your opponent\'s active character cannot have more than 3 energy attached to it at once.',
+            description: 'Your opponent\'s active character cannot have more than 3 energy attached to it at once. If they do before this card is active, they must discard until they have 3 energy.',
             type: 'passive'
         },
         moves: [
-            { name: 'Embouchure', cost: ['B'], damage: 20, effect: 'Move your energy among your characters any way you would like.' }
+            { name: 'Embouchure', cost: 1, damage: 20, effect: 'Move your energy among your characters any way you would like.' }
         ],
         retreatCost: 2
     },
     CAROLYN_ZHENG: {
         name: 'Carolyn Zheng',
         type: [TYPES.BRASS],
-        hp: 60,
+        hp: 90,
         ability: {
             name: 'Procrastinate',
-            description: 'If this character did not attack during the previous turn, do +40 damage. Stacks.',
+            description: 'If this character did not attack during the previous turn, do +40 damage. Does not stack.',
             type: 'passive'
         },
         moves: [
-            { name: 'Blast', cost: ['B', 'B', 'B'], damage: 40 }
+            { name: 'Blast', cost: 3, damage: 50 }
         ],
         retreatCost: 1
     },
@@ -67,8 +67,8 @@ const CHARACTERS = {
         type: [TYPES.BRASS],
         hp: 120,
         moves: [
-            { name: 'Heart of the Cards', cost: ['B'], damage: 0, effect: 'Name a card, then draw the top card of your deck. If the two are the same, deal 60 damage.' },
-            { name: 'Echoing Blast', cost: ['B', 'B', 'X'], damage: 40, effect: 'Deal 10 damage to each of your opponent\'s bench' }
+            { name: 'Heart of the Cards', cost: 1, damage: 0, effect: 'Name a card, then draw the top card of your deck. If the two are the same, deal 60 damage.' },
+            { name: 'Echoing Blast', cost: 3, damage: 40, effect: 'Deal 10 damage to each of your opponent\'s bench' }
         ],
         retreatCost: 2
     },
@@ -82,7 +82,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Concert Pitch', cost: ['B', 'B', 'X'], damage: 20, effect: 'If you have only brass characters on your bench, this attack does 20 more damage per brass.' }
+            { name: 'Concert Pitch', cost: 3, damage: 20, effect: 'If you have only brass characters on your bench, this attack does 20 more damage per brass.' }
         ],
         retreatCost: 2
     },
@@ -94,11 +94,11 @@ const CHARACTERS = {
         hp: 100,
         ability: {
             name: 'Bass Boost',
-            description: 'If this character has 2 Guitar energy attached to her, after this character attacks, you may draw one extra card.',
+            description: 'If this character exactly has 2 energy attached to her and is in the active slot, you may draw one extra card.',
             type: 'passive'
         },
         moves: [
-            { name: 'Full Force', cost: ['C', 'C', 'X'], damage: 30, effect: 'Your opponent\'s benched characters take 10 damage.' }
+            { name: 'Full Force', cost: 3, damage: 30, effect: 'Your opponent\'s benched characters take 10 damage.' }
         ],
         retreatCost: 1
     },
@@ -112,7 +112,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Ross Attack!', cost: ['X', 'X'], damage: 0, effect: 'If Ross is on your bench, draw two cards. If Ross is on your opponent\'s bench, do 50 damage to one of your opponent\'s characters. If Ross is on both benches, nothing happens.' }
+            { name: 'Ross Attack!', cost: 2, damage: 0, effect: 'If Ross is on your bench, draw two cards. If Ross is on your opponent\'s bench, do 50 damage to one of your opponent\'s characters. If Ross is on both benches, nothing happens.' }
         ],
         retreatCost: 2
     },
@@ -126,7 +126,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'SATB', cost: ['C', 'X'], damage: 0, effect: 'For each of your Choir type characters in play, choose one of your opponent\'s characters and do 10 damage to it.' }
+            { name: 'SATB', cost: 2, damage: 0, effect: 'For each of your Choir type characters in play, choose one of your opponent\'s characters and do 10 damage to it.' }
         ],
         retreatCost: 1
     },
@@ -135,8 +135,8 @@ const CHARACTERS = {
         type: [TYPES.CHOIR],
         hp: 100,
         moves: [
-            { name: 'Tabemono King', cost: ['X', 'X'], damage: 0, effect: 'All your characters heal by 30 damage. All your opponent\'s characters heal by 10 damage. Discard 1 energy from this character.' },
-            { name: 'Chorus', cost: ['C', 'C'], damage: 20, effect: 'Does 10 more damage per benched character you have in play.' }
+            { name: 'Tabemono King', cost: 2, damage: 0, effect: 'All your characters heal by 30 damage. All your opponent\'s characters heal by 10 damage. Discard 1 energy from this character.' },
+            { name: 'Chorus', cost: 2, damage: 20, effect: 'Does 10 more damage per benched character you have in play.' }
         ],
         retreatCost: 1
     },
@@ -146,11 +146,11 @@ const CHARACTERS = {
         hp: 110,
         ability: {
             name: 'Program Production',
-            description: 'Once during your turn, if Rachel is in the active slot, you may retrieve up to 2 number of concert programs or concert tickets from the discard into your hand.',
+            description: 'Once during your turn, you may retrieve one concert program or concert ticket from the discard into your hand.',
             type: 'activated'
         },
         moves: [
-            { name: 'SATB', cost: ['C', 'X'], damage: 0, effect: 'For each of your Choir type characters in play, choose one of your opponent\'s characters and do 10 damage to it.' }
+            { name: 'SATB', cost: 2, damage: 0, effect: 'For each of your Choir type characters in play, choose one of your opponent\'s characters and do 10 damage to it.' }
         ],
         retreatCost: 1
     },
@@ -161,8 +161,8 @@ const CHARACTERS = {
         type: [TYPES.GUITAR],
         hp: 100,
         moves: [
-            { name: 'Feedback Loop', cost: ['G', 'X'], damage: 40, effect: 'Each of your guitars take 10 damage.' },
-            { name: 'Domain Expansion', cost: ['G', 'G', 'G'], damage: 0, effect: 'Discard all energy attached to this character. Does 40 damage to all your opponent\'s characters.' }
+            { name: 'Feedback Loop', cost: 2, damage: 40, effect: 'Each of your guitars take 10 damage.' },
+            { name: 'Domain Expansion', cost: 3, damage: 0, effect: 'Discard all energy attached to this character. Does 40 damage to all your opponent\'s characters.' }
         ],
         retreatCost: 2
     },
@@ -171,8 +171,8 @@ const CHARACTERS = {
         type: [TYPES.GUITAR],
         hp: 100,
         moves: [
-            { name: 'Fingerstyle', cost: ['G', 'X'], damage: 0, effect: 'You can only use this attack if this character did not use Power Chord during your last turn. Flip 8 coins and do 10 damage for each heads.' },
-            { name: 'Power Chord', cost: ['G', 'G', 'G'], damage: 70, effect: 'Discard 2 Energy from this character.' }
+            { name: 'Fingerstyle', cost: 2, damage: 0, effect: 'You can only use this attack if this character did not use Power Chord during your last turn. Flip 8 coins and do 20 damage for each heads.' },
+            { name: 'Power Chord', cost: 3, damage: 70, effect: 'Discard 2 Energy from this character.' }
         ],
         retreatCost: 2
     },
@@ -181,8 +181,8 @@ const CHARACTERS = {
         type: [TYPES.GUITAR],
         hp: 110,
         moves: [
-            { name: 'Packet Loss', cost: ['X', 'X'], damage: 0, effect: 'Flip a coin for each energy attached to your opponent\'s active character. For each tails, discard one of those energies.' },
-            { name: 'Distortion', cost: ['G', 'G', 'G'], damage: 30, effect: 'During your next turn, your plucked strings do 40 more damage.' }
+            { name: 'Packet Loss', cost: 2, damage: 0, effect: 'Flip a coin for each energy attached to your opponent\'s active character. For each tails, discard one of those energies.' },
+            { name: 'Distortion', cost: 3, damage: 20, effect: 'During your next turn, your plucked strings do 40 more damage.' }
         ],
         retreatCost: 2
     },
@@ -191,22 +191,22 @@ const CHARACTERS = {
         type: [TYPES.GUITAR],
         hp: 100,
         moves: [
-            { name: 'Strum', cost: ['G'], damage: 20 },
-            { name: 'Surprise Delivery', cost: ['G', 'G'], damage: 0, effect: 'You may look at the top three cards of your deck and attach any energy you find there to one of your benched characters. Do 20 damage for each card attached in this way.' }
+            { name: 'Strum', cost: 1, damage: 20 },
+            { name: 'Surprise Delivery', cost: 2, damage: 0, effect: 'You may look at the top three cards of your deck, reveal all energy cards, and put them in your hand. Do 10 damage for each card you put in your hand this way.' }
         ],
         retreatCost: 2
     },
     MEYA_GAO: {
         name: 'Meya Gao',
         type: [TYPES.GUITAR],
-        hp: 110,
+        hp: 120,
         ability: {
             name: 'I See Your Soul',
             description: 'If Meya is damaged by any character, that character and Meya both cannot attack during the next turn.',
             type: 'passive'
         },
         moves: [
-            { name: 'Distortion', cost: ['G', 'G', 'G'], damage: 30, effect: 'During your next turn, your plucked strings do 40 more damage.' }
+            { name: 'Distortion', cost: 3, damage: 20, effect: 'During your next turn, your plucked strings do 40 more damage.' }
         ],
         retreatCost: 2
     },
@@ -215,8 +215,8 @@ const CHARACTERS = {
         type: [TYPES.GUITAR],
         hp: 110,
         moves: [
-            { name: 'Guitar Shredding', cost: ['G', 'G'], damage: 10, effect: 'Discard all guitar energy attached to this character. For each energy, discard 2 cards from the top of your opponent\'s deck.' },
-            { name: 'Distortion', cost: ['G', 'G', 'G'], damage: 30, effect: 'During your next turn, your plucked strings do 40 more damage.' }
+            { name: 'Guitar Shredding', cost: 2, damage: 20, effect: 'Discard all energy attached to this character. For each energy, discard 1 card from the top of your opponent\'s deck.' },
+            { name: 'Distortion', cost: 3, damage: 20, effect: 'During your next turn, your plucked strings do 40 more damage.' }
         ],
         retreatCost: 2
     },
@@ -226,13 +226,27 @@ const CHARACTERS = {
         hp: 110,
         ability: {
             name: 'Royalties',
-            description: 'If Grace is active, any opposing character with any AVGE patch or t-shirt takes 10 damage.',
+            description: 'If Grace is active, any opposing character with any AVGE showcase sticker or t-shirt takes 10 damage at the end of every turn.',
             type: 'passive'
         },
         moves: [
-            { name: 'Feedback Loop', cost: ['G', 'X'], damage: 40, effect: 'Each of your plucked strings take 10 damage.' }
+            { name: 'Feedback Loop', cost: 2, damage: 40, effect: 'Each of your strings take 10 damage.' }
         ],
         retreatCost: 2
+    },
+    BEN_CHEREK: {
+        name: 'Ben Cherek',
+        type: [TYPES.GUITAR],
+        hp: 120,
+        ability: {
+            name: 'Loudmouth',
+            description: 'When you first play this character, you may switch it with your active character for free.',
+            type: 'passive'
+        },
+        moves: [
+            { name: 'Feedback Loop', cost: 2, damage: 40, effect: 'Each of your plucked strings take 10 damage.' }
+        ],
+        retreatCost: 1
     },
 
     // PERCUSSION CHARACTERS
@@ -241,8 +255,8 @@ const CHARACTERS = {
         type: [TYPES.PERCUSSION],
         hp: 100,
         moves: [
-            { name: 'Stick Trick', cost: ['P', 'X'], damage: 10, effect: 'Swap with one of your Benched characters for free.' },
-            { name: 'Tricky Rhythms', cost: ['P', 'P', 'X'], damage: 0, effect: 'Choose both one of your opponents benched characters and one of your own benched characters to discard all energy from. Then, choose a different one of your opponent\'s characters and do 10 damage to it for each energy discarded. (You must be able to discard at least one energy from each character to use this attack.)' }
+            { name: 'Stick Trick', cost: 2, damage: 10, effect: 'Swap with one of your Benched characters for free.' },
+            { name: 'Tricky Rhythms', cost: 3, damage: 0, effect: 'Each character in play with a tool attached to it takes 40 damage.' }
         ],
         retreatCost: 2
     },
@@ -256,17 +270,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Cymbal Crash', cost: ['P'], damage: 20 }
-        ],
-        retreatCost: 2
-    },
-    GEORGE_CHUDLEY: {
-        name: 'George Chudley',
-        type: [TYPES.PERCUSSION],
-        hp: 100,
-        moves: [
-            { name: 'Rimshot', cost: ['P', 'X'], damage: 0, effect: 'Roll a d6. If you roll a 1-4, do 60 damage.' },
-            { name: 'Snowball Effect', cost: ['X', 'X', 'X'], damage: 0, effect: 'Roll a d6 until you get a 6. Your attack does 10 damage multiplied by the number of non-6 rolls you got.' }
+            { name: 'Cymbal Crash', cost: 1, damage: 20 }
         ],
         retreatCost: 2
     },
@@ -275,8 +279,8 @@ const CHARACTERS = {
         type: [TYPES.PERCUSSION],
         hp: 100,
         moves: [
-            { name: 'Ragebaited', cost: ['P', 'X'], damage: 10, effect: 'When below 50% hp this attack does +20 damage. When below 20% hp, +60 damage.' },
-            { name: 'Ominous Chimes', cost: ['P', 'X', 'X'], damage: 0, effect: 'Shuffle this character and all cards attached to it back into your deck. At the end of your opponent\'s next turn, their Active character takes 50 damage.' }
+            { name: 'Ragebaited', cost: 2, damage: 10, effect: 'When 50 hp or below, this attack does 30 more damage. When 20 hp or below, 80 more damage.' },
+            { name: 'Ominous Chimes', cost: 3, damage: 0, effect: 'Shuffle this character and all cards attached to it back into your deck. At the end of your opponent\'s next turn, their Active character takes 50 damage.' }
         ],
         retreatCost: 2
     },
@@ -285,8 +289,8 @@ const CHARACTERS = {
         type: [TYPES.PERCUSSION],
         hp: 100,
         moves: [
-            { name: 'Percussion Ensemble', cost: ['P'], damage: 0, effect: 'Search your deck for up to 2 Percussion Energies and attach all of them to any other percussionist.' },
-            { name: 'Four Mallets', cost: ['P', 'X', 'X'], damage: 0, effect: 'Four individual attacks of 10 damage each.' }
+            { name: 'Percussion Ensemble', cost: 1, damage: 0, effect: 'Attach up to two energy to one of your benched Percussion types.' },
+            { name: 'Four Mallets', cost: 3, damage: 0, effect: 'Four individual attacks of 10 damage each.' }
         ],
         retreatCost: 2
     },
@@ -295,8 +299,8 @@ const CHARACTERS = {
         type: [TYPES.PERCUSSION],
         hp: 100,
         moves: [
-            { name: 'Rimshot', cost: ['P', 'X'], damage: 0, effect: 'Roll a d6. If you roll a 1-4, do 60 damage.' },
-            { name: 'Stickshot', cost: ['P', 'X', 'X'], damage: 0, effect: 'Roll a d6. If you roll a 1-4, roll once more. Damage is equal to (10 * the highest number you rolled)' }
+            { name: 'Rimshot', cost: 2, damage: 0, effect: 'Roll a d6. If you roll a 1-4, do 60 damage.' },
+            { name: 'Stickshot', cost: 3, damage: 0, effect: 'Roll a d6. If you roll a 1-4, roll once more. Damage is equal to (10 * the highest number you rolled)' }
         ],
         retreatCost: 2
     },
@@ -310,7 +314,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Four Hands', cost: ['K', 'K', 'X'], damage: 30, effect: '+30 damage if you have another piano on your bench.' }
+            { name: 'Four Hands Piano', cost: 3, damage: 30, effect: '+30 damage if you have a piano on your bench.' }
         ],
         retreatCost: 2
     },
@@ -319,8 +323,8 @@ const CHARACTERS = {
         type: [TYPES.PERCUSSION],
         hp: 100,
         moves: [
-            { name: 'Rudiments', cost: ['P'], damage: 10, effect: '10 damage to one of your opponent\'s characters of your choice.' },
-            { name: 'Drum Kid Workshop', cost: ['P', 'P'], damage: 0, effect: 'Choose any Percussion type in play\'s attack to use as this attack. After attacking you must move all energy from this character to the character whose attack you used.' }
+            { name: 'Rudiments', cost: 1, damage: 10, effect: '10 damage to one of your opponent\'s characters of your choice.' },
+            { name: 'Drum Kid Workshop', cost: 2, damage: 0, effect: 'Choose any Percussion type in play\'s attack to use as this attack. After attacking you must move all energy from this character to the character whose attack you used.' }
         ],
         retreatCost: 2
     },
@@ -330,11 +334,11 @@ const CHARACTERS = {
         hp: 110,
         ability: {
             name: 'Algorithm',
-            description: 'If your opponent plays a card that has a duplicate on your bench, they take 50 damage.',
+            description: 'If your opponent plays a card that has a duplicate on your bench, they take 60 damage.',
             type: 'passive'
         },
         moves: [
-            { name: 'Rimshot', cost: ['P', 'X'], damage: 0, effect: 'Roll a d6. If you roll a 1-4, do 60 damage.' }
+            { name: 'Rimshot', cost: 2, damage: 0, effect: 'Roll a d6. If you roll a 1-4, do 60 damage.' }
         ],
         retreatCost: 2
     },
@@ -344,11 +348,11 @@ const CHARACTERS = {
         hp: 100,
         ability: {
             name: 'Fermentation',
-            description: 'While active, you may attach three energy (instead of one) to one to your characters.',
+            description: 'While this card is active, you may attach two energy per turn (instead of one) to one of your benched characters.',
             type: 'passive'
         },
         moves: [
-            { name: 'Stick Trick', cost: ['P', 'X'], damage: 10, effect: 'Swap with one of your Benched characters for free.' }
+            { name: 'Stick Trick', cost: 2, damage: 10, effect: 'Swap with one of your Benched characters for free.' }
         ],
         retreatCost: 2
     },
@@ -357,8 +361,8 @@ const CHARACTERS = {
         type: [TYPES.PERCUSSION],
         hp: 110,
         moves: [
-            { name: 'Stick Trick', cost: ['P', 'X'], damage: 10, effect: 'Swap with one of your Benched characters for free.' },
-            { name: 'Excused Absence', cost: ['X', 'X', 'X'], damage: 0, effect: 'Heal 30 damage from each of your characters.' }
+            { name: 'Stick Trick', cost: 2, damage: 10, effect: 'Swap with one of your Benched characters for free.' },
+            { name: 'Excused Absence', cost: 3, damage: 0, effect: 'Heal 30 damage from each of your characters.' }
         ],
         retreatCost: 2
     },
@@ -374,7 +378,7 @@ const CHARACTERS = {
             type: 'activated'
         },
         moves: [
-            { name: 'Damper Pedal', cost: ['K', 'K'], damage: 20, effect: 'Damage of your opponent\'s next attack is halved (rounded up)' }
+            { name: 'Damper Pedal', cost: 2, damage: 20, effect: 'Damage of your opponent\'s next attack is halved (rounded up)' }
         ],
         retreatCost: 2
     },
@@ -383,8 +387,8 @@ const CHARACTERS = {
         type: [TYPES.PIANO],
         hp: 110,
         moves: [
-            { name: 'Glissando', cost: ['K'], damage: 30, effect: 'You cannot use this attack during your next turn.' },
-            { name: 'Improv', cost: ['X', 'X', 'X'], damage: 0, effect: 'Discard the top 3 cards of your opponent\'s deck. 40 damage x the number of item cards discarded.' }
+            { name: 'Glissando', cost: 1, damage: 30, effect: 'You cannot use this attack during your next turn.' },
+            { name: 'Improv', cost: 3, damage: 50, effect: 'Discard the top 3 cards of your opponent\'s deck. 20 more damage for each item discarded.' }
         ],
         retreatCost: 2
     },
@@ -394,11 +398,11 @@ const CHARACTERS = {
         hp: 100,
         ability: {
             name: 'Moe moe kyun~!',
-            description: 'All maids\' attacks do 20 more damage.',
+            description: 'All maids\' attacks (on both sides) do 10 more damage.',
             type: 'passive'
         },
         moves: [
-            { name: 'Separate Hands', cost: ['K'], damage: 0, effect: '0 damage. During your next turn, this attack does 40 damage.' }
+            { name: 'Separate Hands', cost: 1, damage: 0, effect: '0 damage. During your next turn, this attack does 40 damage.' }
         ],
         retreatCost: 2
     },
@@ -408,11 +412,11 @@ const CHARACTERS = {
         hp: 110,
         ability: {
             name: 'Nausicaa\'s Undying Heartbeat',
-            description: 'If this character is at 40 or less health at the end of a turn, heal 20 damage from each of your characters.',
+            description: 'If this character is at 50 or less health at the end of a turn, heal 20 damage from each of your characters.',
             type: 'passive'
         },
         moves: [
-            { name: 'Grand Piano', cost: ['K', 'X', 'X'], damage: 60, effect: 'You may only use this attack if the stadium in play is a performance stadium.' }
+            { name: 'Grand Piano', cost: 3, damage: 40, effect: '+20 damage if the stadium in play is a performance hall.' }
         ],
         retreatCost: 2
     },
@@ -426,7 +430,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Four Hands', cost: ['K', 'K', 'X'], damage: 30, effect: '+30 damage if you have another piano on your bench.' }
+            { name: 'Four Hands', cost: 3, damage: 30, effect: '+30 damage if you have another piano on your bench.' }
         ],
         retreatCost: 2
     },
@@ -440,7 +444,7 @@ const CHARACTERS = {
             type: 'activated'
         },
         moves: [
-            { name: 'Damper Pedal', cost: ['K', 'K'], damage: 20, effect: 'Damage of your opponent\'s next attack is halved (rounded up)' }
+            { name: 'Damper Pedal', cost: 2, damage: 20, effect: 'Damage of your opponent\'s next attack is halved (rounded up)' }
         ],
         retreatCost: 2
     },
@@ -449,8 +453,8 @@ const CHARACTERS = {
         type: [TYPES.PIANO],
         hp: 110,
         moves: [
-            { name: 'Small Ensemble Committee', cost: ['K', 'K'], damage: 0, effect: 'If a small ensemble committee member is in play, this does 10 damage to each opposing character. If at least three are in play it does 30 damage to each opposing character.' },
-            { name: 'Grand Piano', cost: ['K', 'X', 'X'], damage: 60, effect: 'You may only use this attack if the stadium in play is a performance stadium.' }
+            { name: 'Small Ensemble Committee', cost: 2, damage: 0, effect: 'If a small ensemble committee member is in play, this does 10 damage to each opposing character. If at least three are in play it does 30 damage to each opposing character.' },
+            { name: 'Grand Piano', cost: 3, damage: 40, effect: '+20 damage if the stadium in play is a performance hall.' }
         ],
         retreatCost: 2
     },
@@ -459,8 +463,8 @@ const CHARACTERS = {
         type: [TYPES.PIANO],
         hp: 100,
         moves: [
-            { name: 'Glissando', cost: ['K'], damage: 30, effect: 'You cannot use this attack during your next turn.' },
-            { name: 'Inventory Management', cost: ['X', 'X'], damage: 0, effect: 'Flip a coin for every card in your hand. For each heads, do 10 damage to one of your opponent\'s characters.' }
+            { name: 'Glissando', cost: 1, damage: 30, effect: 'You cannot use this attack during your next turn.' },
+            { name: 'Inventory Management', cost: 2, damage: 0, effect: 'Flip a coin for every card in your hand. For each heads, do 10 damage to one of your opponent\'s characters.' }
         ],
         retreatCost: 2
     },
@@ -474,7 +478,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Three Hand Technique', cost: ['K'], damage: 0, effect: 'Four individual attacks of 10 damage each' }
+            { name: 'Three Hand Technique', cost: 1, damage: 0, effect: 'Four individual attacks of 10 damage each' }
         ],
         retreatCost: 2
     },
@@ -483,8 +487,8 @@ const CHARACTERS = {
         type: [TYPES.PIANO],
         hp: 110,
         moves: [
-            { name: 'Racket Smash', cost: ['X', 'X'], damage: 10, effect: 'Discard an energy from one of your opponent\'s benched characters.' },
-            { name: 'Four Hands', cost: ['K', 'K', 'X'], damage: 30, effect: '+30 damage if you have another piano on your bench.' }
+            { name: 'Racket Smash', cost: 2, damage: 10, effect: 'Discard an energy from one of your opponent\'s benched characters.' },
+            { name: 'Four Hands', cost: 3, damage: 30, effect: '+30 damage if you have another piano on your bench.' }
         ],
         retreatCost: 2
     },
@@ -498,9 +502,23 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Damper Pedal', cost: ['K', 'K'], damage: 20, effect: 'Damage of your opponent\'s next attack is halved (rounded up)' }
+            { name: 'Damper Pedal', cost: 2, damage: 20, effect: 'Damage of your opponent\'s next attack is halved (rounded up)' }
         ],
         retreatCost: 2
+    },
+    JOSHUA_KOU: {
+        name: 'Joshua Kou',
+        type: [TYPES.PIANO],
+        hp: 90,
+        ability: {
+            name: 'Category Theory',
+            description: 'If you have at least 2 cards in your hand, and all of them are Items, you may reveal them, shuffle them into your deck, and draw 3 cards.',
+            type: 'activated'
+        },
+        moves: [
+            { name: 'Hands separately', cost: 1, damage: 0, effect: '0 damage. During your next turn, this attack does 40 damage.' }
+        ],
+        retreatCost: 1
     },
 
     // STRINGS CHARACTERS
@@ -509,12 +527,12 @@ const CHARACTERS = {
         type: [TYPES.STRINGS],
         hp: 100,
         ability: {
-            name: 'Borrow',
+            name: 'Borrow a Bow',
             description: 'Once per turn you may move one energy from another string player to this character.',
             type: 'activated'
         },
         moves: [
-            { name: 'Triple Stop', cost: ['S', 'X', 'X'], damage: 0, effect: 'Flip three coins. Does 30 damage for each heads.' }
+            { name: 'Triple Stop', cost: 3, damage: 0, effect: 'Flip three coins. Does 30 damage for each heads.' }
         ],
         retreatCost: 2
     },
@@ -523,8 +541,8 @@ const CHARACTERS = {
         type: [TYPES.STRINGS],
         hp: 100,
         moves: [
-            { name: 'Foresight', cost: ['X'], damage: 0, effect: 'Look at the top three cards of your opponent\'s deck and rearrange them in any way you like.' },
-            { name: 'Snap Pizz', cost: ['S', 'S', 'X'], damage: 20, effect: 'Discard 2 energy from one of your opponent\'s characters.' }
+            { name: 'Foresight', cost: 1, damage: 0, effect: 'Look at the top three cards of your opponent\'s deck and rearrange them in any way you like.' },
+            { name: 'Snap Pizz', cost: 3, damage: 20, effect: 'Discard 2 energy from one of your opponent\'s characters.' }
         ],
         retreatCost: 1
     },
@@ -538,7 +556,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Seal Attack', cost: ['S', 'X'], damage: 30 }
+            { name: 'Seal Attack', cost: 2, damage: 30 }
         ],
         retreatCost: 1
     },
@@ -547,8 +565,8 @@ const CHARACTERS = {
         type: [TYPES.STRINGS],
         hp: 100,
         moves: [
-            { name: 'Open Strings', cost: ['S'], damage: 10, effect: 'Draw a card. If it is an energy, attach it to this character.' },
-            { name: 'VocaRock!!', cost: ['S', 'S'], damage: 20, effect: 'If Miku Otamatone is attached to this character, 50 additional damage.' }
+            { name: 'Open Strings', cost: 1, damage: 10, effect: 'Draw a card. If it is an item, you must use it.' },
+            { name: 'VocaRock!!', cost: 2, damage: 20, effect: 'If Miku Otamatone is attached to this character, 50 additional damage.' }
         ],
         retreatCost: 1
     },
@@ -557,18 +575,18 @@ const CHARACTERS = {
         type: [TYPES.STRINGS],
         hp: 110,
         moves: [
-            { name: 'Midday Nap', cost: ['X'], damage: 0, effect: 'Heal 20 damage.' },
-            { name: 'Snap Pizz', cost: ['S', 'S', 'X'], damage: 20, effect: 'Discard 2 energy from one of your opponent\'s characters.' }
+            { name: 'Midday Nap', cost: 1, damage: 0, effect: 'Heal 20 damage.' },
+            { name: 'Snap Pizz', cost: 3, damage: 20, effect: 'Discard 2 energy from one of your opponent\'s characters.' }
         ],
         retreatCost: 2
     },
     GABRIEL_CHEN: {
         name: 'Gabriel Chen',
         type: [TYPES.STRINGS],
-        hp: 80,
+        hp: 90,
         moves: [
-            { name: 'You know what it is', cost: ['X'], damage: 0, effect: 'Only usable if he has exactly 60 health. Does 70 damage to any of the opponent\'s characters.' },
-            { name: 'Harmonics', cost: ['S', 'S'], damage: 0, effect: 'Flip two coins. If both of them are heads, do 80 damage. Otherwise, do nothing.' }
+            { name: 'You know what it is', cost: 1, damage: 0, effect: 'Only usable if he has exactly 60 health. Does 70 damage to any of the opponent\'s characters.' },
+            { name: 'Harmonics', cost: 2, damage: 0, effect: 'Flip two coins. If both of them are heads, do 80 damage. Otherwise, do nothing.' }
         ],
         retreatCost: 2
     },
@@ -578,11 +596,11 @@ const CHARACTERS = {
         hp: 100,
         ability: {
             name: 'Cleric Spell',
-            description: 'During your turn, you may choose to shuffle one card from your discard pile back into your deck.',
+            description: 'Once during your turn, you may choose to shuffle one card from your discard pile back into your deck.',
             type: 'activated'
         },
         moves: [
-            { name: 'Vibrato', cost: ['S', 'X'], damage: 30 }
+            { name: 'Vibrato', cost: 2, damage: 30 }
         ],
         retreatCost: 1
     },
@@ -596,7 +614,7 @@ const CHARACTERS = {
             type: 'activated'
         },
         moves: [
-            { name: 'Triple Stop', cost: ['S', 'X', 'X'], damage: 0, effect: 'Flip three coins. Does 30 damage for each heads.' }
+            { name: 'Triple Stop', cost: 3, damage: 0, effect: 'Flip three coins. Does 30 damage for each heads.' }
         ],
         retreatCost: 1
     },
@@ -610,7 +628,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Triple Stop', cost: ['S', 'X', 'X'], damage: 0, effect: 'Flip three coins. Does 30 damage for each heads.' }
+            { name: 'Triple Stop', cost: 3, damage: 0, effect: 'Flip three coins. Does 30 damage for each heads.' }
         ],
         retreatCost: 1
     },
@@ -624,7 +642,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Vibrato', cost: ['S', 'X'], damage: 30 }
+            { name: 'Vibrato', cost: 2, damage: 30 }
         ],
         retreatCost: 2
     },
@@ -633,8 +651,8 @@ const CHARACTERS = {
         type: [TYPES.STRINGS],
         hp: 100,
         moves: [
-            { name: '440 Hz', cost: ['X'], damage: 0, effect: 'Attach an energy from your hand to one of your benched characters.' },
-            { name: 'Song Voting', cost: ['S', 'S', 'S'], damage: 0, effect: 'Each player places two cards from their hand face down and reveals them at the same time. If there are an even number of energy cards, do 50 damage to active character. If there are an even number of character cards, do 50 damage to one benched character. (zero is an even number)' }
+            { name: '440 Hz', cost: 1, damage: 0, effect: 'Attach an energy to one of your benched characters.' },
+            { name: 'Song Voting', cost: 3, damage: 0, effect: 'Each player places two cards from their hand face down and reveals them at the same time. If there are an even number of supporter cards, do 50 damage to your opponent\'s active character. If there are an even number of character cards, do 50 damage to your opponent\'s benched character. (zero is an even number)' }
         ],
         retreatCost: 2
     },
@@ -643,8 +661,8 @@ const CHARACTERS = {
         type: [TYPES.STRINGS],
         hp: 100,
         moves: [
-            { name: 'Gacha Gaming', cost: ['X'], damage: 0, effect: 'You may choose to draw cards, taking 20 damage for each card drawn. If you get AVGE Birb, heal all damage from this card, and you get to keep all other cards you drew. If you ever choose to stop drawing cards, you must shuffle them back into the deck. You may not knock yourself out doing this.' },
-            { name: 'Snap Pizz', cost: ['S', 'S', 'X'], damage: 20, effect: 'Discard 2 energy from one of your opponent\'s characters.' }
+            { name: 'Gacha Gaming', cost: 1, damage: 0, effect: 'You may choose to draw cards, taking 20 damage for each card drawn. If you get AVGE Birb, heal all damage from this card, and you get to keep all other cards you drew. If you ever choose to stop drawing cards, you must shuffle them back into the deck. You may not knock yourself out doing this.' },
+            { name: 'Snap Pizz', cost: 3, damage: 20, effect: 'Discard 2 energy from one of your opponent\'s characters.' }
         ],
         retreatCost: 2
     },
@@ -658,7 +676,37 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Vibrato', cost: ['S', 'X'], damage: 30 }
+            { name: 'Vibrato', cost: 2, damage: 30 }
+        ],
+        retreatCost: 1
+    },
+    MICHAEL_TU: {
+        name: 'Michael Tu',
+        type: [TYPES.STRINGS],
+        hp: 100,
+        moves: [
+            { name: '440 Hz', cost: 1, damage: 0, effect: 'Attach an energy to one of your benched characters.' },
+            { name: 'Synchro Summon', cost: 2, damage: 0, effect: 'Reveal cards from the top of your deck until a character card is revealed. If that character is not a String type, do 20 damage, and put the character in your hand and shuffle the other cards into your deck.' }
+        ],
+        retreatCost: 1
+    },
+    IRIS_YANG: {
+        name: 'Iris Yang',
+        type: [TYPES.STRINGS],
+        hp: 100,
+        moves: [
+            { name: 'Open Strings', cost: 1, damage: 10, effect: 'Draw a card. If it is an item, you must use it.' },
+            { name: 'Spike', cost: 3, damage: 10, effect: 'Discard an energy from each of your opponent\'s benched characters.' }
+        ],
+        retreatCost: 1
+    },
+    JULIA_CECCARELLI: {
+        name: 'Julia Ceccarelli',
+        type: [TYPES.STRINGS],
+        hp: 100,
+        moves: [
+            { name: 'Photograph', cost: 1, damage: 0, effect: 'Look at your opponent\'s hand. You may choose an Item card there and use its effects as this attack.' },
+            { name: 'Snap Pizz', cost: 3, damage: 20, effect: 'Discard 2 energy from one of your opponent\'s characters.' }
         ],
         retreatCost: 1
     },
@@ -674,7 +722,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Overblow', cost: ['W', 'X'], damage: 40, effect: 'You take 10 recoil damage' }
+            { name: 'Overblow', cost: 2, damage: 40, effect: 'You take 10 recoil damage' }
         ],
         retreatCost: 2
     },
@@ -683,8 +731,8 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 100,
         moves: [
-            { name: 'Analysis Paralysis', cost: ['X'], damage: 0, effect: 'Reveal your opponents hand and choose to shuffle one of their cards back into their deck.' },
-            { name: 'Screech!', cost: ['W', 'X', 'X'], damage: 0, effect: 'Roll a d6. Damage is equal to 10 + (10 * the number on the D6)' }
+            { name: 'Analysis Paralysis', cost: 1, damage: 0, effect: 'Reveal your opponents hand and choose to shuffle one of their cards back into their deck.' },
+            { name: 'Screech!', cost: 3, damage: 0, effect: 'Roll a d6. Damage is equal to 10 + (10 * the number on the D6)' }
         ],
         retreatCost: 1
     },
@@ -694,11 +742,11 @@ const CHARACTERS = {
         hp: 90,
         ability: {
             name: 'Synesthesia',
-            description: 'When this character is on your bench, you may treat exactly one of your Woodwinds energy as any other energy while attacking.',
+            description: 'If all of your characters in play are a different type, they each take 10 less damage from any attack.',
             type: 'passive'
         },
         moves: [
-            { name: 'Multiphonics', cost: ['W', 'W', 'W'], damage: 0, effect: 'Flip two coins. If both of them are heads, do 40 damage to each of your opponent\'s benched characters. If both of them are tails, do 80 damage to your opponent\'s active character.' }
+            { name: 'Multiphonics', cost: 3, damage: 0, effect: 'Flip two coins. If both of them are heads, do 40 damage to each of your opponent\'s benched characters. If both of them are tails, do 80 damage to your opponent\'s active character.' }
         ],
         retreatCost: 1
     },
@@ -707,8 +755,8 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 90,
         moves: [
-            { name: 'Overblow', cost: ['W', 'X'], damage: 40, effect: 'You take 10 recoil damage' },
-            { name: 'Speedrun Central', cost: ['W', 'X', 'X'], damage: 20, effect: 'If this character came off the bench during this turn, 40 additional damage.' }
+            { name: 'Overblow', cost: 2, damage: 40, effect: 'You take 10 recoil damage' },
+            { name: 'Speedrun Central', cost: 3, damage: 20, effect: 'If this character came off the bench during this turn, 70 additional damage.' }
         ],
         retreatCost: 1
     },
@@ -717,8 +765,8 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 100,
         moves: [
-            { name: 'Trickster', cost: ['X'], damage: 0, effect: 'During your opponent\'s next turn, they do 20 more damage. During your next turn, this character does 50 more damage.' },
-            { name: 'Sparkling run', cost: ['W', 'X'], damage: 20, effect: 'Heal 20 damage.' }
+            { name: 'Trickster', cost: 1, damage: 0, effect: 'During your opponent\'s next turn, their attacks do 20 more damage. During your next turn, this character does 60 more damage.' },
+            { name: 'Sparkling run', cost: 2, damage: 20, effect: 'Heal 20 damage.' }
         ],
         retreatCost: 1
     },
@@ -727,8 +775,8 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 100,
         moves: [
-            { name: 'Double Tongue', cost: ['W'], damage: 0, effect: 'Two individual attacks of 10 damage each.' },
-            { name: 'Banana Bread for Everyone!', cost: ['X', 'X', 'X'], damage: 0, effect: 'Heal 30 damage from each of your characters. Discard an energy from this character' }
+            { name: 'Double Tongue', cost: 1, damage: 0, effect: 'Two individual attacks of 10 damage each.' },
+            { name: 'Banana Bread for Everyone!', cost: 3, damage: 0, effect: 'Heal 30 damage from each of your characters. Discard an energy from this character' }
         ],
         retreatCost: 1
     },
@@ -737,8 +785,8 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 100,
         moves: [
-            { name: 'Overblow', cost: ['W', 'X'], damage: 40, effect: 'You take 10 recoil damage' },
-            { name: 'Wipeout', cost: ['W', 'W', 'X'], damage: 0, effect: 'Deal 60 damage to three different characters in play, one of which must be yourself.' }
+            { name: 'Overblow', cost: 2, damage: 40, effect: 'You take 10 recoil damage' },
+            { name: 'Wipeout', cost: 3, damage: 0, effect: 'Deal 60 damage to three different characters in play, one of which must be yourself.' }
         ],
         retreatCost: 2
     },
@@ -748,11 +796,11 @@ const CHARACTERS = {
         hp: 110,
         ability: {
             name: 'Immense Aura',
-            description: 'Take 20 less damage from each attack.',
+            description: 'Take 10 less damage from each attack.',
             type: 'passive'
         },
         moves: [
-            { name: 'Screech!', cost: ['W', 'X', 'X'], damage: 0, effect: 'Roll a d6. Damage is equal to 10 + (10 * the number on the D6)' }
+            { name: 'Screech!', cost: 3, damage: 0, effect: 'Roll a d6. Damage is equal to 10 + (10 * the number on the D6)' }
         ],
         retreatCost: 2
     },
@@ -761,8 +809,8 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 90,
         moves: [
-            { name: 'Sparkling Run', cost: ['W', 'X'], damage: 20, effect: 'Heal 20 damage.' },
-            { name: 'Clarinet Solo', cost: ['W', 'W'], damage: 0, effect: 'If she is the only WW character in play, this attack does 80 damage.' }
+            { name: 'Sparkling Run', cost: 2, damage: 20, effect: 'Heal 20 damage.' },
+            { name: 'Clarinet Solo', cost: 2, damage: 0, effect: 'If she is the only WW character in play, this attack does 60 damage.' }
         ],
         retreatCost: 1
     },
@@ -776,7 +824,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Screech!', cost: ['W', 'X', 'X'], damage: 0, effect: 'Roll a d6. Damage is equal to 10 + (10 * the number on the D6)' }
+            { name: 'Screech!', cost: 3, damage: 0, effect: 'Roll a d6. Damage is equal to 10 + (10 * the number on the D6)' }
         ],
         retreatCost: 1
     },
@@ -785,8 +833,8 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 90,
         moves: [
-            { name: 'Sparkling Run', cost: ['W', 'X'], damage: 20, effect: 'Heal 20 damage.' },
-            { name: 'Piccolo Solo', cost: ['W', 'W'], damage: 0, effect: 'If they are the only WW character in play, this attack does 80 damage.' }
+            { name: 'Sparkling Run', cost: 2, damage: 20, effect: 'Heal 20 damage.' },
+            { name: 'Piccolo Solo', cost: 2, damage: 0, effect: 'If he is the only WW character in play, this attack does 60 damage.' }
         ],
         retreatCost: 1
     },
@@ -796,11 +844,11 @@ const CHARACTERS = {
         hp: 110,
         ability: {
             name: 'Share the Pain',
-            description: 'Whenever one of your other characters takes damage, you may instead inflict up to 20 of that damage onto this character. (Note that you may not knock out this character by using this ability.)',
+            description: 'Whenever one of your other characters takes damage, you may instead inflict up to 30 of that damage onto this character. (Note that you may not knock out this character by using this ability. This applies after all status effects)',
             type: 'passive'
         },
         moves: [
-            { name: 'Screech!', cost: ['W', 'X', 'X'], damage: 0, effect: 'Roll a d6. Damage is equal to 10 + (10 * the number on the D6)' }
+            { name: 'Screech!', cost: 3, damage: 0, effect: 'Roll a d6. Damage is equal to 10 + (10 * the number on the D6)' }
         ],
         retreatCost: 2
     },
@@ -809,8 +857,8 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 100,
         moves: [
-            { name: 'Circular Breathing', cost: ['W'], damage: 10, effect: 'During your next turn, this attack does 10 more damage. Effect stacks if used consecutively.' },
-            { name: 'SN2', cost: ['W', 'W'], damage: 20, effect: 'Only works when your opponent\'s bench is not full. 20 damage, and shuffle one of your opponent\'s benched characters back into their deck.' }
+            { name: 'Circular Breathing', cost: 1, damage: 10, effect: 'During your next turn, this attack does 10 more damage. Effect stacks if used consecutively.' },
+            { name: 'E2 Reaction', cost: 2, damage: 20, effect: 'Only works when your opponent\'s bench has at least 2 members. 20 damage; you may choose one of your opponent\'s benched characters to shuffle back into their deck. (Damage does NOT save.)' }
         ],
         retreatCost: 1
     },
@@ -819,8 +867,8 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 100,
         moves: [
-            { name: 'Outreach', cost: ['W'], damage: 0, effect: 'Search through your deck for any character card, and put it on top of your deck.' },
-            { name: 'Overblow', cost: ['W', 'X'], damage: 40, effect: 'You take 10 recoil damage' }
+            { name: 'Outreach', cost: 1, damage: 0, effect: 'Search through your deck for any character card, and put it on top of your deck.' },
+            { name: 'Overblow', cost: 2, damage: 40, effect: 'You take 10 recoil damage' }
         ],
         retreatCost: 1
     },
@@ -830,11 +878,11 @@ const CHARACTERS = {
         hp: 110,
         ability: {
             name: 'Do Not Disturb',
-            description: 'If this character is on your bench, reduce any damage taken from attacks by 30 damage.',
+            description: 'If this character is on your bench, she takes 20 less damage from each attack.',
             type: 'passive'
         },
         moves: [
-            { name: 'Overblow', cost: ['W', 'X'], damage: 40, effect: 'You take 10 recoil damage' }
+            { name: 'Overblow', cost: 2, damage: 40, effect: 'You take 10 recoil damage' }
         ],
         retreatCost: 2
     },
@@ -843,8 +891,8 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 100,
         moves: [
-            { name: 'Circular Breathing', cost: ['W'], damage: 10, effect: 'During your next turn, this attack does 10 more damage. Effect stacks if used consecutively.' },
-            { name: 'SE lord', cost: ['W', 'W', 'W'], damage: 0, effect: 'Heal all damage from your opponent\'s bench. However much total damage healed is inflicted upon your opponent\'s active character.' }
+            { name: 'Circular Breathing', cost: 1, damage: 10, effect: 'During your next turn, this attack does 10 more damage. Effect stacks if used consecutively.' },
+            { name: 'SE lord', cost: 3, damage: 0, effect: 'Heal all damage from your opponent\'s bench. However much total damage healed is inflicted upon your opponent\'s active character.' }
         ],
         retreatCost: 1
     },
@@ -853,8 +901,8 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 100,
         moves: [
-            { name: 'Double Tongue', cost: ['W'], damage: 0, effect: 'Two individual attacks of 10 damage each' },
-            { name: 'Artist Alley', cost: ['X', 'X', 'X'], damage: 0, effect: 'Discard any amount of concert posters from your hand and do 30 damage for each.' }
+            { name: 'Double Tongue', cost: 1, damage: 0, effect: 'Two individual attacks of 10 damage each' },
+            { name: 'Artist Alley', cost: 3, damage: 0, effect: 'Discard any amount of concert programs or concert tickets from your hand and do 30 damage for each.' }
         ],
         retreatCost: 1
     },
@@ -868,7 +916,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Multiphonics', cost: ['W', 'W', 'W'], damage: 0, effect: 'Flip two coins. If both of them are heads, do 40 damage to each of your opponent\'s benched characters. If both of them are tails, do 80 damage to your opponent\'s active character.' }
+            { name: 'Multiphonics', cost: 3, damage: 0, effect: 'Flip two coins. If both of them are heads, do 40 damage to each of your opponent\'s benched characters. If both of them are tails, do 80 damage to your opponent\'s active character.' }
         ],
         retreatCost: 2
     }
@@ -946,12 +994,6 @@ const TOOLS = {
         effect: 'Forced Recruitment: Attached character gains Maid status while holding this tool.',
         grantStatus: 'Maid'
     },
-    CONDUCTOR_BATON: {
-        name: 'Conductor Baton',
-        type: 'tool',
-        effect: 'Conducting Auditions: Grants Conductor status while attached.',
-        grantStatus: 'Conductor'
-    },
     KIKI_HEADBAND: {
         name: 'Kiki\'s Headband',
         type: 'tool',
@@ -984,9 +1026,9 @@ const TOOLS = {
 };
 
 // Statuses
-// Maid: immune to small attacks (<=10 damage), +10 healing from each matcha
+// Maid: This character is immune to all attacks of 10 base damage or less (before debuffs).
 // Conductor: This character gains 30 health, but the retreat cost is doubled. Each music stand used gives +10 additional damage
-// Goon: -20 damage per attack, Every time this character is attacked, reflects 20 damage
+// Goon: This character gains 20 health, and each music stand used grants this character +10 damage, but their retreat cost is doubled.
 // Arranger: Whenever damaged, you may retrieve an item card from your discard pile. When knocked out, you may search your discard pile for one musescore file and put it in your hand.
 
 // Non-Tool Items
@@ -995,13 +1037,13 @@ const ITEMS = {
         name: 'Otamatone',
         type: 'item',
         subtype: 'special_energy',
-        effect: 'During this turn only, your active character has one additional typeless energy attached.'
+        effect: 'Wildcard: During this turn only, your active character has one additional energy attached. Cannot be played on the first turn.'
     },
     MIKU_OTAMATONE: {
         name: 'Miku Otamatone',
         type: 'item',
         subtype: 'special_energy',
-        effect: 'Only works in concert halls. During this turn only, your active character has two additional typeless energy attached.'
+        effect: 'Only works in concert halls. During this turn only, your active character has two additional energy attached. Cannot be played on the first turn.'
     },
     MATCHA_LATTE: {
         name: 'Matcha Latte',
@@ -1017,42 +1059,30 @@ const ITEMS = {
         name: 'Printed Score',
         type: 'item',
         subtype: 'sheet_music',
-        effect: 'Active character does +10 damage this turn'
+        effect: 'Opponent reveals their entire hand.'
     },
     ANNOTATED_SCORE: {
         name: 'Annotated Score',
         type: 'item',
         subtype: 'sheet_music',
-        effect: 'Active character does +20 damage this turn. Discard 1 energy from the active character.'
+        effect: 'Opponent reveals 2 cards from hand; choose one to discard.'
     },
     MUSESCORE_FILE: {
         name: 'Standard Musescore File',
         type: 'item',
         subtype: 'musescore',
-        effect: 'Opponent reveals 3 cards from hand; choose one to discard.'
+        effect: 'You can only play this if your active character is an Arranger. Draw two cards from the top of your deck.'
     },
     CORRUPTED_FILE: {
-        name: 'Corrupted File',
+        name: 'Corrupted Musescore File',
         type: 'item',
         subtype: 'musescore',
-        effect: 'You can only play this if you have an Arranger in play. Opponent shuffles their hand into deck and draws 3 cards.'
+        effect: 'You can only play this if your active character is an Arranger. Draw two cards from the bottom of your deck.'
     },
     CAST_RESERVE: {
         name: 'Cast Reserve',
         type: 'item',
-        effect: 'Flip a coin. Heads: opponent shuffles a benched character into deck. Tails: opponent chooses one to shuffle.'
-    },
-    FOLDING_STAND: {
-        name: 'Folding Stand',
-        type: 'item',
-        subtype: 'music_stand',
-        effect: 'Shuffle up to three energy cards from your discard pile into your deck.'
-    },
-    BUO_STAND: {
-        name: 'BUO Stand',
-        type: 'item',
-        subtype: 'music_stand',
-        effect: 'Put one energy on top of your deck and one on the bottom.'
+        effect: 'Flip a coin. Heads: you choose one of your opponent\'s benched characters to shuffle into their deck. Tails: opponent chooses one of their benched characters to shuffle into their deck.'
     },
     ICE_SKATES: {
         name: 'Ice Skates',
@@ -1089,17 +1119,12 @@ const ITEMS = {
     AVGE_BIRB: {
         name: 'AVGE Birb',
         type: 'item',
-        effect: 'Remove all opponent tool cards. During your next turn, your active character takes +20 damage from attacks.'
+        effect: 'Remove all tool cards from your opponent\'s active and benched characters. During your next turn, your active character takes +20 damage from attacks.'
     },
     CAMERA: {
         name: 'Camera',
         type: 'item',
-        effect: 'Retrieve one Supporter card from your discard pile into your hand.'
-    },
-    VIDEO_CAMERA: {
-        name: 'Video Camera',
-        type: 'item',
-        effect: 'Retrieve two energy cards from your discard pile into your hand.'
+        effect: 'Shuffle up to two Supporter cards from your discard pile into your deck.'
     },
     RAFFLE_TICKET: {
         name: 'Raffle Ticket',
@@ -1123,7 +1148,7 @@ const SUPPORTERS = {
     MICHELLE: {
         name: 'Michelle',
         type: 'supporter',
-        effect: 'Discord Announcement: Move up to two energy to any characters using energy from hand or board.'
+        effect: 'Discord Announcement: Opponent discards down to 2 cards in hand.'
     },
     WILL: {
         name: 'Will',
@@ -1155,15 +1180,4 @@ const SUPPORTERS = {
         type: 'supporter',
         effect: 'Section Leader: Choose a type, search for up to 2 characters of that type in your deck, and put them all on your bench.'
     }
-};
-
-// Energy Cards
-const ENERGY_TYPES = {
-    WOODWINDS: { name: 'Woodwinds Energy', type: 'energy', energyType: TYPES.WOODWINDS },
-    PERCUSSION: { name: 'Percussion Energy', type: 'energy', energyType: TYPES.PERCUSSION },
-    PIANO: { name: 'Piano Energy', type: 'energy', energyType: TYPES.PIANO },
-    STRINGS: { name: 'Strings Energy', type: 'energy', energyType: TYPES.STRINGS },
-    GUITAR: { name: 'Guitar Energy', type: 'energy', energyType: TYPES.GUITAR },
-    CHOIR: { name: 'Choir Energy', type: 'energy', energyType: TYPES.CHOIR },
-    BRASS: { name: 'Brass Energy', type: 'energy', energyType: TYPES.BRASS }
 };

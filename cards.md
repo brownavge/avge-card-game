@@ -220,9 +220,6 @@
 ### Maid Outfit
 - While equipped, this character does not take damage from any attacks that do 20 damage to it or less and gains Maid status. For each active or benched maid, at the start of each turn a player can look at the top 2 cards of their deck, play up to one matcha, and shuffle the rest back in.
 
-### Conductor Baton
-- While equipped, this character gains 30 health and Conductor status, but the retreat cost is doubled.
-
 ### Kiki's Headband
 - Retreat cost -1 (Free or cheaper switches).
 
