@@ -887,6 +887,25 @@ body {
     padding-bottom: 10px;
 }
 
+.card-search-container {
+    margin-bottom: 15px;
+}
+
+.card-search-container input {
+    width: 100%;
+    padding: 10px;
+    border: 2px solid #667eea;
+    border-radius: 5px;
+    font-size: 14px;
+    box-sizing: border-box;
+}
+
+.card-search-container input:focus {
+    outline: none;
+    border-color: #764ba2;
+    box-shadow: 0 0 5px rgba(118, 75, 162, 0.3);
+}
+
 .tab-btn {
     padding: 8px 15px;
     background: #f0f0f0;

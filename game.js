@@ -445,8 +445,16 @@ class GameState {
         // Arranger status: retrieve item when damaged
         if (characterCard.status && characterCard.status.includes('Arranger') && finalDamage > 0) {
             this.log(`${characterCard.name} may retrieve an item from discard pile (Arranger status)`);
-            const player = this.players[this.currentPlayer];
-            selectFromDiscard(player, 'item');
+            const ownerPlayerNum = this.findPlayerWithCharacter(characterCard);
+            if (ownerPlayerNum) {
+                const ownerPlayer = this.players[ownerPlayerNum];
+                selectFromDiscard(ownerPlayer, 'item', 1, (selectedCards) => {
+                    if (selectedCards.length > 0) {
+                        ownerPlayer.hand.push(...selectedCards);
+                        this.log(`${characterCard.name} retrieved ${selectedCards[0].name} from discard (Arranger)`);
+                    }
+                });
+            }
         }
 
         // Check if knocked out
@@ -557,16 +565,11 @@ class GameState {
             const card = player.deck.shift();
             player.hand.push(card);
 
-            // Yuelin Hu's Musical Cat - Draw AVGE birb → discard + 30 damage
+            // Yuelin Hu's Musical Cat - Draw AVGE birb → discard
             if (card.name === 'AVGE Birb' && [player.active, ...player.bench].some(c => c && c.name === 'Yuelin Hu')) {
                 this.log('Yuelin Hu\'s Musical Cat: Drew AVGE Birb!');
                 player.discard.push(card);
                 player.hand = player.hand.filter(c => c.id !== card.id);
-
-                if (player.active) {
-                    game.nextTurnEffects[playerNum].avgebBirbPenalty = -30; // Negative for bonus
-                    this.log('Musical Cat: Active will deal +30 damage next turn!');
-                }
             }
 
             // Alice Wang's Euclidean Algorithm - Hand size equalization
@@ -574,13 +577,15 @@ class GameState {
             const opponent = this.players[opponentNum];
             const hasAlice = [player.active, ...player.bench].some(c => c && c.name === 'Alice Wang');
 
-            if (hasAlice && player.hand.length > opponent.hand.length + 2) {
-                const discardCount = player.hand.length - opponent.hand.length;
-                for (let j = 0; j < discardCount && player.hand.length > 0; j++) {
-                    const discarded = player.hand.pop();
-                    player.discard.push(discarded);
+            if (hasAlice && opponent.hand.length > player.hand.length) {
+                const discardCount = opponent.hand.length - player.hand.length;
+                // Let the opponent (who just ended their turn) choose which cards to discard
+                if (discardCount > 0) {
+                    showOpponentDiscardChoice(opponentNum, discardCount, () => {
+                        this.log(`Alice Wang's Euclidean Algorithm: Player ${opponentNum} discarded ${discardCount} cards to equalize hand sizes`);
+                    });
+                    // Note: This will be async, but that's okay for end of turn
                 }
-                this.log(`Alice Wang's Euclidean Algorithm: Discarded ${discardCount} cards to equalize hand sizes`);
             }
         }
         this.render();
@@ -1857,7 +1862,7 @@ function executeItemEffect(card) {
             return true; // Wait for modal
 
         // Draw items
-        case 'Concert ticket':
+        case 'Concert Ticket':
             // Account for the fact that this card is still in hand when calculating
             // After this item is discarded, we want player to have 4 cards total
             const cardsToDraw = Math.max(0, 4 - (player.hand.length - 1));
@@ -2129,6 +2134,63 @@ function selectMultipleFromDiscard(player, cardType, count, callback) {
     showDiscardSelectionModal(player, eligibleCards, cardType, Math.min(count, eligibleCards.length), callback);
 }
 
+// Show discard pile contents (read-only view)
+function showDiscardPileModal(playerNum) {
+    const player = game.players[playerNum];
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    const playerLabel = playerNum === game.currentPlayer ? 'Your' : "Opponent's";
+
+    let html = `<h2>${playerLabel} Discard Pile (${player.discard.length} cards)</h2>`;
+    
+    if (player.discard.length === 0) {
+        html += `<p>The discard pile is empty.</p>`;
+    } else {
+        html += `<div class="discard-pile-view" style="max-height: 400px; overflow-y: auto;">`;
+        
+        // Group cards by type for better organization
+        const cardsByType = {
+            character: [],
+            item: [],
+            tool: [],
+            supporter: [],
+            stadium: [],
+            energy: []
+        };
+
+        player.discard.forEach(card => {
+            if (card && card.name) {
+                const type = card.cardType || 'other';
+                if (cardsByType[type]) {
+                    cardsByType[type].push(card);
+                } else {
+                    cardsByType[type] = [card];
+                }
+            }
+        });
+
+        // Display cards by type
+        Object.keys(cardsByType).forEach(type => {
+            if (cardsByType[type].length > 0) {
+                html += `<h3 style="margin-top: 10px; text-transform: capitalize;">${type}s (${cardsByType[type].length})</h3>`;
+                html += `<div style="margin-left: 10px;">`;
+                cardsByType[type].forEach(card => {
+                    html += `<div style="padding: 5px; border-bottom: 1px solid #ccc;">${card.name}</div>`;
+                });
+                html += `</div>`;
+            }
+        });
+
+        html += `</div>`;
+    }
+
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Close</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
 // Modal for selecting cards from discard pile
 function showDiscardSelectionModal(player, cards, cardType, maxSelect, callback) {
     const modal = document.getElementById('action-modal');
@@ -2328,12 +2390,12 @@ function discardOpponentCard(cardId) {
         game.log(`Opponent discarded ${card.name}`, 'info');
     }
 
-    // Discard the Musescore file or other hand disruption card
+    // Discard the Musescore file, Fake email, or Annotated Score card
     const player = game.players[game.currentPlayer];
-    const musescoreCard = player.hand.find(c => c.name === 'Musescore file' || c.name === 'Fake email');
-    if (musescoreCard) {
-        player.hand = player.hand.filter(c => c.id !== musescoreCard.id);
-        player.discard.push(musescoreCard);
+    const disruptionCard = player.hand.find(c => c.name === 'Musescore file' || c.name === 'Fake email' || c.name === 'Annotated Score');
+    if (disruptionCard) {
+        player.hand = player.hand.filter(c => c.id !== disruptionCard.id);
+        player.discard.push(disruptionCard);
     }
 
     closeModal('action-modal');
@@ -2421,6 +2483,14 @@ function confirmOpponentDiscard() {
     });
 
     game.log(`Opponent discarded ${selectedCardIds.length} card${selectedCardIds.length > 1 ? 's' : ''}`, 'info');
+
+    // Discard the Michelle supporter card
+    const player = game.players[game.currentPlayer];
+    const michelleCard = player.hand.find(c => c.name === 'Michelle');
+    if (michelleCard) {
+        player.hand = player.hand.filter(c => c.id !== michelleCard.id);
+        player.discard.push(michelleCard);
+    }
 
     // Call callback if provided
     if (game.tempSelections.opponentDiscardCallback) {
@@ -3727,6 +3797,51 @@ function selectSATBTarget(targetId) {
     }
 }
 
+// You know what it is: Select any opponent character for 70 damage
+function showYouKnowWhatItIsTargetSelection(opponent, attacker) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const allOpponentChars = [opponent.active, ...opponent.bench].filter(c => c);
+
+    let html = `<h2>You know what it is</h2>`;
+    html += `<p>Choose any opponent character to deal 70 damage:</p>`;
+    html += `<div class="target-selection">`;
+
+    allOpponentChars.forEach(char => {
+        const currentHp = char.hp - (char.damage || 0);
+        html += `<div class="target-option" onclick="selectYouKnowWhatItIsTarget('${char.id}', '${attacker.id}')">
+            ${char.name} - ${currentHp}/${char.hp} HP
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function selectYouKnowWhatItIsTarget(targetId, attackerId) {
+    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const opponent = game.players[opponentNum];
+    const player = game.players[game.currentPlayer];
+
+    const target = [opponent.active, ...opponent.bench].find(c => c && c.id === targetId);
+    const attacker = [player.active, ...player.bench].find(c => c && c.id === attackerId);
+
+    if (target && attacker) {
+        const move = { name: 'You know what it is', damage: 70 };
+        const damage = calculateDamage(attacker, target, 70, move);
+        game.dealDamage(target, damage);
+        game.log(`You know what it is: ${damage} damage to ${target.name}!`, 'damage');
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
 function playSupporter(cardId) {
     const player = game.players[game.currentPlayer];
     const card = player.hand.find(c => c.id === cardId);
@@ -3844,12 +3959,15 @@ function executeSupporterEffect(card) {
             return true; // Wait for modal
 
         case 'Angel':
-            // Give active goon status
-            if (player.active) {
-                if (!player.active.status) player.active.status = [];
-                player.active.status.push('Goon');
-                game.log(`${player.active.name} gained Goon status`, 'info');
-            }
+            // Give all characters Goon status
+            const allCharsForGoon = [player.active, ...player.bench].filter(c => c);
+            allCharsForGoon.forEach(char => {
+                if (!char.status) char.status = [];
+                if (!char.status.includes('Goon')) {
+                    char.status.push('Goon');
+                    game.log(`${char.name} gained Goon status`, 'info');
+                }
+            });
             break;
 
         case 'Lio':
@@ -4384,9 +4502,14 @@ function executeAttack(attackerId, moveName, targetId) {
             break;
 
         case 'You know what it is':
-            // Only usable if exactly 60 health, 70 damage
+            // Only usable if exactly 60 health, 70 damage to any opponent character
             if (attacker.hp - (attacker.damage || 0) === 60) {
-                executeDamageAttack(attacker, target, move);
+                const opponentChars = [opponent.active, ...opponent.bench].filter(c => c);
+                if (opponentChars.length > 0) {
+                    showYouKnowWhatItIsTargetSelection(opponent, attacker);
+                } else {
+                    game.log('You know what it is: No valid targets');
+                }
             } else {
                 game.log('You know what it is can only be used at exactly 60 HP!');
             }
@@ -5460,10 +5583,11 @@ function executeAttack(attackerId, moveName, targetId) {
             game.dealDamage(target, cherryDamage);
             game.log(`Cherry Flavored Valve Oil: ${cherryDamage} damage dealt!`, 'damage');
 
-            const benchToHeal = player.bench.find(c => c);
-            if (benchToHeal) {
-                game.dealDamage(benchToHeal, -cherryDamage);
-                game.log(`Healed ${benchToHeal.name} for ${cherryDamage}!`);
+            const benchedForCherry = player.bench.filter(c => c);
+            if (benchedForCherry.length > 0) {
+                showCherryHealSelection(player, benchedForCherry, cherryDamage);
+            } else {
+                game.log('Cherry Flavored Valve Oil: No benched characters to heal', 'info');
             }
             break;
 
@@ -5542,11 +5666,10 @@ function calculateDamage(attacker, defender, baseDamage, move) {
                     game.log(`Salomon DECI: Rolled ${game.stadium.diceRoll}`, 'info');
                 }
 
-                const modifier = (game.stadium.diceRoll - 4) * 10;
+                // On 1-2: +10 damage, On 3-6: -10 damage
+                const modifier = (game.stadium.diceRoll <= 2) ? 10 : -10;
                 damage = Math.max(0, damage + modifier);
-                if (modifier !== 0) {
-                    game.log(`Salomon DECI: ${modifier > 0 ? '+' : ''}${modifier} damage modifier`);
-                }
+                game.log(`Salomon DECI: ${modifier > 0 ? '+' : ''}${modifier} damage modifier`);
             }
         } else if (game.stadium.name === 'Steinert Basement Studio') {
             // String Ensemble: +10 damage if 2+ string players in play (across both sides)
@@ -5671,12 +5794,6 @@ function calculateDamage(attacker, defender, baseDamage, move) {
         game.log(`Item bonus: +${game.attackModifiers[game.currentPlayer].damageBonus} damage`);
     }
 
-    // Apply AVGE Birb penalty (from previous turn)
-    if (game.nextTurnEffects[game.currentPlayer].avgebBirbPenalty && attacker === currentPlayer.active) {
-        damage += game.nextTurnEffects[game.currentPlayer].avgebBirbPenalty;
-        game.log(`AVGE Birb penalty: +${game.nextTurnEffects[game.currentPlayer].avgebBirbPenalty} damage to active`);
-    }
-
     // Cavin's SCP: Takes 2x damage from Sophia and Pascal
     if (defender.name === 'Cavin' && (attacker.name === 'Sophia' || attacker.name === 'Pascal')) {
         damage *= 2;
@@ -5728,6 +5845,15 @@ function calculateDamage(attacker, defender, baseDamage, move) {
         damage = Math.floor(damage / 2);
         game.log('Damper Pedal: Attack halved!');
         game.nextTurnEffects[game.currentPlayer].damperPedal = false;
+    }
+
+    // AVGE Birb penalty - defender takes +20 damage
+    if (game.nextTurnEffects[defenderPlayerNum] && game.nextTurnEffects[defenderPlayerNum].avgebBirbPenalty) {
+        if (defender === game.players[defenderPlayerNum].active) {
+            damage += game.nextTurnEffects[defenderPlayerNum].avgebBirbPenalty;
+            game.log(`AVGE Birb penalty: +${game.nextTurnEffects[defenderPlayerNum].avgebBirbPenalty} damage`);
+            game.nextTurnEffects[defenderPlayerNum].avgebBirbPenalty = 0;
+        }
     }
 
     // Bokai Bi's Algorithm - Opponent plays duplicate → 50 damage (handled elsewhere)
@@ -6081,12 +6207,23 @@ function showClericSpellModal(player) {
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
+    // Filter out any undefined or invalid cards from discard pile
+    const validCards = player.discard.filter(card => card && card.name);
+
+    if (validCards.length === 0) {
+        alert('No valid cards in discard pile!');
+        closeModal('action-modal');
+        return;
+    }
+
     let html = `<h2>Cleric Spell: Shuffle Card Back</h2>`;
     html += `<p>Select card from discard pile to shuffle back into deck:</p>`;
     html += `<div class="target-selection">`;
 
-    player.discard.forEach((card, idx) => {
-        html += `<div class="target-option" onclick="executeClericSpell(${idx})">
+    validCards.forEach((card, idx) => {
+        // Find the actual index in the discard pile
+        const actualIdx = player.discard.indexOf(card);
+        html += `<div class="target-option" onclick="executeClericSpell(${actualIdx})">
             ${card.name}
         </div>`;
     });
@@ -6100,7 +6237,7 @@ function showClericSpellModal(player) {
 function executeClericSpell(cardIdx) {
     const player = game.players[game.currentPlayer];
 
-    if (player.discard[cardIdx]) {
+    if (player.discard[cardIdx] && player.discard[cardIdx].name) {
         const card = player.discard.splice(cardIdx, 1)[0];
         player.deck.push(card);
         game.shuffleDeck(game.currentPlayer);
@@ -6165,6 +6302,14 @@ function setupEventListeners() {
     // Begin attack phase button
     document.getElementById('begin-attack-btn').addEventListener('click', () => {
         game.beginAttackPhase();
+    });
+
+    // Discard pile click handlers
+    document.querySelectorAll('.discard-pile').forEach(pile => {
+        pile.addEventListener('click', () => {
+            const playerNum = parseInt(pile.getAttribute('data-player'));
+            showDiscardPileModal(playerNum);
+        });
     });
 
     // Close modals
@@ -6282,6 +6427,12 @@ function setupDeckBuilderListeners() {
         btn.onclick = () => switchCardTab(btn.dataset.type);
     });
 
+    // Search input
+    const searchInput = document.getElementById('card-search-input');
+    if (searchInput) {
+        searchInput.oninput = () => filterCardPool(searchInput.value);
+    }
+
     // Save and Clear buttons
     const saveBtn = document.getElementById('save-deck-btn');
     const clearBtn = document.getElementById('clear-deck-btn');
@@ -6307,7 +6458,10 @@ function switchCardTab(cardType) {
     displayCardPool(cardType);
 }
 
+let currentCardType = 'character';
+
 function displayCardPool(cardType) {
+    currentCardType = cardType;
     const cardPool = document.getElementById('card-pool');
     cardPool.innerHTML = '';
     cardPool.className = 'card-pool';
@@ -6339,6 +6493,23 @@ function displayCardPool(cardType) {
     cards.forEach(card => {
         const cardElement = createPoolCardElement(card, cardType);
         cardPool.appendChild(cardElement);
+    });
+}
+
+function filterCardPool(searchTerm) {
+    const cardPool = document.getElementById('card-pool');
+    const cards = cardPool.querySelectorAll('.pool-card');
+    const lowerSearch = searchTerm.toLowerCase();
+
+    cards.forEach(cardElement => {
+        const cardName = cardElement.querySelector('.pool-card-name').textContent.toLowerCase();
+        const cardEffect = cardElement.querySelector('.pool-card-effect')?.textContent.toLowerCase() || '';
+        
+        if (cardName.includes(lowerSearch) || cardEffect.includes(lowerSearch)) {
+            cardElement.style.display = '';
+        } else {
+            cardElement.style.display = 'none';
+        }
     });
 }
 
@@ -6804,6 +6975,39 @@ function applyDrainHeal(charId, healAmount) {
         const actualHeal = Math.min(healAmount, char.damage);
         char.damage -= actualHeal;
         game.log(`Drain: ${char.name} healed ${actualHeal} damage!`, 'heal');
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showCherryHealSelection(player, benchedChars, healAmount) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Cherry Flavored Valve Oil: Heal Benched Character</h2>`;
+    html += `<p>Select a benched character to heal ${healAmount} damage:</p>`;
+    html += `<div class="target-selection">`;
+
+    benchedChars.forEach(char => {
+        const currentHp = char.hp - (char.damage || 0);
+        html += `<div class="target-option" onclick="applyCherryHeal('${char.id}', ${healAmount})">
+            ${char.name} - ${currentHp}/${char.hp} HP
+        </div>`;
+    });
+
+    html += `</div>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function applyCherryHeal(charId, healAmount) {
+    const player = game.players[game.currentPlayer];
+    const char = [player.active, ...player.bench].find(c => c && c.id === charId);
+
+    if (char) {
+        game.dealDamage(char, -healAmount);
+        game.log(`Cherry Flavored Valve Oil: ${char.name} healed ${healAmount} HP!`, 'heal');
     }
 
     closeModal('action-modal');
