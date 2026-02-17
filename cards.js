@@ -392,9 +392,9 @@ const CHARACTERS = {
         type: [TYPES.PIANO],
         hp: 110,
         ability: {
-            name: 'Nausicaa\'s Undying Heartbeat',
-            description: 'If this character is at 50 or less health at the end of a turn, heal 20 damage from each of your characters.',
-            type: 'passive'
+              name: 'Nausicaa\'s Undying Heartbeat',
+              description: '(Ability) Nausicaa\'s Undying Heartbeat: If this character is at 50 or less health at the end of your turn, heal 20 damage from each of your characters.',
+              type: 'passive'
         },
         moves: [
             { name: 'Grand Piano', cost: 3, damage: 40, effect: '+20 damage if the stadium in play is a performance hall.' }
@@ -473,8 +473,8 @@ const CHARACTERS = {
         ],
         retreatCost: 2
     },
-    SOPHIA_WANG: {
-        name: 'Sophia Wang',
+    SOPHIA_S_WANG: {
+        name: 'Sophia S. Wang',
         type: [TYPES.PIANO],
         hp: 110,
         ability: {
@@ -637,8 +637,8 @@ const CHARACTERS = {
         ],
         retreatCost: 2
     },
-    SOPHIA_WANG: {
-        name: 'Sophia S. Wang',
+    SOPHIA_Y_WANG: {
+        name: 'Sophia Y. Wang',
         type: [TYPES.STRINGS],
         hp: 100,
         moves: [

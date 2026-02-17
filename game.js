@@ -56,7 +56,11 @@ class GameState {
         this.applyEndOfTurnEffects();
 
         // Clear next turn effects for the player who just finished their turn
+        const preservedTricksterSelfBonus = this.nextTurnEffects[previousPlayer].tricksterSelfBonus;
         this.nextTurnEffects[previousPlayer] = {};
+        if (preservedTricksterSelfBonus) {
+            this.nextTurnEffects[previousPlayer].tricksterSelfBonus = preservedTricksterSelfBonus;
+        }
 
         // After player 1's first turn, set isFirstTurn to false
         if (this.currentPlayer === 1 && this.isFirstTurn) {
@@ -113,7 +117,7 @@ class GameState {
 
         // Katie Xiang's Nausicaa's Undying Heartbeat - At ≤40 HP, heal 20 from all
         [player.active, ...player.bench].filter(c => c).forEach(char => {
-            if ((char.name === 'Katie Xiang' || char.name === 'Katie') && (char.hp - (char.damage || 0)) <= 40) {
+            if (char.name === 'Katie Xiang' && (char.hp - (char.damage || 0)) <= 40) {
                 // Heal 20 damage from all your characters
                 [player.active, ...player.bench].filter(c => c).forEach(healChar => {
                     if (healChar.damage && healChar.damage > 0) {
@@ -131,6 +135,32 @@ class GameState {
             this.log('Yanwan Zhu\'s Bass Boost: Drew 1 card!');
             player.active.shouldDrawFromBassBoost = false;
         }
+
+        // Katie Xiang's Nausicaa's Undying Heartbeat - At ≤40 HP, heal 20 from all (end of her player's turn)
+        [player.active, ...player.bench].filter(c => c && c.name === 'Katie Xiang').forEach(katie => {
+            const currentHP = katie.hp - (katie.damage || 0);
+            if (currentHP <= 40 && currentHP > 0) {
+                [player.active, ...player.bench].filter(c => c).forEach(char => {
+                    if (char.damage && char.damage > 0) {
+                        const healAmount = Math.min(20, char.damage);
+                        char.damage -= healAmount;
+                        this.log(`Katie's Nausicaa's Undying Heartbeat: ${char.name} healed ${healAmount}!`, 'heal');
+                    }
+                });
+            }
+        });
+
+        // Trickster opponent bonus lasts only for this turn
+        if (this.nextTurnEffects[this.currentPlayer].tricksterOpponentBonus) {
+            this.nextTurnEffects[this.currentPlayer].tricksterOpponentBonus = 0;
+        }
+
+        // Clear Trickster self bonus after the turn ends
+        [player.active, ...player.bench].filter(c => c).forEach(char => {
+            if (char.tricksterBonusThisTurn) {
+                char.tricksterBonusThisTurn = 0;
+            }
+        });
     }
 
     beginAttackPhase() {
@@ -169,7 +199,7 @@ class GameState {
         // Apply Fiona's "Getting dressed" - while on bench, active gains maid status
         [1, 2].forEach(playerNum => {
             const player = this.players[playerNum];
-            const hasFionaOnBench = player.bench.some(char => char && (char.name === 'Fiona Li' || char.name === 'Fiona'));
+            const hasFionaOnBench = player.bench.some(char => char && char.name === 'Fiona Li');
 
             if (player.active) {
                 if (hasFionaOnBench) {
@@ -200,7 +230,7 @@ class GameState {
 
         // Matthew Wang's Pot of Greed - flip coin at turn start, heads = may draw
         if (player.active && player.active.name === 'Matthew Wang') {
-            const coin = Math.random() < 0.5;
+            const coin = flipCoin();
             game.log(`Matthew Wang's Pot of Greed: Flipped ${coin ? 'heads' : 'tails'}`);
             if (coin) {
                 const shouldDraw = confirm('Matthew Wang\'s Pot of Greed: Heads! Draw an extra card?');
@@ -213,18 +243,27 @@ class GameState {
             }
         }
 
-        // Trickster delayed damage
-        if (game.nextTurnEffects[this.currentPlayer].tricksterDamage) {
-            const targetId = game.nextTurnEffects[this.currentPlayer].tricksterTarget;
-            const target = player.active && player.active.id === targetId ? player.active :
-                          player.bench.find(c => c && c.id === targetId);
+        // Trickster self-bonus (applies on your next turn)
+        if (game.nextTurnEffects[this.currentPlayer].tricksterSelfBonus) {
+            const { attackerId, bonus } = game.nextTurnEffects[this.currentPlayer].tricksterSelfBonus;
+            const targetChar = player.active && player.active.id === attackerId ? player.active :
+                player.bench.find(c => c && c.id === attackerId);
 
-            if (target) {
-                this.dealDamage(target, game.nextTurnEffects[this.currentPlayer].tricksterDamage);
-                game.log(`Trickster: ${target.name} takes ${game.nextTurnEffects[this.currentPlayer].tricksterDamage} delayed damage!`, 'damage');
+            if (targetChar) {
+                targetChar.tricksterBonusThisTurn = bonus;
+                game.log(`Trickster: ${targetChar.name} will do +${bonus} damage this turn`, 'info');
             }
-            game.nextTurnEffects[this.currentPlayer].tricksterDamage = 0;
+
+            delete game.nextTurnEffects[this.currentPlayer].tricksterSelfBonus;
         }
+
+        // Expire Circular Breathing bonus if it wasn't used on the intended turn
+        [player.active, ...player.bench].filter(c => c).forEach(char => {
+            if (char.circularBreathingBonus && char.circularBreathingBonusTurn && game.turn > char.circularBreathingBonusTurn) {
+                char.circularBreathingBonus = 0;
+                char.circularBreathingBonusTurn = null;
+            }
+        });
 
         // Arrangement procrastination delayed damage
         if (game.nextTurnEffects[this.currentPlayer].arrangementProcrastination) {
@@ -296,7 +335,7 @@ class GameState {
         }
 
         // Grace Zhao's Royalties ability
-        if (opponent.active && (opponent.active.name === 'Grace Zhao' || opponent.active.name === 'Grace')) {
+        if (opponent.active && opponent.active.name === 'Grace Zhao') {
             if (player.active && player.active.attachedTools) {
                 const hasAVGEItem = player.active.attachedTools.some(tool =>
                     tool.name === 'AVGE T-Shirt' || tool.name === 'AVGE T-shirt' || tool.name === 'AVGE Showcase Sticker' || tool.name === 'AVGE showcase sticker'
@@ -319,6 +358,21 @@ class GameState {
         // Apply defensive abilities and status effects
         let finalDamage = amount;
 
+        const isAttackDamage = source && this.lastAttackSource && source.id === this.lastAttackSource.id && this.phase === 'attack' && characterCard.id !== source.id;
+        let playerNum = this.findPlayerWithCharacter(characterCard);
+        let playerObj = this.players[playerNum];
+
+        if (isAttackDamage) {
+            if (game.nextTurnEffects[game.currentPlayer].tricksterOpponentBonus) {
+                finalDamage += game.nextTurnEffects[game.currentPlayer].tricksterOpponentBonus;
+                game.log(`Trickster: +${game.nextTurnEffects[game.currentPlayer].tricksterOpponentBonus} damage this turn`);
+            }
+            if (source.tricksterBonusThisTurn) {
+                finalDamage += source.tricksterBonusThisTurn;
+                game.log(`Trickster: ${source.name} gains +${source.tricksterBonusThisTurn} damage`);
+            }
+        }
+
         // Goon status: -20 damage, reflects 20 damage
         if (characterCard.status && characterCard.status.includes('Goon')) {
             finalDamage -= 20;
@@ -333,49 +387,34 @@ class GameState {
         // Conductor status: double healing from music stands (handled elsewhere)
 
         // Maid status: immune to <=20 damage
-        if (characterCard.status && characterCard.status.includes('Maid') && finalDamage <= 20) {
+        if (characterCard.status && characterCard.status.includes('Maid') && finalDamage <= 20 && characterCard.name !== 'Kana Takizawa') {
             this.log(`${characterCard.name} is protected by Maid status!`);
             return;
         }
 
-        // Character-specific abilities
-        if (characterCard.name === 'Kana') {
-            finalDamage -= 20; // Immense Aura
-            this.log('Kana\'s Immense Aura reduces damage by 20');
-        }
+        if (isAttackDamage) {
+            // Character-specific abilities
+            if (characterCard.name === 'Kana Takizawa') {
+                finalDamage -= 10; // Immense Aura
+                this.log('Kana\'s Immense Aura reduces damage by 10');
+            }
 
-        // Check for synergy abilities (Katie/Mason, Sophia/Pascal)
-        const player = this.findPlayerWithCharacter(characterCard);
-        if ((characterCard.name === 'Katie Xiang' || characterCard.name === 'Katie') && this.isCharacterInPlay(['Mason Yu', 'Mason'], player)) {
-            finalDamage -= 10;
-            this.log('Katie takes 10 less damage (Mason in play)');
-        }
-        if ((characterCard.name === 'Mason Yu' || characterCard.name === 'Mason') && this.isCharacterInPlay(['Katie Xiang', 'Katie'], player)) {
-            finalDamage -= 10;
-            this.log('Mason takes 10 less damage (Katie in play)');
-        }
-        if ((characterCard.name === 'Sophia S. Wang' || characterCard.name === 'Sophia Y. Wang' || characterCard.name === 'Sophia') && this.isCharacterInPlay(['Pascal Kim', 'Pascal'], player)) {
-            finalDamage -= 10;
-            this.log('Sophia takes 10 less damage (Pascal in play - Love wins)');
-        }
-        if ((characterCard.name === 'Pascal Kim' || characterCard.name === 'Pascal') && this.isCharacterInPlay(['Sophia S. Wang', 'Sophia Y. Wang', 'Sophia'], player)) {
-            finalDamage -= 10;
-            this.log('Pascal takes 10 less damage (Sophia in play - Love wins)');
-        }
+            // Check for synergy abilities (Katie/Mason, Sophia/Pascal)
+            const player = this.findPlayerWithCharacter(characterCard);
+            // Removed Katie/Mason and Sophia/Pascal synergies (no longer on card text)
 
-        // Izzy's BAI wrangler: Take 20 less damage if concert hall is in play
-        if (characterCard.name === 'Izzy' && this.stadium && this.isPerformanceSpace(this.stadium.name)) {
-            finalDamage -= 20;
-            this.log('Izzy\'s BAI wrangler: -20 damage (Concert Hall active)');
-        }
+            // Izzy's BAI wrangler: Take 20 less damage if concert hall is in play
+            if (characterCard.name === 'Izzy' && this.stadium && this.isPerformanceSpace(this.stadium.name)) {
+                finalDamage -= 20;
+                this.log('Izzy\'s BAI wrangler: -20 damage (Concert Hall active)');
+            }
 
-        // Demi Lu's Steinert Warrior - Immune on bench if Steinert stadium
-        let playerNum = this.findPlayerWithCharacter(characterCard);
-        let playerObj = this.players[playerNum];
-        if (characterCard.name === 'Demi Lu' && playerObj && playerObj.bench.includes(characterCard)) {
-            if (this.stadium && (this.stadium.name === 'Steinert Practice Room' || this.stadium.name === 'Steinert Basement Studio')) {
-                finalDamage = 0;
-                this.log('Demi Lu\'s Steinert Warrior: Immune on bench in Steinert stadium!');
+            // Demi Lu's Steinert Warrior - Immune on bench if Steinert stadium
+            if (characterCard.name === 'Demi Lu' && playerObj && playerObj.bench.includes(characterCard)) {
+                if (this.stadium && (this.stadium.name === 'Steinert Practice Room' || this.stadium.name === 'Steinert Basement Studio')) {
+                    finalDamage = 0;
+                    this.log('Demi Lu\'s Steinert Warrior: Immune on bench in Steinert stadium!');
+                }
             }
         }
 
@@ -386,8 +425,6 @@ class GameState {
         }
 
         // Weston Poe's Right back at you - Reflect 50+ damage
-        playerNum = this.findPlayerWithCharacter(characterCard);
-        playerObj = this.players[playerNum];
         if (characterCard.name === 'Weston Poe' && finalDamage >= 50 && source) {
             // Reflect damage to the attacker (source of the damage)
             this.dealDamage(source, finalDamage, null); // Pass null as source to avoid infinite recursion
@@ -395,16 +432,23 @@ class GameState {
             // Weston still takes the damage (don't set finalDamage to 0)
         }
 
-        // Daniel Zhu's Share the Pain - If Daniel is in play, redirect up to 20 damage FROM other characters TO Daniel
+        // Daniel Zhu's Share the Pain - choose up to 30 (in multiples of 10) to redirect, cannot KO Daniel
         const danielZhu = playerObj && playerObj.bench.find(c => c && c.name === 'Daniel Zhu');
         if (danielZhu && characterCard.id !== danielZhu.id && finalDamage > 0) {
-            // Check if Daniel can take the damage without being KO'd
             const danielCurrentHP = danielZhu.hp - (danielZhu.damage || 0);
-            const redirectAmount = Math.min(20, finalDamage, danielCurrentHP - 1); // Don't KO Daniel
-            if (redirectAmount > 0) {
-                this.dealDamage(danielZhu, redirectAmount, null);
-                finalDamage -= redirectAmount;
-                this.log(`Daniel Zhu's Share the Pain: Redirected ${redirectAmount} damage from ${characterCard.name} to Daniel Zhu!`);
+            const maxSafeRedirect = Math.min(30, finalDamage, danielCurrentHP - 1);
+            if (maxSafeRedirect >= 10) {
+                const rawChoice = prompt(`Daniel Zhu's Share the Pain: Redirect how much damage to Daniel? (0-${maxSafeRedirect}, multiples of 10)`);
+                let chosenRedirect = Number(rawChoice);
+                if (!Number.isFinite(chosenRedirect)) chosenRedirect = 0;
+                chosenRedirect = Math.max(0, Math.min(maxSafeRedirect, chosenRedirect));
+                chosenRedirect = Math.floor(chosenRedirect / 10) * 10;
+
+                if (chosenRedirect > 0) {
+                    this.dealDamage(danielZhu, chosenRedirect, null);
+                    finalDamage -= chosenRedirect;
+                    this.log(`Daniel Zhu's Share the Pain: Redirected ${chosenRedirect} damage from ${characterCard.name} to Daniel Zhu!`);
+                }
             }
         }
 
@@ -417,21 +461,6 @@ class GameState {
         }
 
         characterCard.damage = (characterCard.damage || 0) + finalDamage;
-
-        // Katie Xiang's Nausicaa's Undying Heartbeat - At ≤40 HP, heal 20 all characters
-        if (characterCard.name === 'Katie' || characterCard.name === 'Katie Xiang') {
-            const currentHP = characterCard.hp - characterCard.damage;
-            if (currentHP <= 40 && currentHP > 0) {
-                const allChars = [playerObj.active, ...playerObj.bench].filter(c => c);
-                allChars.forEach(char => {
-                    if (char.damage > 0) {
-                        const healAmount = Math.min(20, char.damage);
-                        char.damage -= healAmount;
-                        this.log(`Katie's Nausicaa's Undying Heartbeat: ${char.name} healed ${healAmount}!`, 'heal');
-                    }
-                });
-            }
-        }
 
         // Arranger status: retrieve item when damaged
         if (characterCard.status && characterCard.status.includes('Arranger') && finalDamage > 0) {
@@ -674,7 +703,7 @@ const DECK_TEMPLATES = {
         description: 'Emily, Sophia, Ashley, Fiona with Riley Hall. Fast string attacks.',
         build: () => [
             createCharacterCard(CHARACTERS.EMILY_WANG),
-            createCharacterCard(CHARACTERS.SOPHIA_WANG),
+            createCharacterCard(CHARACTERS.SOPHIA_Y_WANG),
             createCharacterCard(CHARACTERS.ASHLEY_TOBY),
             createCharacterCard(CHARACTERS.FIONA_LI),
             createItemCard(ITEMS.OTAMATONE),
@@ -1753,6 +1782,7 @@ function playCharacterToActive(cardId) {
         player.active = card;
         player.hand = player.hand.filter(c => c.id !== cardId);
         game.log(`${card.name} played to Active`);
+        game.applyPassiveStatuses();
 
         // Bokai Bi's Algorithm - If opponent has this character, deal 50 damage
         const hasBokaiOnOppBench = opponent.bench.some(c => c && c.name === 'Bokai Bi');
@@ -1809,6 +1839,7 @@ function playCharacterToBench(cardId, slotIndex) {
                 card.cameOffBenchThisTurn = true;
                 player.bench[benchIndex] = temp;
                 game.log(`Loudmouth: ${card.name} switched with ${temp.name} for free!`);
+                game.applyPassiveStatuses();
             }
         }
 
@@ -2053,7 +2084,7 @@ function executeItemEffect(card) {
 
         // Board manipulation
         case 'Cast reserve':
-            const castCoinFlip = Math.random() < 0.5;
+            const castCoinFlip = flipCoin();
             const opponentBench = opponent.bench.filter(c => c);
             if (opponentBench.length > 0) {
                 if (castCoinFlip) {
@@ -2154,7 +2185,7 @@ function executeItemEffect(card) {
                 break;
             }
 
-            const castReserveCoin = Math.random() < 0.5 ? 'Heads' : 'Tails';
+            const castReserveCoin = flipCoin() ? 'Heads' : 'Tails';
             game.log(`Cast Reserve: Flipped ${castReserveCoin}!`, 'info');
 
             if (castReserveCoin === 'Heads') {
@@ -4509,7 +4540,6 @@ function showTargetSelection(attacker, move) {
     // Check if this move can target bench (like Pokemon TCG, only certain moves can)
     const benchTargetingMoves = ['Small Ensemble committee', 'Jennie spread attack', 'Rudiments'];
     const canTargetBench = benchTargetingMoves.includes(move.name);
-    const safeMoveName = move.name.replace(/'/g, "\\'");
 
     let html = `<h2>Select Target for ${move.name}</h2>`;
     html += `<div class="target-selection">`;
@@ -4536,8 +4566,9 @@ function showTargetSelection(attacker, move) {
         });
     }
 
-    targets.forEach((target, idx) => {
-        html += `<button class="target-option action-btn" data-target-index="${idx}" style="color: #000;">${target.label}</button>`;
+    const encodedMoveName = encodeURIComponent(move.name);
+    targets.forEach((target) => {
+        html += `<button class="target-option action-btn" data-target-id="${target.id}" data-attacker-id="${attacker.id}" data-move-name="${encodedMoveName}" onclick="handleTargetSelection(this)" style="color: #000;">${target.label}</button>`;
     });
 
     html += `</div>`;
@@ -4545,16 +4576,14 @@ function showTargetSelection(attacker, move) {
 
     content.innerHTML = html;
     modal.classList.remove('hidden');
+}
 
-    document.querySelectorAll('[data-target-index]').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const targetIndex = Number(btn.getAttribute('data-target-index'));
-            const selectedTarget = targets[targetIndex];
-            if (selectedTarget) {
-                executeAttack(attacker.id, move.name, selectedTarget.id);
-            }
-        });
-    });
+function handleTargetSelection(button) {
+    if (!button) return;
+    const targetId = button.getAttribute('data-target-id');
+    const attackerId = button.getAttribute('data-attacker-id');
+    const moveName = decodeURIComponent(button.getAttribute('data-move-name') || '');
+    executeAttack(attackerId, moveName, targetId);
 }
 
 function executeAttack(attackerId, moveName, targetId) {
@@ -4625,9 +4654,16 @@ function executeDamageAttack(attacker, target, move) {
     let baseDamage = move.damage || 0;
 
     // Apply Circular Breathing bonus
-    if (attacker.circularBreathingBonus && move.name === 'Circular Breathing') {
-        baseDamage += attacker.circularBreathingBonus;
-        game.log(`Circular Breathing bonus: +${attacker.circularBreathingBonus} damage`);
+    if (move.name === 'Circular Breathing') {
+        if (attacker.circularBreathingBonus && attacker.circularBreathingBonusTurn === game.turn) {
+            baseDamage += attacker.circularBreathingBonus;
+            game.log(`Circular Breathing bonus: +${attacker.circularBreathingBonus} damage`);
+            attacker.circularBreathingBonus = 0;
+            attacker.circularBreathingBonusTurn = null;
+        } else if (attacker.circularBreathingBonus && attacker.circularBreathingBonusTurn && game.turn > attacker.circularBreathingBonusTurn) {
+            attacker.circularBreathingBonus = 0;
+            attacker.circularBreathingBonusTurn = null;
+        }
     }
 
     const finalDamage = calculateDamage(attacker, target, baseDamage, move);
@@ -4711,7 +4747,7 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     const opponent = game.players[opponentNum];
 
     // Grace's Amplify (bench ability)
-    const hasGraceOnBench = currentPlayer.bench.some(char => char && (char.name === 'Grace Zhao' || char.name === 'Grace'));
+    const hasGraceOnBench = currentPlayer.bench.some(char => char && char.name === 'Grace Zhao');
     if (hasGraceOnBench && attacker.type.includes(TYPES.GUITAR)) {
         damage += 20;
         game.log('Grace\'s Amplify: +20 damage');
@@ -4734,7 +4770,7 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     }
 
     // Cavin's "Wait no... I'm not into femboys–" - +20 damage per maid in play
-    if (attacker.name === 'Cavin Xue' || attacker.name === 'Cavin') {
+    if (attacker.name === 'Cavin Xue') {
         const allChars = [currentPlayer.active, ...currentPlayer.bench, opponent.active, ...opponent.bench].filter(c => c);
         const maidCount = allChars.filter(char => char.status && char.status.includes('Maid')).length;
         if (maidCount > 0) {
@@ -4793,7 +4829,7 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     }
 
     // Grace's Royalties (if Grace is active and opponent has AVGE items)
-    if ((attacker.name === 'Grace Zhao' || attacker.name === 'Grace') && currentPlayer.active === attacker) {
+    if (attacker.name === 'Grace Zhao' && currentPlayer.active === attacker) {
         const opponentActive = opponent.active;
         if (opponentActive && opponentActive.attachedTools) {
             const hasAVGEItem = opponentActive.attachedTools.some(tool =>
@@ -4818,6 +4854,7 @@ function calculateDamage(attacker, defender, baseDamage, move) {
             attacker.shouldDrawFromBassBoost = true;
         }
     }
+
 
     // Ross Williams's I Am Become Ross - Active can use Ross's attacks from bench
     const rossOnBench = currentPlayer.bench.find(c => c && c.name === 'Ross Williams');
@@ -4950,6 +4987,8 @@ function retreat(activeCardId, benchSlotIndex, cost) {
 
     game.log(`${active.name} retreated, ${benchChar.name} is now active`);
 
+    game.applyPassiveStatuses();
+
     closeModal('action-modal');
     updateUI();
 }
@@ -4968,6 +5007,7 @@ function switchToActive(cardId) {
             player.active.cameOffBenchThisTurn = true;
         }
         game.log(`${player.active.name} moved to active`, 'info');
+        game.applyPassiveStatuses();
     } else {
         // Manual switch requires retreat cost from active pokemon
         const active = player.active;
@@ -5028,6 +5068,8 @@ function confirmSwitch(cardId, benchIndex, retreatCost) {
 
     game.log(`${active.name} switched to bench, ${benchChar.name} is now active (paid ${retreatCost} energy)`, 'info');
 
+    game.applyPassiveStatuses();
+
     closeModal('action-modal');
     updateUI();
 }
@@ -5064,6 +5106,8 @@ function executeStickTrickSwap(benchCharId) {
     player.active = benchChar;
 
     game.log(`Stick Trick: ${benchChar.name} is now active`, 'info');
+
+    game.applyPassiveStatuses();
 
     closeModal('action-modal');
     updateUI();
@@ -6028,8 +6072,9 @@ function flipCoin() {
     if (hasJayden && !game.usedFourLeafClover) {
         game.usedFourLeafClover = true;
         game.log('Jayden Brown\'s Four-leaf Clover: Choose first coin flip result!');
-        const choice = confirm('Choose heads? (OK = Heads, Cancel = Tails)');
-        return choice; // true = heads, false = tails
+        const rolledHeads = Math.random() < 0.5;
+        const forceHeads = confirm(`Four-leaf Clover: Rolled ${rolledHeads ? 'Heads' : 'Tails'}. Force Heads? (OK = Heads, Cancel = Keep Result)`);
+        return forceHeads ? true : rolledHeads;
     }
 
     return Math.random() < 0.5;
@@ -6728,24 +6773,31 @@ function showWipeoutSelection(player, opponent, attacker) {
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
-    const allTargets = [opponent.active, ...opponent.bench, attacker].filter(c => c);
+    const allTargets = [
+        player.active,
+        ...player.bench,
+        opponent.active,
+        ...opponent.bench
+    ].filter(c => c);
 
     game.tempSelections = game.tempSelections || {};
-    game.tempSelections.wipeoutTargets = [];
+    game.tempSelections.wipeoutTargets = [attacker.id];
     game.tempSelections.wipeoutAttacker = attacker;
 
     let html = `<h2>Wipeout: Select 3 Targets</h2>`;
-    html += `<p>Select 3 different characters (including yourself if desired):</p>`;
+    html += `<p>You must include yourself. Select 2 other characters:</p>`;
     html += `<div id="wipeout-targets" class="target-selection">`;
 
     allTargets.forEach(char => {
-        html += `<div class="target-option" onclick="addWipeoutTarget('${char.id}')">
-            ${char.name}${char.id === attacker.id ? ' (You)' : ''}
+        const isSelf = char.id === attacker.id;
+        const selectedClass = isSelf ? ' selected' : '';
+        html += `<div class="target-option${selectedClass}" data-wipeout-id="${char.id}" onclick="addWipeoutTarget('${char.id}')">
+            ${char.name}${isSelf ? ' (You)' : ''}
         </div>`;
     });
 
     html += `</div>`;
-    html += `<p id="wipeout-selected">Selected: 0/3</p>`;
+    html += `<p id="wipeout-selected">Selected: 1/3</p>`;
     html += `<button class="action-btn" onclick="executeWipeout()">Confirm</button>`;
     html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
     content.innerHTML = html;
@@ -6754,12 +6806,21 @@ function showWipeoutSelection(player, opponent, attacker) {
 
 function addWipeoutTarget(charId) {
     const targets = game.tempSelections.wipeoutTargets;
+    const attacker = game.tempSelections.wipeoutAttacker;
+    if (attacker && charId === attacker.id) {
+        return;
+    }
 
     if (targets.includes(charId)) {
         // Remove if already selected
         game.tempSelections.wipeoutTargets = targets.filter(id => id !== charId);
     } else if (targets.length < 3) {
         targets.push(charId);
+    }
+
+    const option = document.querySelector(`[data-wipeout-id="${charId}"]`);
+    if (option) {
+        option.classList.toggle('selected', game.tempSelections.wipeoutTargets.includes(charId));
     }
 
     document.getElementById('wipeout-selected').textContent = `Selected: ${game.tempSelections.wipeoutTargets.length}/3`;
@@ -7019,6 +7080,7 @@ function performMoveEffect(attacker, target, move) {
             executeDamageAttack(attacker, target, move);
             if (!attacker.circularBreathingBonus) attacker.circularBreathingBonus = 0;
             attacker.circularBreathingBonus += 10;
+            attacker.circularBreathingBonusTurn = game.turn + 2;
             game.log('Circular Breathing bonus will apply next turn!');
             break;
 
@@ -7217,7 +7279,7 @@ function performMoveEffect(attacker, target, move) {
             // Flip 3 coins, 30 damage per heads
             let heads = 0;
             for (let i = 0; i < 3; i++) {
-                if (Math.random() < 0.5) {
+                if (flipCoin()) {
                     heads++;
                     game.log('Triple Stop: Heads!');
                 } else {
@@ -7305,8 +7367,8 @@ function performMoveEffect(attacker, target, move) {
 
         case 'Harmonics':
             // Flip 2 coins, if both heads do 80 damage
-            const coin1 = Math.random() < 0.5;
-            const coin2 = Math.random() < 0.5;
+            const coin1 = flipCoin();
+            const coin2 = flipCoin();
             game.log(`Harmonics: Coin 1 - ${coin1 ? 'Heads' : 'Tails'}, Coin 2 - ${coin2 ? 'Heads' : 'Tails'}`);
             if (coin1 && coin2) {
                 const harmonicsDamage = calculateDamage(attacker, target, 80, move);
@@ -7984,11 +8046,13 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Trickster':
-            // Complex turn-delayed damage
-            const tricksterDamage = move.damage || 30;
-            game.nextTurnEffects[opponentNum].tricksterDamage = tricksterDamage;
-            game.nextTurnEffects[opponentNum].tricksterTarget = opponent.active ? opponent.active.id : null;
-            game.log(`Trickster: ${tricksterDamage} damage will be dealt at start of opponent's next turn`);
+            // Next turn effects: opponent attacks +20, this character +60
+            game.nextTurnEffects[opponentNum].tricksterOpponentBonus = 20;
+            game.nextTurnEffects[game.currentPlayer].tricksterSelfBonus = {
+                attackerId: attacker.id,
+                bonus: 60
+            };
+            game.log('Trickster: Opponent attacks +20 next turn; this character +60 next turn', 'info');
             break;
 
         case 'Sparkling run':
@@ -8025,18 +8089,22 @@ function performMoveEffect(attacker, target, move) {
 
         case 'Clarinet Solo':
         case 'Piccolo Solo':
-            // 80 damage if only WW in play
+            // Only usable if opponent has no woodwinds in play; 80 damage if only WW in play
             const allCharsForSolo = [
                 game.players[1].active, ...game.players[1].bench,
                 game.players[2].active, ...game.players[2].bench
             ].filter(c => c);
 
             const woodwindCharsForSolo = allCharsForSolo.filter(c => c.type.includes(TYPES.WOODWINDS));
+            if (woodwindCharsForSolo.length > 1) {
+                game.log(`${move.name}: Cannot be used while another Woodwinds character is in play`, 'warning');
+                break;
+            }
             let soloDamage = move.damage || 30;
 
             if (woodwindCharsForSolo.length === 1 && woodwindCharsForSolo[0].id === attacker.id) {
-                soloDamage = 80;
-                game.log(`${move.name}: Only WW in play, 80 damage!`);
+                soloDamage = 60;
+                game.log(`${move.name}: Only WW in play, 60 damage!`);
             }
 
             const soloFinal = calculateDamage(attacker, target, soloDamage, move);
@@ -8189,8 +8257,8 @@ function performMoveEffect(attacker, target, move) {
 
         case 'Multiphonics':
             // Flip 2 coins - both heads = 40 to each bench, both tails = 80 to active
-            const multiCoin1 = Math.random() < 0.5;
-            const multiCoin2 = Math.random() < 0.5;
+            const multiCoin1 = flipCoin();
+            const multiCoin2 = flipCoin();
             game.log(`Multiphonics: Flipped ${multiCoin1 ? 'heads' : 'tails'} and ${multiCoin2 ? 'heads' : 'tails'}`);
 
             if (multiCoin1 && multiCoin2) {
@@ -8391,6 +8459,8 @@ Object.assign(window, {
     executeAnalysisParalysis,
     addWipeoutTarget,
     executeWipeout,
+    executeAttack,
+    handleTargetSelection,
     executeOutreach,
     executeRossAttackTarget,
     executeE2Reaction

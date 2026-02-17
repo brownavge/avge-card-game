@@ -60,7 +60,7 @@ export function buildDeck(templateName) {
 function buildStringsAggro() {
     return [
         createCard(CHARACTERS.EMILY_WANG, 'character'),
-        createCard(CHARACTERS.SOPHIA_WANG, 'character'),
+        createCard(CHARACTERS.SOPHIA_Y_WANG, 'character'),
         createCard(CHARACTERS.ASHLEY_TOBY, 'character'),
         createCard(CHARACTERS.FIONA_LI, 'character'),
         ...Array(10).fill(null).map(() => createCard(ENERGY_TYPES.STRINGS, 'energy')),

@@ -647,9 +647,9 @@ body {
 }
 
 .target-option.selected {
-    background: #667eea;
-    color: white;
-    border-color: #764ba2;
+    background: #e8f0ff;
+    border-color: #667eea;
+    box-shadow: 0 0 6px rgba(102, 126, 234, 0.4);
 }
 
 /* Dragging */
