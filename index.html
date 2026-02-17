@@ -53,6 +53,12 @@
                 <p id="player2-deck-description" class="deck-description">Katie, David, Jennie, Henry with Steinert Basement. Piano control.</p>
             </div>
         </div>
+        <div class="playtest-toggle">
+            <label>
+                <input type="checkbox" id="playtest-mode-toggle">
+                Playtest mode (unrestricted card play)
+            </label>
+        </div>
         <button id="start-game-btn" class="btn btn-large">Start Game</button>
         <button id="open-deck-builder-btn" class="btn btn-large" style="margin-top: 20px;">Build Custom Deck</button>
         <button id="view-cards-btn" class="btn btn-large" style="margin-top: 10px;">View All Cards</button>
@@ -163,6 +169,9 @@
             <!-- Current Player's Hand -->
             <div id="hand-zone">
                 <h3>Your Hand</h3>
+                <div id="playtest-controls" class="hidden">
+                    <button id="playtest-add-card-btn" class="btn">Playtest: Add Card</button>
+                </div>
                 <div id="hand-cards"></div>
             </div>
         </div>
@@ -187,6 +196,14 @@
         <div class="modal-content">
             <span class="close-modal">&times;</span>
             <div id="action-content"></div>
+        </div>
+    </div>
+
+    <!-- Playtest Card Library Modal -->
+    <div id="playtest-modal" class="modal hidden">
+        <div class="modal-content">
+            <span class="close-modal">&times;</span>
+            <div id="playtest-content"></div>
         </div>
     </div>
 
@@ -244,7 +261,6 @@
         </div>
     </div>
 
-    <script src="cards.js"></script>
-    <script src="game.js"></script>
+    <script type="module" src="game.js"></script>
 </body>
 </html>

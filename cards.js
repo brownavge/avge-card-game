@@ -1,25 +1,6 @@
 // Card Database
 
-const TYPES = {
-    WOODWINDS: 'Woodwinds',
-    PERCUSSION: 'Percussion',
-    PIANO: 'Piano',
-    STRINGS: 'Strings',
-    GUITAR: 'Guitar',
-    CHOIR: 'Choir',
-    BRASS: 'Brass'
-};
-
-// Type super effectiveness chain: Strings → Brass → Piano → Choir → Perc → WW → Guitar → Strings (2x damage)
-const SUPER_EFFECTIVE_CHAIN = {
-    [TYPES.STRINGS]: TYPES.BRASS,
-    [TYPES.BRASS]: TYPES.PIANO,
-    [TYPES.PIANO]: TYPES.CHOIR,
-    [TYPES.CHOIR]: TYPES.PERCUSSION,
-    [TYPES.PERCUSSION]: TYPES.WOODWINDS,
-    [TYPES.WOODWINDS]: TYPES.GUITAR,
-    [TYPES.GUITAR]: TYPES.STRINGS
-};
+import { TYPES, SUPER_EFFECTIVE_CHAIN } from './src/constants.js';
 
 // Character Cards
 const CHARACTERS = {
@@ -40,7 +21,7 @@ const CHARACTERS = {
         hp: 100,
         ability: {
             name: 'Get Served',
-            description: 'Your opponent\'s active character cannot have more than 3 energy attached to it at once. If they do before this card is active, they must discard until they have 3 energy.',
+            description: 'While this character is in play, none of your opponent\’s characters can have more than 3 energy attached to them at once. If they do before this card is active, they must discard the excess energy from each.',
             type: 'passive'
         },
         moves: [
@@ -68,7 +49,7 @@ const CHARACTERS = {
         hp: 120,
         moves: [
             { name: 'Heart of the Cards', cost: 1, damage: 0, effect: 'Name a card, then draw the top card of your deck. If the two are the same, deal 60 damage.' },
-            { name: 'Echoing Blast', cost: 3, damage: 40, effect: 'Deal 10 damage to each of your opponent\'s bench' }
+            { name: 'Intense Echo', cost: 3, damage: 30, effect: 'Your opponent\'s benched characters take 10 damage.' }
         ],
         retreatCost: 2
     },
@@ -98,7 +79,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Full Force', cost: 3, damage: 30, effect: 'Your opponent\'s benched characters take 10 damage.' }
+            { name: 'Intense Echo', cost: 3, damage: 30, effect: 'Your opponent\'s benched characters take 10 damage.' }
         ],
         retreatCost: 1
     },
@@ -122,8 +103,8 @@ const CHARACTERS = {
         hp: 90,
         ability: {
             name: 'Leave Rehearsal Early',
-            description: 'If this card has no cards attached to it and is on the bench, you may put it in your hand at the end of your turn.',
-            type: 'passive'
+            description: 'During your turn, if this character is on your bench and has no tools attached, you may move her to your hand, healing her fully and discarding any attached energy.',
+            type: 'activated'
         },
         moves: [
             { name: 'SATB', cost: 2, damage: 0, effect: 'For each of your Choir type characters in play, choose one of your opponent\'s characters and do 10 damage to it.' }
@@ -192,7 +173,7 @@ const CHARACTERS = {
         hp: 100,
         moves: [
             { name: 'Strum', cost: 1, damage: 20 },
-            { name: 'Surprise Delivery', cost: 2, damage: 0, effect: 'You may look at the top three cards of your deck, reveal all energy cards, and put them in your hand. Do 10 damage for each card you put in your hand this way.' }
+            { name: 'Surprise Delivery', cost: 2, damage: 0, effect: 'You may look at the top three cards of your deck. Reveal all character cards, put them in your hand, and do 10 damage for each; topdeck the rest in any order.' }
         ],
         retreatCost: 2
     },
@@ -474,11 +455,11 @@ const CHARACTERS = {
         hp: 100,
         ability: {
             name: 'Pot of Greed',
-            description: 'During the beginning of each of your turns, flip a coin. If heads, you may draw an extra card.',
+            description: 'While this character is in your active slot, at the beginning of each of your turns, flip a coin. If heads, you may draw an extra card.',
             type: 'passive'
         },
         moves: [
-            { name: 'Three Hand Technique', cost: 1, damage: 0, effect: 'Four individual attacks of 10 damage each' }
+            { name: 'Three Hand Technique', cost: 2, damage: 0, effect: 'Three individual attacks of 10 damage each' }
         ],
         retreatCost: 2
     },
@@ -516,7 +497,7 @@ const CHARACTERS = {
             type: 'activated'
         },
         moves: [
-            { name: 'Hands separately', cost: 1, damage: 0, effect: '0 damage. During your next turn, this attack does 40 damage.' }
+            { name: 'Separate Hands', cost: 1, damage: 0, effect: '0 damage. During your next turn, this attack does 40 damage.' }
         ],
         retreatCost: 1
     },
@@ -656,8 +637,8 @@ const CHARACTERS = {
         ],
         retreatCost: 2
     },
-    SOPHIA_Y_WANG: {
-        name: 'Sophia Y. Wang',
+    SOPHIA_WANG: {
+        name: 'Sophia S. Wang',
         type: [TYPES.STRINGS],
         hp: 100,
         moves: [
@@ -986,6 +967,8 @@ const STADIUMS = {
     }
 };
 
+export { TYPES, SUPER_EFFECTIVE_CHAIN, CHARACTERS, ITEMS, TOOLS, SUPPORTERS, STADIUMS };
+
 // Tool Items (each character can hold at most one tool at a time)
 const TOOLS = {
     MAID_OUTFIT: {
@@ -1084,6 +1067,16 @@ const ITEMS = {
         type: 'item',
         effect: 'Flip a coin. Heads: you choose one of your opponent\'s benched characters to shuffle into their deck. Tails: opponent chooses one of their benched characters to shuffle into their deck.'
     },
+    FOLDING_STAND: {
+        name: 'Folding Stand',
+        type: 'item',
+        effect: 'Active character does +10 damage this turn.'
+    },
+    BUO_STAND: {
+        name: 'BUO Stand',
+        type: 'item',
+        effect: 'Active character does +20 damage this turn. Discard 1 energy from the active character.'
+    },
     ICE_SKATES: {
         name: 'Ice Skates',
         type: 'item',
@@ -1125,6 +1118,11 @@ const ITEMS = {
         name: 'Camera',
         type: 'item',
         effect: 'Shuffle up to two Supporter cards from your discard pile into your deck.'
+    },
+    VIDEO_CAMERA: {
+        name: 'Video Camera',
+        type: 'item',
+        effect: 'Put an item card from your discard pile into your hand.'
     },
     RAFFLE_TICKET: {
         name: 'Raffle Ticket',

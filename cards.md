@@ -101,7 +101,6 @@
 ### Cavin
 - **Type:** Percussion | **HP:** 90 | **Grad Year:** 2028 | **Retreat Cost:** 1
 - **Abilities:**
-  - SCP (Passive) - Take 2x damage from Sophia and Pascal.
   - Wait no... I'm not into femboys– (Passive) - Deal 10 more damage for each maid in play.
 - **Moves:**
   - Drum Solo: (P + X) 30 damage
