@@ -547,7 +547,7 @@ const CHARACTERS = {
         hp: 100,
         moves: [
             { name: 'Open Strings', cost: 1, damage: 10, effect: 'Draw a card. If it is an item, you must use it.' },
-            { name: 'VocaRock!!', cost: 2, damage: 20, effect: 'If Miku Otamatone is attached to this character, 50 additional damage.' }
+            { name: 'VocaRock!!', cost: 2, damage: 20, effect: 'If Miku Otamatone has been used this turn, 50 additional damage.' }
         ],
         retreatCost: 1
     },
@@ -567,7 +567,7 @@ const CHARACTERS = {
         hp: 90,
         moves: [
             { name: 'You know what it is', cost: 1, damage: 0, effect: 'Only usable if he has exactly 60 health. Does 70 damage to any of the opponent\'s characters.' },
-            { name: 'Harmonics', cost: 2, damage: 0, effect: 'Flip two coins. If both of them are heads, do 80 damage. Otherwise, do nothing.' }
+            { name: 'Harmonics', cost: 2, damage: 0, effect: 'Flip two coins. If both of them are heads, do 100 damage. Otherwise, do nothing.' }
         ],
         retreatCost: 2
     },
@@ -577,7 +577,7 @@ const CHARACTERS = {
         hp: 100,
         ability: {
             name: 'Cleric Spell',
-            description: 'Once during your turn, you may choose to shuffle one card from your discard pile back into your deck.',
+            description: 'While she is in play, once during your turn, you may choose to shuffle one card from your discard pile back into your deck.',
             type: 'activated'
         },
         moves: [
@@ -1026,7 +1026,7 @@ const ITEMS = {
         name: 'Miku Otamatone',
         type: 'item',
         subtype: 'special_energy',
-        effect: 'Only works in concert halls. During this turn only, your active character has two additional energy attached. Cannot be played on the first turn.'
+        effect: 'Only has an effect in concert halls. During this turn only, your active character has two additional energy attached. Cannot be played on the first turn.'
     },
     MATCHA_LATTE: {
         name: 'Matcha Latte',

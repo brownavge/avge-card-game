@@ -13,6 +13,8 @@ class GameState {
         this.supporterPlayedThisTurn = false;
         this.attackedThisTurn = false;
         this.helperCardsPlayedThisTurn = 0; // For Main Hall stadium
+        this.borrowABowUsedThisTurn = false;
+        this.pendingAttackEndTurn = false;
 
         this.players = {
             1: this.createPlayerState(),
@@ -72,6 +74,7 @@ class GameState {
         this.supporterPlayedThisTurn = false;
         this.attackedThisTurn = false;
         this.helperCardsPlayedThisTurn = 0;
+        this.borrowABowUsedThisTurn = false;
         this.firstEnergyAttached = false; // Reset for Sophia S. Wang
         this.turn++;
         this.phase = 'main';
@@ -90,6 +93,7 @@ class GameState {
             char.sophiaTriggeredThisTurn = false; // Reset Sophia S. Wang's trigger
             char.usedPowerChordLastTurn = char.usedPowerChord || false; // Track for Fingerstyle
             char.usedPowerChord = false; // Reset Power Chord flag
+            char.usedClericSpellThisTurn = false;
         });
 
         this.applyStartOfTurnEffects();
@@ -164,11 +168,6 @@ class GameState {
     }
 
     beginAttackPhase() {
-        if (this.phase === 'attack') {
-            alert('Already in attack phase!');
-            return;
-        }
-
         // Player 1 cannot attack on their first turn (like Pokémon TCG)
         if (this.isFirstTurn && this.currentPlayer === 1) {
             alert('Player 1 cannot attack on their first turn!');
@@ -190,9 +189,12 @@ class GameState {
             this.log('Luke Xu\'s Nullify: Opponent abilities are disabled this turn!', 'info');
         }
 
-        this.phase = 'attack';
-        this.log(`▶ Attack Phase begins`, 'turn-change');
-        this.render();
+        const player = this.players[this.currentPlayer];
+        if (player.active) {
+            showAttackMenu(player.active.id);
+        } else {
+            alert('No active character to attack with.');
+        }
     }
 
     applyPassiveStatuses() {
@@ -358,7 +360,7 @@ class GameState {
         // Apply defensive abilities and status effects
         let finalDamage = amount;
 
-        const isAttackDamage = source && this.lastAttackSource && source.id === this.lastAttackSource.id && this.phase === 'attack' && characterCard.id !== source.id;
+        const isAttackDamage = source && this.lastAttackSource && source.id === this.lastAttackSource.id && characterCard.id !== source.id;
         let playerNum = this.findPlayerWithCharacter(characterCard);
         let playerObj = this.players[playerNum];
 
@@ -404,7 +406,7 @@ class GameState {
             // Removed Katie/Mason and Sophia/Pascal synergies (no longer on card text)
 
             // Izzy's BAI wrangler: Take 20 less damage if concert hall is in play
-            if (characterCard.name === 'Izzy' && this.stadium && this.isPerformanceSpace(this.stadium.name)) {
+            if (characterCard.name === 'Izzy Chen' && this.stadium && this.isPerformanceSpace(this.stadium.name)) {
                 finalDamage -= 20;
                 this.log('Izzy\'s BAI wrangler: -20 damage (Concert Hall active)');
             }
@@ -1179,6 +1181,8 @@ function generateCardId() {
 
 // UI Rendering
 function updateUI() {
+    game.applyPassiveStatuses();
+
     // Update deck and discard counts
     document.getElementById('p1-deck-count').textContent = game.players[1].deck.length;
     document.getElementById('p1-hand-count').textContent = game.players[1].hand.length;
@@ -1198,7 +1202,11 @@ function updateUI() {
 
     // Update turn info
     document.getElementById('current-turn').textContent = `Player ${game.currentPlayer}'s Turn`;
-    document.getElementById('phase-info').textContent = `${game.phase.charAt(0).toUpperCase() + game.phase.slice(1)} Phase`;
+    const phaseInfo = document.getElementById('phase-info');
+    if (phaseInfo) {
+        phaseInfo.textContent = game.phase === 'gameover' ? 'Game Over' : '';
+        phaseInfo.style.display = 'none';
+    }
 
     // Show energy attached count (normal is 1, Eugenia allows 3)
     const player = game.players[game.currentPlayer];
@@ -1206,26 +1214,24 @@ function updateUI() {
     document.getElementById('energy-status').textContent = `${game.energyAttachedThisTurn}/${maxEnergy}`;
 
     document.getElementById('supporter-status').textContent = game.supporterPlayedThisTurn ? 'Yes' : 'No';
-    document.getElementById('attacked-status').textContent = game.attackedThisTurn ? 'Yes' : 'No';
+    const attackedStatus = document.getElementById('attacked-status');
+    if (attackedStatus) {
+        attackedStatus.textContent = game.attackedThisTurn ? 'Yes' : 'No';
+    }
+
+    const attackedRow = document.getElementById('attacked-played');
+    if (attackedRow) {
+        attackedRow.style.display = 'none';
+    }
 
     // Update button visibility based on phase
     const beginAttackBtn = document.getElementById('begin-attack-btn');
     const endTurnBtn = document.getElementById('end-turn-btn');
 
-    if (game.phase === 'main') {
-        // On Player 1's first turn, show both buttons (allow skipping attack phase)
-        if (game.isFirstTurn && game.currentPlayer === 1) {
-            beginAttackBtn.style.display = 'none';
-            endTurnBtn.style.display = 'inline-block';
-        } else {
-            beginAttackBtn.style.display = 'inline-block';
-            endTurnBtn.style.display = 'none';
-        }
-    } else if (game.phase === 'attack') {
+    if (beginAttackBtn) {
         beginAttackBtn.style.display = 'none';
-        endTurnBtn.style.display = 'inline-block';
-    } else {
-        beginAttackBtn.style.display = 'inline-block';
+    }
+    if (endTurnBtn) {
         endTurnBtn.style.display = 'inline-block';
     }
 
@@ -1549,8 +1555,12 @@ function showCardActions(card) {
 
         // If character is in play, show other actions
         if (player.active === card) {
-            const attackDisabled = (game.phase !== 'attack' || game.attackedThisTurn) ? 'disabled' : '';
-            const attackLabel = game.phase !== 'attack' ? ' (Need Attack Phase)' : (game.attackedThisTurn ? ' (Already Used)' : '');
+            const cannotAttackFirstTurn = game.isFirstTurn && game.currentPlayer === 1;
+            const cannotAttackEffect = game.nextTurnEffects[game.currentPlayer].cannotAttack;
+            const attackDisabled = (game.attackedThisTurn || cannotAttackFirstTurn || cannotAttackEffect) ? 'disabled' : '';
+            const attackLabel = game.attackedThisTurn
+                ? ' (Already Used)'
+                : (cannotAttackFirstTurn ? ' (P1 First Turn)' : (cannotAttackEffect ? ' (Cannot Attack)' : ''));
             html += `<button class="action-btn" ${attackDisabled} onclick="showAttackMenu('${card.id}')">Attack${attackLabel}</button>`;
             html += `<button class="action-btn" onclick="showRetreatMenu('${card.id}')">Retreat</button>`;
 
@@ -1709,12 +1719,18 @@ function renderPlaytestCardLibrary() {
     content.innerHTML = html;
     filterPlaytestLibrary();
 
+    focusPlaytestSearch();
+}
+
+function focusPlaytestSearch() {
     const searchInput = document.getElementById('playtest-card-search');
-    if (searchInput) {
+    if (!searchInput) return;
+    setTimeout(() => {
         searchInput.focus();
-        searchInput.selectionStart = searchInput.value.length;
-        searchInput.selectionEnd = searchInput.value.length;
-    }
+        const length = searchInput.value.length;
+        searchInput.selectionStart = length;
+        searchInput.selectionEnd = length;
+    }, 0);
 }
 
 function filterPlaytestLibrary() {
@@ -2006,9 +2022,12 @@ function executeItemEffect(card) {
 
         case 'Miku Otamatone':
             // Only in concert halls
+            if (!game.attackModifiers[game.currentPlayer].mikuOtamatoneUsed) {
+                game.attackModifiers[game.currentPlayer].mikuOtamatoneUsed = true;
+            }
             if (!game.stadium || !game.isPerformanceSpace(game.stadium.name)) {
-                game.log('Miku Otamatone can only be used in concert halls!', 'error');
-                return false;
+                game.log('Miku Otamatone used outside a concert hall (no energy bonus).', 'info');
+                break;
             }
             if (!game.attackModifiers[game.currentPlayer].otamatoneBonus) {
                 game.attackModifiers[game.currentPlayer].otamatoneBonus = 0;
@@ -4343,6 +4362,18 @@ function playStadium(cardId) {
 function closeModal(modalId) {
     document.getElementById(modalId).classList.add('hidden');
 
+    if (modalId === 'action-modal' && game.tempSelections && game.tempSelections.foresightPending) {
+        const cards = game.tempSelections.foresightOriginal;
+        const opponent = game.tempSelections.foresightOpponent;
+        if (cards && opponent) {
+            opponent.deck.unshift(...cards);
+        }
+        delete game.tempSelections.foresightCards;
+        delete game.tempSelections.foresightOriginal;
+        delete game.tempSelections.foresightOpponent;
+        delete game.tempSelections.foresightPending;
+    }
+
     if (modalId === 'action-modal' && game.tempSelections && game.tempSelections.drumKidWorkshopPendingTransfer) {
         const { sourceId, attackerId } = game.tempSelections.drumKidWorkshopPendingTransfer;
         const allChars = [
@@ -4370,6 +4401,11 @@ function closeModal(modalId) {
     if (modalId === 'action-modal') {
         game.lastAttackSource = null;
     }
+
+    if (modalId === 'action-modal' && game.pendingAttackEndTurn) {
+        game.pendingAttackEndTurn = false;
+        endTurn();
+    }
 }
 
 // Attack System
@@ -4382,10 +4418,26 @@ function showAttackMenu(cardId) {
         return;
     }
 
-    if (game.phase !== 'attack') {
-        alert('You must enter the Attack Phase first! Click "Begin Attack Phase" button.');
+    // Player 1 cannot attack on their first turn (like Pokémon TCG)
+    if (game.isFirstTurn && game.currentPlayer === 1) {
+        alert('Player 1 cannot attack on their first turn!');
+        game.log('Cannot attack: Player 1 cannot attack on their first turn', 'warning');
         closeModal('action-modal');
         return;
+    }
+
+    // Check for Meya Gao's I See Your Soul - cannot attack
+    if (game.nextTurnEffects[game.currentPlayer].cannotAttack) {
+        alert('Cannot attack this turn due to Meya Gao\'s I See Your Soul!');
+        game.log('Cannot attack: Meya Gao\'s I See Your Soul is active', 'warning');
+        game.nextTurnEffects[game.currentPlayer].cannotAttack = false;
+        closeModal('action-modal');
+        return;
+    }
+
+    // Check for Luke Xu's Nullify - opponent abilities disabled
+    if (game.nextTurnEffects[game.currentPlayer].abilitiesDisabled) {
+        game.log('Luke Xu\'s Nullify: Opponent abilities are disabled this turn!', 'info');
     }
 
     if (game.attackedThisTurn) {
@@ -4519,7 +4571,9 @@ function selectMove(cardId, moveIndex) {
         'Vocal warmups',
         'Percussion Ensemble',
         'Personal use',
-        'Arrangement procrastination'
+        'Arrangement procrastination',
+        'Artist Alley',
+        'Snap Pizz'
     ];
 
     if (noTargetMoves.includes(move.name)) {
@@ -4537,8 +4591,8 @@ function showTargetSelection(attacker, move) {
     const opponentNum = game.currentPlayer === 1 ? 2 : 1;
     const opponent = game.players[opponentNum];
 
-    // Check if this move can target bench (like Pokemon TCG, only certain moves can)
-    const benchTargetingMoves = ['Small Ensemble committee', 'Jennie spread attack', 'Rudiments'];
+    // Check if this move can target bench (like Pokemon TCG, only certain movecans can)
+    const benchTargetingMoves = ['Small Ensemble committee', 'Jennie spread attack', 'Rudiments', 'You know what it is'];
     const canTargetBench = benchTargetingMoves.includes(move.name);
 
     let html = `<h2>Select Target for ${move.name}</h2>`;
@@ -4643,10 +4697,12 @@ function executeAttack(attackerId, moveName, targetId) {
     // Execute specific attack effects by move name
     const waitForModal = performMoveEffect(attacker, target, move);
     if (waitForModal) {
+        game.pendingAttackEndTurn = true;
         return;
     }
     closeModal('action-modal');
     updateUI();
+    endTurn();
 }
 
 // Helper function for standard damage attacks
@@ -4874,14 +4930,13 @@ function calculateDamage(attacker, defender, baseDamage, move) {
 
     // Separate Hands delayed damage handled in the move logic
 
-    // Anna Brown's Do Not Disturb - On bench, reduce damage by 30
-    const defenderPlayer = game.findPlayerWithCharacter(defender);
-    const defenderPlayerObj = game.players[defenderPlayer];
-    const annaOnBench = defenderPlayerObj && defenderPlayerObj.bench.some(c => c && c.name === 'Anna Brown');
-    if (annaOnBench && defenderPlayerObj.bench.includes(defender)) {
-        damage = Math.max(0, damage - 30);
-        game.log('Anna Brown\'s Do Not Disturb: -30 damage to benched characters');
-    }
+        // Anna Brown's Do Not Disturb - On bench, Anna takes 20 less damage
+        const defenderPlayer = game.findPlayerWithCharacter(defender);
+        const defenderPlayerObj = game.players[defenderPlayer];
+        if (defender && defender.name === 'Anna Brown' && defenderPlayerObj && defenderPlayerObj.bench.includes(defender)) {
+            damage = Math.max(0, damage - 20);
+            game.log('Anna Brown\'s Do Not Disturb: -20 damage while benched');
+        }
 
     // Damper Pedal effect
     if (game.nextTurnEffects[game.currentPlayer].damperPedal) {
@@ -5162,6 +5217,14 @@ function useActivatedAbility(cardId, abilitySlot) {
 
         case 'Profit Margins':
             // Emily: Discard a tool to draw 2 cards
+            if (player.active !== card) {
+                alert('Emily must be active to use Profit Margins!');
+                break;
+            }
+            if (game.phase !== 'attack' || game.attackedThisTurn) {
+                alert('Profit Margins can only be used right before your attack!');
+                break;
+            }
             if (card.attachedTools && card.attachedTools.length > 0) {
                 // Show tool selection modal
                 showToolSelectionForDiscard(card);
@@ -5303,7 +5366,14 @@ function useActivatedAbility(cardId, abilitySlot) {
 
         case 'Cleric Spell':
             // Jessica Jung: Shuffle one discard back to deck
+            if (card.usedClericSpellThisTurn) {
+                alert('Cleric Spell can only be used once per turn!');
+                closeModal('action-modal');
+                break;
+            }
             if (player.discard.length > 0) {
+                game.tempSelections = game.tempSelections || {};
+                game.tempSelections.clericSpellCardId = card.id;
                 showClericSpellModal(player);
             } else {
                 alert('No cards in discard pile!');
@@ -5313,11 +5383,16 @@ function useActivatedAbility(cardId, abilitySlot) {
 
         case 'Borrow a Bow':
             // Ina Ma: Move energy from another string (passive implementation in move, this is activated version)
+            if (game.borrowABowUsedThisTurn) {
+                alert('Borrow a Bow can only be used once per turn!');
+                closeModal('action-modal');
+                break;
+            }
             const stringCharsForBorrow = [player.active, ...player.bench].filter(c =>
                 c && c.type.includes(TYPES.STRINGS) && c.id !== card.id && c.attachedEnergy && c.attachedEnergy.length > 0
             );
             if (stringCharsForBorrow.length > 0) {
-                showBorrowSelection(player, stringCharsForBorrow, card);
+                showBorrowSelection(player, stringCharsForBorrow, card, true);
             } else {
                 alert('No other strings with energy to borrow from!');
                 closeModal('action-modal');
@@ -5370,6 +5445,18 @@ function executeClericSpell(cardIdx) {
         player.deck.push(card);
         game.shuffleDeck(game.currentPlayer);
         game.log(`Cleric Spell: Shuffled ${card.name} back into deck`);
+
+        const clericId = game.tempSelections && game.tempSelections.clericSpellCardId;
+        if (clericId) {
+            const cleric = [player.active, ...player.bench].find(c => c && c.id === clericId);
+            if (cleric) {
+                cleric.usedClericSpellThisTurn = true;
+            }
+        }
+    }
+
+    if (game.tempSelections) {
+        delete game.tempSelections.clericSpellCardId;
     }
 
     closeModal('action-modal');
@@ -5415,22 +5502,20 @@ function discardToolForProfitMargins(cardId, toolIndex) {
 }
 
 function setupEventListeners() {
+    setupKeyboardShortcuts();
+
     // End turn button
     document.getElementById('end-turn-btn').addEventListener('click', () => {
-        game.switchPlayer();
-
-        // Don't auto-draw if Friedman Hall is active (it handles its own draw) or if draw was skipped
-        if ((!game.stadium || game.stadium.name !== 'Friedman Hall') && !game.turnDrawSkipped) {
-            game.drawCards(game.currentPlayer, 1);
-        }
-
-        updateUI();
+        endTurn();
     });
 
-    // Begin attack phase button
-    document.getElementById('begin-attack-btn').addEventListener('click', () => {
-        game.beginAttackPhase();
-    });
+    // Begin attack phase button (legacy UI)
+    const beginAttackBtn = document.getElementById('begin-attack-btn');
+    if (beginAttackBtn) {
+        beginAttackBtn.addEventListener('click', () => {
+            game.beginAttackPhase();
+        });
+    }
 
     const playtestAddButton = document.getElementById('playtest-add-card-btn');
     if (playtestAddButton) {
@@ -5462,6 +5547,207 @@ function setupEventListeners() {
             }
         });
     });
+}
+
+function endTurn() {
+    game.switchPlayer();
+
+    // Don't auto-draw if Friedman Hall is active (it handles its own draw) or if draw was skipped
+    if ((!game.stadium || game.stadium.name !== 'Friedman Hall') && !game.turnDrawSkipped) {
+        game.drawCards(game.currentPlayer, 1);
+    }
+
+    updateUI();
+}
+
+let hotkeysInitialized = false;
+
+function setupKeyboardShortcuts() {
+    if (hotkeysInitialized) return;
+    hotkeysInitialized = true;
+
+    document.addEventListener('keydown', (event) => {
+        if (event.repeat) return;
+
+        const key = event.key.toLowerCase();
+
+        if (key === 'escape') {
+            closeTopModal();
+            return;
+        }
+
+        const activeTag = document.activeElement?.tagName;
+        if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') return;
+
+        if (handleModalOptionHotkey(key)) {
+            return;
+        }
+
+        switch (key) {
+            case 'escape':
+                closeTopModal();
+                break;
+            case 'p':
+                playSelectedCardHotkey();
+                break;
+            case 'e':
+                attachEnergyHotkey();
+                break;
+            case '1':
+                useMoveHotkey(0);
+                break;
+            case '2':
+                useMoveHotkey(1);
+                break;
+            case '3':
+                useMoveHotkey(2);
+                break;
+            case '4':
+                useMoveHotkey(3);
+                break;
+            case 'a':
+                attackHotkey();
+                break;
+            case 'r':
+                retreatHotkey();
+                break;
+            case 'b':
+                beginAttackPhaseHotkey();
+                break;
+            case 't':
+                endTurnHotkey();
+                break;
+            default:
+                break;
+        }
+    });
+}
+
+function closeTopModal() {
+    const modals = Array.from(document.querySelectorAll('.modal'))
+        .filter(modal => !modal.classList.contains('hidden'));
+    if (modals.length === 0) return;
+    const topModal = modals[modals.length - 1];
+    if (topModal.id) {
+        closeModal(topModal.id);
+    } else {
+        topModal.classList.add('hidden');
+    }
+}
+
+function handleModalOptionHotkey(key) {
+    const modal = document.getElementById('action-modal');
+    if (!modal || modal.classList.contains('hidden')) return false;
+
+    const index = parseInt(key, 10);
+    if (Number.isNaN(index) || index < 1 || index > 4) return false;
+
+    const options = Array.from(modal.querySelectorAll('.target-option, .action-btn'))
+        .filter(el => !el.disabled && !el.classList.contains('close-modal'))
+        .filter(el => {
+            const text = (el.textContent || '').toLowerCase();
+            return text !== 'cancel' && text !== 'close';
+        });
+
+    const choice = options[index - 1];
+    if (!choice) return false;
+
+    choice.click();
+    return true;
+}
+
+function playSelectedCardHotkey() {
+    const card = game.selectedCard;
+    if (!card) return;
+
+    const player = game.players[game.currentPlayer];
+    const inHand = player.hand.some(c => c.id === card.id);
+    if (!inHand) return;
+
+    const canPlayAnytime = game.playtestMode || game.phase === 'main';
+    if (!canPlayAnytime) return;
+
+    if (card.cardType === 'character') {
+        if (!player.active) {
+            playCharacterToActive(card.id);
+            return;
+        }
+        const emptyBenchSlot = player.bench.indexOf(null);
+        if (emptyBenchSlot !== -1) {
+            playCharacterToBench(card.id, emptyBenchSlot);
+        }
+        return;
+    }
+
+    if (card.cardType === 'item' || card.cardType === 'tool') {
+        playItem(card.id);
+        return;
+    }
+
+    if (card.cardType === 'supporter') {
+        if (!game.supporterPlayedThisTurn || game.playtestMode) {
+            playSupporter(card.id);
+        }
+        return;
+    }
+
+    if (card.cardType === 'stadium') {
+        playStadium(card.id);
+    }
+}
+
+function attachEnergyHotkey() {
+    if (!game.playtestMode && game.phase !== 'main') return;
+    const player = game.players[game.currentPlayer];
+    const selected = game.selectedCard;
+    if (selected && selected.cardType === 'character') {
+        if (player.active && player.active.id === selected.id) {
+            attachEnergy('active');
+            return;
+        }
+        const selectedBenchIndex = player.bench.findIndex(c => c && c.id === selected.id);
+        if (selectedBenchIndex !== -1) {
+            attachEnergy(selectedBenchIndex);
+            return;
+        }
+    }
+    if (player.active) {
+        attachEnergy('active');
+        return;
+    }
+    const benchIndex = player.bench.findIndex(c => c);
+    if (benchIndex !== -1) {
+        attachEnergy(benchIndex);
+    }
+}
+
+function attackHotkey() {
+    const player = game.players[game.currentPlayer];
+    if (!player.active) return;
+    showAttackMenu(player.active.id);
+}
+
+function useMoveHotkey(moveIndex) {
+    const player = game.players[game.currentPlayer];
+    if (!player.active) return;
+    if (!game.playtestMode && game.attackedThisTurn) return;
+
+    selectMove(player.active.id, moveIndex);
+}
+
+function retreatHotkey() {
+    const player = game.players[game.currentPlayer];
+    if (!player.active) return;
+    showRetreatMenu(player.active.id);
+}
+
+function beginAttackPhaseHotkey() {
+    attackHotkey();
+}
+
+function endTurnHotkey() {
+    const button = document.getElementById('end-turn-btn');
+    if (button) button.click();
 }
 
 // Start game when page loads
@@ -6335,7 +6621,7 @@ function showDrumKidWorkshopTargetSelection(sourceId, attackerId, moveIndex) {
         return;
     }
 
-    const benchTargetingMoves = ['Small Ensemble committee', 'Jennie spread attack', 'Rudiments'];
+    const benchTargetingMoves = ['Small Ensemble committee', 'Jennie spread attack', 'Rudiments', 'You know what it is'];
     const canTargetBench = benchTargetingMoves.includes(move.name);
 
     const modal = document.getElementById('action-modal');
@@ -6493,6 +6779,47 @@ function showRacketSmashSelection(player, benchChars) {
     modal.classList.remove('hidden');
 }
 
+function showSnapPizzDiscardSelection(opponentChars) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Snap Pizz: Discard Energy</h2>`;
+    html += `<p>Choose an opponent character to discard up to 2 energy from:</p>`;
+    html += `<div class="target-selection">`;
+
+    opponentChars.forEach(char => {
+        const energyCount = char.attachedEnergy ? char.attachedEnergy.length : 0;
+        html += `<div class="target-option" onclick="executeSnapPizzDiscard('${char.id}')">
+            ${char.name} (${energyCount} energy)
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeSnapPizzDiscard(targetId) {
+    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const opponent = game.players[opponentNum];
+    const target = [opponent.active, ...opponent.bench].find(c => c && c.id === targetId);
+
+    if (target && target.attachedEnergy && target.attachedEnergy.length > 0) {
+        const discardCount = Math.min(2, target.attachedEnergy.length);
+        for (let i = 0; i < discardCount; i++) {
+            const discardedEnergy = target.attachedEnergy.pop();
+            opponent.discard.push(discardedEnergy);
+        }
+        game.log(`Snap Pizz: Discarded ${discardCount} energy from ${target.name}!`);
+    } else {
+        game.log('Snap Pizz: No energy to discard');
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
 function executeRacketSmash(charId) {
     const player = game.players[game.currentPlayer];
     const char = player.bench.find(c => c && c.id === charId);
@@ -6507,9 +6834,12 @@ function executeRacketSmash(charId) {
     updateUI();
 }
 
-function showBorrowSelection(player, stringChars, attacker) {
+function showBorrowSelection(player, stringChars, attacker, isAbility = false) {
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
+
+    game.tempSelections = game.tempSelections || {};
+    game.tempSelections.borrowIsAbility = !!isAbility;
 
     let html = `<h2>Borrow: Move Energy</h2>`;
     html += `<p>Select string character to borrow energy from:</p>`;
@@ -6588,6 +6918,13 @@ function executeBorrow(sourceId, attackerId) {
         const energy = source.attachedEnergy.pop();
         attacker.attachedEnergy.push(energy);
         game.log(`Borrow: Moved energy from ${source.name} to ${attacker.name}`);
+        if (game.tempSelections && game.tempSelections.borrowIsAbility) {
+            game.borrowABowUsedThisTurn = true;
+        }
+    }
+
+    if (game.tempSelections) {
+        delete game.tempSelections.borrowIsAbility;
     }
 
     closeModal('action-modal');
@@ -6596,39 +6933,69 @@ function executeBorrow(sourceId, attackerId) {
 
 function showForesightModal(opponent, topThree) {
     const modal = document.getElementById('action-modal');
-    const content = document.getElementById('action-content');
-
     game.tempSelections = game.tempSelections || {};
     game.tempSelections.foresightCards = topThree;
+    game.tempSelections.foresightOriginal = topThree.slice();
     game.tempSelections.foresightOpponent = opponent;
+    game.tempSelections.foresightPending = true;
+
+    renderForesightModal();
+    modal.classList.remove('hidden');
+}
+
+function renderForesightModal() {
+    const content = document.getElementById('action-content');
+    const cards = game.tempSelections.foresightCards || [];
 
     let html = `<h2>Foresight: Rearrange Opponent's Deck</h2>`;
-    html += `<p>Cards: ${topThree.map(c => c.name).join(', ')}</p>`;
-    html += `<p>Select order (click to reorder):</p>`;
+    html += `<p>Move cards to set the new top-to-bottom order:</p>`;
     html += `<div id="foresight-list" class="target-selection">`;
 
-    topThree.forEach((card, idx) => {
-        html += `<div class="target-option" data-index="${idx}">
-            ${idx + 1}. ${card.name}
-        </div>`;
+    cards.forEach((card, idx) => {
+        html += `<div class="target-option" data-foresight-index="${idx}">`;
+        html += `<div>${idx + 1}. ${card.name}</div>`;
+        html += `<div class="action-buttons">`;
+        html += `<button class="action-btn" onclick="moveForesightCard(${idx}, -1)">Up</button>`;
+        html += `<button class="action-btn" onclick="moveForesightCard(${idx}, 1)">Down</button>`;
+        html += `</div>`;
+        html += `</div>`;
     });
 
     html += `</div>`;
     html += `<button class="action-btn" onclick="completeForesight()">Confirm Order</button>`;
     html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+
     content.innerHTML = html;
-    modal.classList.remove('hidden');
+}
+
+function moveForesightCard(index, direction) {
+    const cards = game.tempSelections.foresightCards;
+    if (!cards) return;
+
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= cards.length) return;
+
+    const temp = cards[index];
+    cards[index] = cards[newIndex];
+    cards[newIndex] = temp;
+
+    renderForesightModal();
 }
 
 function completeForesight() {
-    // For simplicity, just put cards back in original order
-    // In a full implementation, you'd allow reordering
     const cards = game.tempSelections.foresightCards;
     const opponent = game.tempSelections.foresightOpponent;
 
-    cards.reverse().forEach(card => {
-        opponent.deck.unshift(card);
-    });
+    if (cards && opponent) {
+        opponent.deck.unshift(...cards);
+    }
+
+    if (game.tempSelections) {
+        delete game.tempSelections.foresightCards;
+        delete game.tempSelections.foresightOriginal;
+        delete game.tempSelections.foresightOpponent;
+        delete game.tempSelections.foresightPending;
+    }
 
     game.log('Foresight: Opponent\'s top 3 cards rearranged');
     closeModal('action-modal');
@@ -6875,6 +7242,85 @@ function showOutreachSelection(player, characters) {
     modal.classList.remove('hidden');
 }
 
+function showArtistAlleySelection(eligibleCards, attacker, target, move) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    game.tempSelections = game.tempSelections || {};
+    game.tempSelections.artistAlleySelected = new Set();
+    game.tempSelections.artistAlleyAttacker = attacker;
+    game.tempSelections.artistAlleyTarget = target;
+    game.tempSelections.artistAlleyMove = move;
+
+    let html = `<h2>Artist Alley</h2>`;
+    html += `<p>Select any number of Concert Programs/Tickets to discard:</p>`;
+    html += `<div class="target-selection">`;
+
+    eligibleCards.forEach(card => {
+        html += `<div class="target-option" data-artist-card-id="${card.id}" onclick="toggleArtistAlleyCard('${card.id}')">
+            ${card.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<p id="artist-alley-selected">Selected: 0</p>`;
+    html += `<button class="action-btn" onclick="confirmArtistAlley()">Confirm</button>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function toggleArtistAlleyCard(cardId) {
+    if (!game.tempSelections || !game.tempSelections.artistAlleySelected) return;
+    const selected = game.tempSelections.artistAlleySelected;
+
+    if (selected.has(cardId)) {
+        selected.delete(cardId);
+    } else {
+        selected.add(cardId);
+    }
+
+    const option = document.querySelector(`[data-artist-card-id="${cardId}"]`);
+    if (option) {
+        option.classList.toggle('selected', selected.has(cardId));
+    }
+
+    const count = selected.size;
+    const countLabel = document.getElementById('artist-alley-selected');
+    if (countLabel) countLabel.textContent = `Selected: ${count}`;
+}
+
+function confirmArtistAlley() {
+    if (!game.tempSelections || !game.tempSelections.artistAlleySelected) return;
+    const selected = Array.from(game.tempSelections.artistAlleySelected);
+    const attacker = game.tempSelections.artistAlleyAttacker;
+    const target = game.tempSelections.artistAlleyTarget;
+    const move = game.tempSelections.artistAlleyMove;
+    const player = game.players[game.currentPlayer];
+
+    if (selected.length === 0) {
+        closeModal('action-modal');
+        return;
+    }
+
+    selected.forEach(cardId => {
+        const card = player.hand.find(c => c.id === cardId);
+        if (card) {
+            player.discard.push(card);
+            player.hand = player.hand.filter(c => c.id !== cardId);
+        }
+    });
+
+    const totalDamage = selected.length * 30;
+    const finalDamage = calculateDamage(attacker, target, totalDamage, move);
+    game.dealDamage(target, finalDamage);
+    game.log(`Artist Alley: Discarded ${selected.length} programs/tickets for ${finalDamage} damage!`, 'damage');
+
+    closeModal('action-modal');
+    updateUI();
+}
+
 function showRossAttackTargetSelection(opponentChars, attacker, move) {
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
@@ -6948,6 +7394,10 @@ function executeE2Reaction(charId) {
     if (benchIndex !== -1) {
         const benchTarget = opponent.bench[benchIndex];
         opponent.bench[benchIndex] = null;
+        if (benchTarget.attachedTools && benchTarget.attachedTools.length > 0) {
+            opponent.deck.push(...benchTarget.attachedTools);
+            benchTarget.attachedTools = [];
+        }
         opponent.deck.push(benchTarget);
         game.shuffleDeck(opponentNum);
         game.log(`E2 Reaction: Shuffled ${benchTarget.name} back into deck`);
@@ -7057,22 +7507,13 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Artist Alley':
-            // Discard concert posters and do 30 damage each
-            const posterCount = player.hand.filter(c => c.name === 'Concert poster').length;
-            if (posterCount > 0) {
-                const discardCount = parseInt(prompt(`Discard how many concert posters? (0-${posterCount})`));
-                if (discardCount > 0 && discardCount <= posterCount) {
-                    for (let i = 0; i < discardCount; i++) {
-                        const poster = player.hand.find(c => c.name === 'Concert poster');
-                        player.discard.push(poster);
-                        player.hand = player.hand.filter(c => c !== poster);
-                    }
-                    const totalDamage = discardCount * 30;
-                    const finalDamage = calculateDamage(attacker, target, totalDamage, move);
-                    game.dealDamage(target, finalDamage);
-                    game.log(`Artist Alley: Discarded ${discardCount} posters for ${finalDamage} damage!`, 'damage');
-                }
+            // Discard chosen concert programs/tickets and do 30 damage each
+            const eligible = player.hand.filter(c => c.name === 'Concert Program' || c.name === 'Concert Ticket');
+            if (eligible.length > 0) {
+                showArtistAlleySelection(eligible, attacker, target, move);
+                return true;
             }
+            game.log('Artist Alley: No Concert Programs or Tickets in hand', 'info');
             break;
 
         case 'Circular Breathing':
@@ -7249,12 +7690,19 @@ function performMoveEffect(attacker, target, move) {
         case 'You know what it is':
             // Only usable if exactly 60 health, 70 damage to any opponent character
             if (attacker.hp - (attacker.damage || 0) === 60) {
-                const opponentChars = [opponent.active, ...opponent.bench].filter(c => c);
-                if (opponentChars.length > 0) {
-                    showYouKnowWhatItIsTargetSelection(opponent, attacker);
-                    return true;
+                if (target) {
+                    const moveOverride = { name: 'You know what it is', damage: 70 };
+                    const damage = calculateDamage(attacker, target, 70, moveOverride);
+                    game.dealDamage(target, damage);
+                    game.log(`You know what it is: ${damage} damage to ${target.name}!`, 'damage');
                 } else {
-                    game.log('You know what it is: No valid targets');
+                    const opponentChars = [opponent.active, ...opponent.bench].filter(c => c);
+                    if (opponentChars.length > 0) {
+                        showYouKnowWhatItIsTargetSelection(opponent, attacker);
+                        return true;
+                    } else {
+                        game.log('You know what it is: No valid targets');
+                    }
                 }
             } else {
                 game.log('You know what it is can only be used at exactly 60 HP!');
@@ -7366,12 +7814,12 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Harmonics':
-            // Flip 2 coins, if both heads do 80 damage
+            // Flip 2 coins, if both heads do 100 damage
             const coin1 = flipCoin();
             const coin2 = flipCoin();
             game.log(`Harmonics: Coin 1 - ${coin1 ? 'Heads' : 'Tails'}, Coin 2 - ${coin2 ? 'Heads' : 'Tails'}`);
             if (coin1 && coin2) {
-                const harmonicsDamage = calculateDamage(attacker, target, 80, move);
+                const harmonicsDamage = calculateDamage(attacker, target, 100, move);
                 game.dealDamage(target, harmonicsDamage);
                 game.log(`Harmonics: Both heads! ${harmonicsDamage} damage!`, 'damage');
             } else {
@@ -7536,18 +7984,18 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Snap Pizz':
-            // 20 damage, discard 2 energy from opponent's character
-            executeDamageAttack(attacker, target, move);
-            if (target.attachedEnergy && target.attachedEnergy.length >= 2) {
-                for (let i = 0; i < 2; i++) {
-                    const discardedEnergy = target.attachedEnergy.pop();
-                    opponent.discard.push(discardedEnergy);
-                }
-                game.log('Snap Pizz: Discarded 2 energy from opponent!');
-            } else if (target.attachedEnergy && target.attachedEnergy.length > 0) {
-                const discardedEnergy = target.attachedEnergy.pop();
-                opponent.discard.push(discardedEnergy);
-                game.log('Snap Pizz: Discarded 1 energy from opponent (only had 1)');
+            // 20 damage to opponent's active, then choose any opponent character to discard up to 2 energy
+            if (opponent.active) {
+                const snapPizzMove = { ...move, damage: 20 };
+                executeDamageAttack(attacker, opponent.active, snapPizzMove);
+            } else {
+                game.log('Snap Pizz: No opponent active to damage');
+            }
+
+            const opponentCharsForSnap = [opponent.active, ...opponent.bench].filter(c => c);
+            if (opponentCharsForSnap.length > 0) {
+                showSnapPizzDiscardSelection(opponentCharsForSnap);
+                return true;
             }
             break;
 
@@ -7973,10 +8421,21 @@ function performMoveEffect(attacker, target, move) {
                 player.hand.push(drawnCard);
                 game.log(`Open Strings: Drew ${drawnCard.name}`);
 
-                if (drawnCard.cardType === 'energy') {
-                    attacker.attachedEnergy.push(drawnCard);
-                    player.hand = player.hand.filter(c => c.id !== drawnCard.id);
-                    game.log(`Open Strings: Attached ${drawnCard.name} to ${attacker.name}`);
+                if (drawnCard.cardType === 'item') {
+                    game.log(`Open Strings: Must use ${drawnCard.name}`);
+                    const waitForModal = executeItemEffect(drawnCard);
+                    if (!waitForModal) {
+                        if (game.stadium && game.stadium.name === 'Alumnae Hall') {
+                            [player.active, ...player.bench].filter(c => c).forEach(char => {
+                                if (char.damage < char.hp) {
+                                    char.damage = Math.min(char.hp - 10, char.damage + 10);
+                                }
+                            });
+                            game.log('Alumnae Hall: 10 damage to all your characters (nonlethal)');
+                        }
+                        player.hand = player.hand.filter(c => c.id !== drawnCard.id);
+                        player.discard.push(drawnCard);
+                    }
                 }
             }
             break;
@@ -7984,7 +8443,8 @@ function performMoveEffect(attacker, target, move) {
         case 'VocaRock!!':
             // 20 damage, +50 if Miku Otamatone attached
             let vocaRockDamage = 20;
-            if (attacker.attachedTools && attacker.attachedTools.some(t => t.name === 'Miku Otamatone')) {
+            const mikuUsed = !!game.attackModifiers[game.currentPlayer].mikuOtamatoneUsed;
+            if (mikuUsed || (attacker.attachedTools && attacker.attachedTools.some(t => t.name === 'Miku Otamatone'))) {
                 vocaRockDamage += 50;
                 game.log('VocaRock!!: +50 damage from Miku Otamatone!');
             }
@@ -8124,13 +8584,15 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'SE lord':
-            // Heal opponent's bench, damage active by that amount
+            // Fully heal opponent's bench, damage active by total healed
             let totalHealed = 0;
-            opponent.bench.filter(c => c && c.damage > 0).forEach(char => {
-                const healAmount = Math.min(30, char.damage);
-                char.damage -= healAmount;
-                totalHealed += healAmount;
-                game.log(`SE lord: Healed ${char.name} for ${healAmount}`, 'heal');
+            opponent.bench.filter(c => c).forEach(char => {
+                const healAmount = Math.max(0, char.damage || 0);
+                if (healAmount > 0) {
+                    char.damage = 0;
+                    totalHealed += healAmount;
+                    game.log(`SE lord: Healed ${char.name} for ${healAmount}`, 'heal');
+                }
             });
 
             if (totalHealed > 0 && opponent.active) {
@@ -8451,9 +8913,11 @@ Object.assign(window, {
     executeTrickyRhythms,
     executeRacketSmash,
     executeBorrow,
+    executeSnapPizzDiscard,
     showPercussionEnsembleEnergyCount,
     executePercussionEnsemble,
     completeForesight,
+    moveForesightCard,
     executeGachaGaming,
     executeSongVoting,
     executeAnalysisParalysis,
@@ -8462,6 +8926,8 @@ Object.assign(window, {
     executeAttack,
     handleTargetSelection,
     executeOutreach,
+    toggleArtistAlleyCard,
+    confirmArtistAlley,
     executeRossAttackTarget,
     executeE2Reaction
 });
