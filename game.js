@@ -27,6 +27,10 @@ function randInt(max) {
     return Math.floor(getRandom() * max);
 }
 
+function abilitiesDisabledFor(playerNum) {
+    return (game.abilitiesDisabledThisTurn === playerNum) || (game.nextTurnEffects[playerNum] && game.nextTurnEffects[playerNum].abilitiesDisabled);
+}
+
 class GameState {
     constructor() {
         this.currentPlayer = 1;
@@ -40,6 +44,8 @@ class GameState {
         this.mainHallActivatedTurn = null;
         this.borrowABowUsedThisTurn = false;
         this.pendingAttackEndTurn = false;
+        this.pendingAttackAttackerId = null;
+        this.blockAttackEnd = false;
 
         this.players = {
             1: this.createPlayerState(),
@@ -104,6 +110,8 @@ class GameState {
         this.attackedThisTurn = false;
         this.cardsPlayedThisTurn = 0;
         this.borrowABowUsedThisTurn = false;
+        this.abilitiesDisabledThisTurn = null;
+        this.abilitiesDisabledThisTurn = null;
         this.firstEnergyAttached = false; // Reset for Sophia S. Wang
         this.turn++;
         this.phase = 'main';
@@ -128,6 +136,9 @@ class GameState {
             char.usedPowerChordLastTurn = char.usedPowerChord || false; // Track for Fingerstyle
             char.usedPowerChord = false; // Reset Power Chord flag
             char.usedClericSpellThisTurn = false;
+            char.usedBAIWranglerThisTurn = false;
+            char.usedMusicalCatSummonedThisTurn = false;
+            char.usedProgramProductionThisTurn = false;
         });
 
         this.applyStartOfTurnEffects();
@@ -154,23 +165,25 @@ class GameState {
         }
 
         // Katie Xiang's Nausicaa's Undying Heartbeat - At ≤50 HP, heal 20 from all
-        let katieHeartbeatTriggered = false;
-        [player.active, ...player.bench].filter(c => c).forEach(char => {
-            if (!katieHeartbeatTriggered && char.name === 'Katie Xiang' && (char.hp - (char.damage || 0)) <= 50) {
-                katieHeartbeatTriggered = true;
-                // Heal 20 damage from all your characters
-                [player.active, ...player.bench].filter(c => c).forEach(healChar => {
-                    if (healChar.damage && healChar.damage > 0) {
-                        const healAmount = Math.min(20, healChar.damage);
-                        healChar.damage -= healAmount;
-                        this.log(`Nausicaa's Undying Heartbeat: ${healChar.name} healed ${healAmount} damage`, 'heal');
-                    }
-                });
-            }
-        });
+        if (!abilitiesDisabledFor(this.currentPlayer)) {
+            let katieHeartbeatTriggered = false;
+            [player.active, ...player.bench].filter(c => c).forEach(char => {
+                if (!katieHeartbeatTriggered && char.name === 'Katie Xiang' && (char.hp - (char.damage || 0)) <= 50) {
+                    katieHeartbeatTriggered = true;
+                    // Heal 20 damage from all your characters
+                    [player.active, ...player.bench].filter(c => c).forEach(healChar => {
+                        if (healChar.damage && healChar.damage > 0) {
+                            const healAmount = Math.min(20, healChar.damage);
+                            healChar.damage -= healAmount;
+                            this.log(`Nausicaa's Undying Heartbeat: ${healChar.name} healed ${healAmount} damage`, 'heal');
+                        }
+                    });
+                }
+            });
+        }
 
         // Yanwan Zhu's Bass Boost - draw after attack
-        if (player.active && player.active.shouldDrawFromBassBoost) {
+        if (!abilitiesDisabledFor(this.currentPlayer) && player.active && player.active.shouldDrawFromBassBoost) {
             this.drawCards(this.currentPlayer, 1);
             this.log('Yanwan Zhu\'s Bass Boost: Drew 1 card!');
             player.active.shouldDrawFromBassBoost = false;
@@ -211,7 +224,7 @@ class GameState {
 
         // Check for Luke Xu's Nullify - opponent abilities disabled
         const opponentNum = this.currentPlayer === 1 ? 2 : 1;
-        if (game.nextTurnEffects[this.currentPlayer].abilitiesDisabled) {
+        if (abilitiesDisabledFor(this.currentPlayer)) {
             this.log('Luke Xu\'s Nullify: Opponent abilities are disabled this turn!', 'info');
         }
 
@@ -227,7 +240,7 @@ class GameState {
         // Apply Fiona's "Getting dressed" - while on bench, active gains maid status
         [1, 2].forEach(playerNum => {
             const player = this.players[playerNum];
-            const hasFionaOnBench = player.bench.some(char => char && char.name === 'Fiona Li');
+            const hasFionaOnBench = !abilitiesDisabledFor(playerNum) && player.bench.some(char => char && char.name === 'Fiona Li');
 
             const activeChar = player.active;
             if (hasFionaOnBench && activeChar) {
@@ -266,7 +279,7 @@ class GameState {
         game.usedFourLeafClover = false;
 
         // Matthew Wang's Pot of Greed - flip coin at turn start, heads = may draw
-        if (player.active && player.active.name === 'Matthew Wang') {
+        if (!abilitiesDisabledFor(this.currentPlayer) && player.active && player.active.name === 'Matthew Wang') {
             const coin = flipCoin();
             game.log(`Matthew Wang's Pot of Greed: Flipped ${coin ? 'heads' : 'tails'}`);
             if (coin) {
@@ -376,7 +389,7 @@ class GameState {
         }
 
         // Grace Zhao's Royalties ability
-        if (opponent.active && opponent.active.name === 'Grace Zhao') {
+        if (!abilitiesDisabledFor(opponentNum) && opponent.active && opponent.active.name === 'Grace Zhao') {
             if (player.active && player.active.attachedTools) {
                 const hasAVGEItem = player.active.attachedTools.some(tool =>
                     tool.name === 'AVGE T-Shirt' || tool.name === 'AVGE T-shirt' || tool.name === 'AVGE Showcase Sticker' || tool.name === 'AVGE showcase sticker'
@@ -389,7 +402,7 @@ class GameState {
         }
     }
 
-    dealDamage(characterCard, amount, source = null) {
+    dealDamage(characterCard, amount, source = null, options = {}) {
         if (!characterCard) return;
 
         if (!source && this.lastAttackSource && this.lastAttackSource.id !== characterCard.id) {
@@ -402,6 +415,7 @@ class GameState {
         const isAttackDamage = source && this.lastAttackSource && source.id === this.lastAttackSource.id && characterCard.id !== source.id;
         let playerNum = this.findPlayerWithCharacter(characterCard);
         let playerObj = this.players[playerNum];
+        const canApplyAbilities = !abilitiesDisabledFor(playerNum);
 
         if (isAttackDamage) {
             if (game.nextTurnEffects[game.currentPlayer].tricksterOpponentBonus) {
@@ -414,28 +428,17 @@ class GameState {
             }
         }
 
-        // Goon status: -20 damage, reflects 20 damage
-        if (characterCard.status && characterCard.status.includes('Goon')) {
-            finalDamage -= 20;
-            // Reflect 20 damage back to attacker (if there is an attacker)
-            if (source && source !== characterCard) {
-                const reflectDamage = 20;
-                source.damage = (source.damage || 0) + reflectDamage;
-                this.log(`Goon status: Reflected ${reflectDamage} damage back to ${source.name}!`, 'damage');
-            }
-        }
-
-        // Conductor status: double healing from music stands (handled elsewhere)
-
-        // Maid status: immune to <=20 damage
-        if (characterCard.status && characterCard.status.includes('Maid') && finalDamage <= 20 && characterCard.name !== 'Kana Takizawa') {
-            this.log(`${characterCard.name} is protected by Maid status!`);
+        // Maid status: immune to attacks of 10 base damage or less (before debuffs)
+        const baseDamage = typeof options.baseDamage === 'number' ? options.baseDamage : (typeof game.lastAttackBaseDamage === 'number' ? game.lastAttackBaseDamage : null);
+        const isAttack = typeof options.isAttack === 'boolean' ? options.isAttack : isAttackDamage;
+        if (!options.ignoreImmunities && isAttack && characterCard.status && characterCard.status.includes('Maid') && baseDamage !== null && baseDamage <= 10) {
+            this.log(`${characterCard.name} is protected by Maid status!`, 'info');
             return;
         }
 
-        if (isAttackDamage) {
+        if (isAttackDamage && canApplyAbilities) {
             // Character-specific abilities
-            if (characterCard.name === 'Kana Takizawa') {
+            if (characterCard.name === 'Kana Takizawa' && canApplyAbilities) {
                 finalDamage -= 10; // Immense Aura
                 this.log('Kana\'s Immense Aura reduces damage by 10');
             }
@@ -444,14 +447,8 @@ class GameState {
             const player = this.findPlayerWithCharacter(characterCard);
             // Removed Katie/Mason and Sophia/Pascal synergies (no longer on card text)
 
-            // Izzy's BAI wrangler: Take 20 less damage if concert hall is in play
-            if (characterCard.name === 'Izzy Chen' && this.stadium && this.isPerformanceSpace(this.stadium.name)) {
-                finalDamage -= 20;
-                this.log('Izzy\'s BAI wrangler: -20 damage (Concert Hall active)');
-            }
-
             // Demi Lu's Steinert Warrior - Immune on bench if Steinert stadium
-            if (characterCard.name === 'Demi Lu' && playerObj && playerObj.bench.includes(characterCard)) {
+            if (!options.ignoreImmunities && characterCard.name === 'Demi Lu' && playerObj && playerObj.bench.includes(characterCard)) {
                 if (this.stadium && (this.stadium.name === 'Steinert Practice Room' || this.stadium.name === 'Steinert Basement Studio')) {
                     finalDamage = 0;
                     this.log('Demi Lu\'s Steinert Warrior: Immune on bench in Steinert stadium!');
@@ -465,8 +462,8 @@ class GameState {
             finalDamage = Math.ceil(finalDamage / 10) * 10;
         }
 
-        // Weston Poe's Right back at you - Reflect 50+ damage
-        if (characterCard.name === 'Weston Poe' && finalDamage >= 50 && source) {
+        // Weston Poe's Right back at you - Reflect 60+ damage
+        if (canApplyAbilities && characterCard.name === 'Weston Poe' && finalDamage >= 60 && source) {
             // Reflect damage to the attacker (source of the damage)
             this.dealDamage(source, finalDamage, null); // Pass null as source to avoid infinite recursion
             this.log(`Weston Poe's Right back at you: Reflected ${finalDamage} damage back to ${source.name}!`, 'damage');
@@ -475,7 +472,7 @@ class GameState {
 
         // Daniel Zhu's Share the Pain - choose up to 30 (in multiples of 10) to redirect, cannot KO Daniel
         const danielZhu = playerObj && playerObj.bench.find(c => c && c.name === 'Daniel Zhu');
-        if (danielZhu && characterCard.id !== danielZhu.id && finalDamage > 0) {
+        if (canApplyAbilities && danielZhu && characterCard.id !== danielZhu.id && finalDamage > 0) {
             const danielCurrentHP = danielZhu.hp - (danielZhu.damage || 0);
             const maxSafeRedirect = Math.min(30, finalDamage, danielCurrentHP - 1);
             if (maxSafeRedirect >= 10) {
@@ -494,7 +491,7 @@ class GameState {
         }
 
         // Meya Gao's I See Your Soul - Both can't attack next turn if damaged
-        if (characterCard.name === 'Meya Gao' && finalDamage > 0) {
+        if (canApplyAbilities && characterCard.name === 'Meya Gao' && finalDamage > 0) {
             const opponentNum = playerNum === 1 ? 2 : 1;
             game.nextTurnEffects[playerNum].cannotAttack = true;
             game.nextTurnEffects[opponentNum].cannotAttack = true;
@@ -503,18 +500,29 @@ class GameState {
 
         characterCard.damage = (characterCard.damage || 0) + finalDamage;
 
-        // Arranger status: retrieve item when damaged
+        // Arranger status: may shuffle an item from discard into deck when damaged
         if (characterCard.status && characterCard.status.includes('Arranger') && finalDamage > 0) {
-            this.log(`${characterCard.name} may retrieve an item from discard pile (Arranger status)`);
             const ownerPlayerNum = this.findPlayerWithCharacter(characterCard);
             if (ownerPlayerNum) {
                 const ownerPlayer = this.players[ownerPlayerNum];
-                selectFromDiscard(ownerPlayer, 'item', 1, (selectedCards) => {
-                    if (selectedCards.length > 0) {
-                        ownerPlayer.hand.push(...selectedCards);
-                        this.log(`${characterCard.name} retrieved ${selectedCards[0].name} from discard (Arranger)`);
+                const itemsInDiscard = ownerPlayer.discard.filter(c => c.cardType === 'item');
+                if (itemsInDiscard.length > 0) {
+                    this.log(`${characterCard.name} may shuffle an item from discard into their deck (Arranger status)`);
+                    if (!game.tempSelections) game.tempSelections = {};
+                    if (source && game.lastAttackSource && source.id === game.lastAttackSource.id) {
+                        game.pendingAttackEndTurn = true;
+                        game.pendingAttackAttackerId = source.id;
+                        game.blockAttackEnd = true;
                     }
-                });
+                    game.tempSelections.discardDestination = 'deck';
+                    game.tempSelections.discardShuffle = true;
+                    showDiscardSelectionModal(ownerPlayer, itemsInDiscard, 'item', 1, () => {
+                        delete game.tempSelections.discardDestination;
+                        delete game.tempSelections.discardShuffle;
+                    });
+                } else {
+                    this.log('No item cards in discard', 'info');
+                }
             }
         }
 
@@ -535,7 +543,7 @@ class GameState {
         // Arranger status: Search discard for Musescore file when knocked out
         if (characterCard.status && characterCard.status.includes('Arranger')) {
             const musescoreFiles = player.discard.filter(c =>
-                c.subtype === 'musescore' || c.name === 'Musescore file' || c.name === 'Standard Musescore File' || c.name === 'Corrupted File'
+                c.name === 'Standard Musescore File' || c.name === 'Corrupted Musescore File'
             );
             if (musescoreFiles.length > 0) {
                 this.log(`Arranger status: ${characterCard.name} can retrieve a Musescore file!`, 'info');
@@ -547,7 +555,16 @@ class GameState {
         }
 
         // Move to discard
-        player.discard.push(characterCard);
+            // Discard attached tools
+            if (characterCard.attachedTools && characterCard.attachedTools.length > 0) {
+                characterCard.attachedTools.forEach(tool => {
+                    player.discard.push(tool);
+                    this.log(`Discarded ${tool.name} from ${characterCard.name}`, 'info');
+                });
+                characterCard.attachedTools = [];
+            }
+
+            player.discard.push(characterCard);
 
         // Remove from active or bench
         if (player.active === characterCard) {
@@ -642,21 +659,22 @@ class GameState {
                 });
             }
 
-            // Yuelin Hu's Musical Cat - Draw AVGE Birb → discard and deal 30 to opponent active
-            if (card.name === 'AVGE Birb' && [player.active, ...player.bench].some(c => c && c.name === 'Yuelin Hu')) {
-                this.log('Yuelin Hu\'s Musical Cat: Drew AVGE Birb!');
-                const useAbility = confirm('Yuelin Hu: Discard AVGE Birb to deal 30 damage to opponent active?');
+            // Yuelin Hu's Musical Cat Summoned - Draw AVGE Birb → discard and deal 40 to opponent active
+            if (!abilitiesDisabledFor(playerNum) && card.name === 'AVGE Birb' && [player.active, ...player.bench].some(c => c && c.name === 'Yuelin Hu')) {
+                this.log('Yuelin Hu\'s Musical Cat Summoned: Drew AVGE Birb!');
+                const useAbility = confirm('Yuelin Hu: Discard AVGE Birb to deal 40 damage to opponent active?');
                 if (useAbility) {
                     player.discard.push(card);
                     player.hand = player.hand.filter(c => c.id !== card.id);
                     const opponentNum = playerNum === 1 ? 2 : 1;
                     const opponent = this.players[opponentNum];
                     if (opponent.active) {
-                        this.dealDamage(opponent.active, 30);
-                        this.log('Yuelin Hu\'s Musical Cat: Dealt 30 damage to opponent active!', 'damage');
+                        this.dealDamage(opponent.active, 40);
+                        this.log('Yuelin Hu\'s Musical Cat Summoned: Dealt 40 damage to opponent active!', 'damage');
                     }
                 }
             }
+
         }
         this.render();
     }
@@ -1439,7 +1457,7 @@ function updateUI() {
 
     // Show energy attached count (normal is 1, Eugenia allows 3)
     const player = game.players[game.currentPlayer];
-    const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo') ? 3 : 1;
+    const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 3 : 1;
     document.getElementById('energy-status').textContent = `${game.energyAttachedThisTurn}/${maxEnergy}`;
 
     document.getElementById('supporter-status').textContent = game.supporterPlayedThisTurn ? 'Yes' : 'No';
@@ -1802,7 +1820,7 @@ function showCardActions(card) {
 
             // Show attach energy button (only during main phase)
             if (game.phase === 'main') {
-                const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo') ? 3 : 1;
+                const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 3 : 1;
                 const energyDisabled = (game.energyAttachedThisTurn >= maxEnergy) ? 'disabled' : '';
                 const energyLabel = (game.energyAttachedThisTurn >= maxEnergy) ? ' (Max Reached)' : ` (${game.energyAttachedThisTurn}/${maxEnergy})`;
                 html += `<button class="action-btn" ${energyDisabled} onclick="attachEnergy('active')">⚡ Attach Energy${energyLabel}</button>`;
@@ -1810,10 +1828,18 @@ function showCardActions(card) {
 
             // Show activated abilities for active character
             if (card.ability && card.ability.type === 'activated') {
-                html += `<button class="action-btn" onclick="useActivatedAbility('${card.id}', 'ability')">Use ${card.ability.name}</button>`;
+                if (abilitiesDisabledFor(game.currentPlayer)) {
+                    html += `<p style="color: red;">Abilities disabled this turn</p>`;
+                } else {
+                    html += `<button class="action-btn" onclick="useActivatedAbility('${card.id}', 'ability')">Use ${card.ability.name}</button>`;
+                }
             }
             if (card.ability2 && card.ability2.type === 'activated') {
-                html += `<button class="action-btn" onclick="useActivatedAbility('${card.id}', 'ability2')">Use ${card.ability2.name}</button>`;
+                if (abilitiesDisabledFor(game.currentPlayer)) {
+                    html += `<p style="color: red;">Abilities disabled this turn</p>`;
+                } else {
+                    html += `<button class="action-btn" onclick="useActivatedAbility('${card.id}', 'ability2')">Use ${card.ability2.name}</button>`;
+                }
             }
         }
         if (player.bench.includes(card)) {
@@ -1822,7 +1848,7 @@ function showCardActions(card) {
 
             // Show attach energy button for bench (only during main phase)
             if (game.phase === 'main') {
-                const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo') ? 3 : 1;
+                const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 3 : 1;
                 const energyDisabled = (game.energyAttachedThisTurn >= maxEnergy) ? 'disabled' : '';
                 const energyLabel = (game.energyAttachedThisTurn >= maxEnergy) ? ' (Max Reached)' : ` (${game.energyAttachedThisTurn}/${maxEnergy})`;
                 html += `<button class="action-btn" ${energyDisabled} onclick="attachEnergy(${benchIndex})">⚡ Attach Energy${energyLabel}</button>`;
@@ -1830,14 +1856,14 @@ function showCardActions(card) {
 
             // Show bench-activated abilities
             if (card.ability && card.ability.type === 'activated') {
-                if (game.nextTurnEffects[game.currentPlayer].abilitiesDisabled) {
+                if (abilitiesDisabledFor(game.currentPlayer)) {
                     html += `<p style="color: red;">Abilities disabled this turn</p>`;
                 } else {
                     html += `<button class="action-btn" onclick="useActivatedAbility('${card.id}', 'ability')">Use ${card.ability.name}</button>`;
                 }
             }
             if (card.ability2 && card.ability2.type === 'activated') {
-                if (game.nextTurnEffects[game.currentPlayer].abilitiesDisabled) {
+                if (abilitiesDisabledFor(game.currentPlayer)) {
                     html += `<p style="color: red;">Abilities disabled this turn</p>`;
                 } else {
                     html += `<button class="action-btn" onclick="useActivatedAbility('${card.id}', 'ability2')">Use ${card.ability2.name}</button>`;
@@ -2056,13 +2082,13 @@ function playCharacterToActive(cardId) {
         // Bokai Bi's Algorithm - If opponent has this character, deal 50 damage
         const hasBokaiOnOppBench = opponent.bench.some(c => c && c.name === 'Bokai Bi');
         const oppHasThisChar = [opponent.active, ...opponent.bench].some(c => c && c.name === card.name);
-        if (hasBokaiOnOppBench && oppHasThisChar) {
+        if (!abilitiesDisabledFor(opponentNum) && hasBokaiOnOppBench && oppHasThisChar) {
             game.dealDamage(card, 50);
             game.log(`Bokai Bi's Algorithm: ${card.name} takes 50 damage for being a duplicate!`, 'damage');
         }
 
         // Barron Lee's Get Served - enforce energy cap on opponent
-        if (card.name === 'Barron Lee') {
+        if (!abilitiesDisabledFor(game.currentPlayer) && card.name === 'Barron Lee') {
             enforceBarronGetServed(opponentNum);
         }
 
@@ -2100,18 +2126,18 @@ function playCharacterToBench(cardId, slotIndex) {
         // Bokai Bi's Algorithm - If opponent has this character, deal 50 damage
         const hasBokaiOnOppBench = opponent.bench.some(c => c && c.name === 'Bokai Bi');
         const oppHasThisChar = [opponent.active, ...opponent.bench].some(c => c && c.name === card.name);
-        if (hasBokaiOnOppBench && oppHasThisChar) {
+        if (!abilitiesDisabledFor(opponentNum) && hasBokaiOnOppBench && oppHasThisChar) {
             game.dealDamage(card, 50);
             game.log(`Bokai Bi's Algorithm: ${card.name} takes 50 damage for being a duplicate!`, 'damage');
         }
 
         // Barron Lee's Get Served - enforce energy cap on opponent
-        if (card.name === 'Barron Lee') {
+        if (!abilitiesDisabledFor(game.currentPlayer) && card.name === 'Barron Lee') {
             enforceBarronGetServed(opponentNum);
         }
 
         // Ben Cherek's Loudmouth - Free switch when first played
-        if (card.name === 'Ben Cherek' && player.active) {
+        if (!abilitiesDisabledFor(game.currentPlayer) && card.name === 'Ben Cherek' && player.active) {
             const shouldSwitch = confirm(`Ben Cherek's Loudmouth: Switch ${card.name} with your active character ${player.active.name} for free?`);
             if (shouldSwitch) {
                 const benchIndex = player.bench.indexOf(card);
@@ -2161,7 +2187,7 @@ function attachEnergy(target) {
     const opponent = game.players[opponentNum];
 
     // Check if we've already attached max energy this turn
-    const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo') ? 3 : 1;
+    const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 3 : 1;
     if (!game.playtestMode && game.energyAttachedThisTurn >= maxEnergy) {
         alert(`You've already attached ${game.energyAttachedThisTurn} energy this turn!`);
         return;
@@ -2180,7 +2206,7 @@ function attachEnergy(target) {
     }
 
     // Check for Barron Lee's Get Served - Opponent cannot exceed 3 energy
-    const barronOnOppSide = [opponent.active, ...opponent.bench].some(c => c && c.name === 'Barron Lee');
+    const barronOnOppSide = !abilitiesDisabledFor(opponentNum) && [opponent.active, ...opponent.bench].some(c => c && c.name === 'Barron Lee');
     if (barronOnOppSide && targetChar.attachedEnergy.length >= 3) {
         game.log('Barron Lee\'s Get Served: Opponent cannot have more than 3 energy on a character!', 'warning');
         alert('Barron Lee\'s Get Served prevents attaching more than 3 energy to a character.');
@@ -2197,7 +2223,7 @@ function attachEnergy(target) {
     }
 
     // Sophia S. Wang's Original is Better - first energy attach each turn → opponent discards
-    if (game.energyAttachedThisTurn === 1 && targetChar.name === 'Sophia S. Wang' && opponent.deck.length > 0) {
+    if (!abilitiesDisabledFor(game.currentPlayer) && game.energyAttachedThisTurn === 1 && targetChar.name === 'Sophia S. Wang' && opponent.deck.length > 0) {
         const discarded = opponent.deck.shift();
         opponent.discard.push(discarded);
         game.log(`Sophia S. Wang's Original is Better: Opponent discarded top card of deck!`);
@@ -2769,6 +2795,10 @@ function showDiscardSelectionModal(player, cards, cardType, maxSelect, callback)
     modal.classList.remove('hidden');
 }
 
+function showMusescoreRetrievalModal(player, musescoreFiles) {
+    showDiscardSelectionModal(player, musescoreFiles, 'musescore', 1);
+}
+
 // Photograph: select an item from opponent hand to copy
 function showPhotographSelectionModal(itemCards, opponentNum) {
     const modal = document.getElementById('action-modal');
@@ -2869,15 +2899,25 @@ function toggleDiscardCard(cardId, maxSelect) {
 }
 
 function confirmDiscardSelection() {
-    const player = game.players[game.currentPlayer];
+    const player = game.tempSelections.discardPlayer || game.players[game.currentPlayer];
+    const destination = game.tempSelections.discardDestination || 'hand';
+    const shouldShuffle = !!game.tempSelections.discardShuffle;
 
     if (game.tempSelections.discardSelected && game.tempSelections.discardSelected.length > 0) {
         game.tempSelections.discardSelected.forEach(cardId => {
             const card = player.discard.find(c => c.id === cardId);
             if (card) {
-                player.hand.push(card);
                 player.discard = player.discard.filter(c => c.id !== cardId);
-                game.log(`Retrieved ${card.name} from discard`, 'info');
+                if (destination === 'deck') {
+                    player.deck.push(card);
+                    if (shouldShuffle) {
+                        game.shuffleDeck(game.currentPlayer);
+                    }
+                    game.log(`Shuffled ${card.name} into deck`, 'info');
+                } else {
+                    player.hand.push(card);
+                    game.log(`Retrieved ${card.name} from discard`, 'info');
+                }
             }
         });
     }
@@ -2885,6 +2925,10 @@ function confirmDiscardSelection() {
     const callback = game.tempSelections.discardCallback;
     delete game.tempSelections.discardSelected;
     delete game.tempSelections.discardCallback;
+    delete game.tempSelections.discardPlayer;
+    delete game.tempSelections.discardDestination;
+    delete game.tempSelections.discardShuffle;
+    game.blockAttackEnd = false;
 
     closeModal('action-modal');
     updateUI();
@@ -2896,6 +2940,8 @@ function cancelDiscardSelection() {
     const callback = game.tempSelections.discardCallback;
     delete game.tempSelections.discardSelected;
     delete game.tempSelections.discardCallback;
+    delete game.tempSelections.discardPlayer;
+    game.blockAttackEnd = false;
 
     closeModal('action-modal');
     updateUI();
@@ -2952,6 +2998,10 @@ function attachTool(toolId, target) {
         if (!character.status.includes(toolCard.grantStatus)) {
             character.status.push(toolCard.grantStatus);
         }
+        if (toolCard.grantStatus === 'Goon') {
+            character.goonBonusHp = (character.goonBonusHp || 0) + 20;
+            character.hp += 20;
+        }
     }
 
     if (toolCard.addType) {
@@ -2973,6 +3023,17 @@ function removeToolEffects(character, tool) {
     // Remove status granted by tool
     if (tool.grantStatus && character.status) {
         character.status = character.status.filter(s => s !== tool.grantStatus);
+    }
+
+    if (tool.grantStatus === 'Goon') {
+        character.goonBonusHp = Math.max(0, (character.goonBonusHp || 0) - 20);
+        character.hp = Math.max(1, character.hp - 20);
+        if (character.goonBonusHp === 0) {
+            delete character.goonMusicStandBonus;
+        }
+        if (character.damage != null && character.damage >= character.hp) {
+            game.knockOut(character);
+        }
     }
 
     // Remove type added by tool
@@ -3750,6 +3811,8 @@ function confirmFoldingStand() {
         player.discard.push(foldingStand);
     }
 
+    applyMusicStandUse(game.currentPlayer);
+
     closeModal('action-modal');
     updateUI();
 }
@@ -3794,9 +3857,21 @@ function selectBUOStandCard(cardId) {
             player.discard.push(buoStand);
         }
 
+        applyMusicStandUse(game.currentPlayer);
+
         closeModal('action-modal');
         updateUI();
     }
+}
+
+function applyMusicStandUse(playerNum) {
+    const player = game.players[playerNum];
+    const goonChars = [player.active, ...player.bench].filter(c => c && c.status && c.status.includes('Goon'));
+    if (goonChars.length === 0) return;
+    goonChars.forEach(char => {
+        char.goonMusicStandBonus = (char.goonMusicStandBonus || 0) + 10;
+        game.log(`Goon status: ${char.name} gains +10 damage from music stand`, 'info');
+    });
 }
 
 // Ice Skates: Player switch modal
@@ -4447,7 +4522,7 @@ function showSATBTargetSelection(opponent) {
 
     let html = `<h2>SATB - Choose Target</h2>`;
     html += `<p>Hits remaining: ${game.tempSelections.satbHitsRemaining}</p>`;
-    html += `<p>Choose an opponent's character to deal 10 damage</p>`;
+    html += `<p>Choose an opponent's character to deal 20 damage</p>`;
     html += `<div class="target-selection">`;
 
     allOpponentChars.forEach(char => {
@@ -4471,8 +4546,8 @@ function selectSATBTarget(targetId) {
     const target = [opponent.active, ...opponent.bench].find(c => c && c.id === targetId);
 
     if (target) {
-        game.dealDamage(target, 10);
-        game.log(`SATB hit ${target.name} for 10 damage`, 'damage');
+        game.dealDamage(target, 20);
+        game.log(`SATB hit ${target.name} for 20 damage`, 'damage');
 
         game.tempSelections.satbHitsRemaining--;
 
@@ -4800,6 +4875,14 @@ function closeModal(modalId) {
 
     if (modalId === 'action-modal' && game.pendingAttackEndTurn) {
         game.pendingAttackEndTurn = false;
+        if (game.pendingAttackAttackerId) {
+            const player = game.players[game.currentPlayer];
+            const attacker = [player.active, ...player.bench].find(c => c && c.id === game.pendingAttackAttackerId);
+            if (attacker) {
+                attacker.lastAttackTurn = game.turn;
+            }
+            game.pendingAttackAttackerId = null;
+        }
         endTurn();
     }
 }
@@ -4832,7 +4915,7 @@ function showAttackMenu(cardId) {
     }
 
     // Check for Luke Xu's Nullify - opponent abilities disabled
-    if (game.nextTurnEffects[game.currentPlayer].abilitiesDisabled) {
+    if (abilitiesDisabledFor(game.currentPlayer)) {
         game.log('Luke Xu\'s Nullify: Opponent abilities are disabled this turn!', 'info');
     }
 
@@ -4853,7 +4936,7 @@ function showAttackMenu(cardId) {
 
     // Ross Williams' I Am Become Ross - Active can use Ross's moves from bench
     const rossOnBench = player.bench.find(c => c && c.name === 'Ross Williams');
-    if (rossOnBench && rossOnBench.moves) {
+    if (!abilitiesDisabledFor(game.currentPlayer) && rossOnBench && rossOnBench.moves) {
         html += `<p style="color: #4CAF50; font-style: italic;">+ Ross's moves available (I Am Become Ross)</p>`;
         rossOnBench.moves.forEach(move => {
             allMoves.push({...move, isRossMove: true});
@@ -4890,6 +4973,11 @@ function getEffectiveRetreatCost(character) {
 
     // Conductor status: double retreat cost
     if (character.status && character.status.includes('Conductor')) {
+        cost *= 2;
+    }
+
+    // Goon status: double retreat cost
+    if (character.status && character.status.includes('Goon')) {
         cost *= 2;
     }
 
@@ -4932,13 +5020,16 @@ function canUseMove(character, move) {
 
 function getMoveEnergyCost(move) {
     const baseCost = Array.isArray(move.cost) ? move.cost.length : (move.cost || 0);
-    const extraCost = (game.stadium && (game.stadium.name === 'Steinert Basement Studio' || game.stadium.name === 'Steinert Practice Room')) ? 1 : 0;
+    let extraCost = (game.stadium && (game.stadium.name === 'Steinert Basement Studio' || game.stadium.name === 'Steinert Practice Room')) ? 1 : 0;
+    const currentPlayer = game.players[game.currentPlayer];
+    const active = currentPlayer && currentPlayer.active;
+    if (active && active.name === 'Demi Lu') {
+        extraCost = 0;
+    }
     let cost = baseCost + extraCost;
 
     if (game.stadium && game.stadium.name === 'Lindemann Big Practice Room') {
-        const player = game.players[game.currentPlayer];
-        const active = player.active;
-        const benchChars = player.bench.filter(c => c);
+        const benchChars = currentPlayer.bench.filter(c => c);
         if (active) {
             const allMatch = benchChars.every(char => char.type.some(t => active.type.includes(t)));
             if (allMatch) {
@@ -4957,7 +5048,7 @@ function selectMove(cardId, moveIndex) {
     // Build combined move list (including Ross's moves if applicable)
     let allMoves = attacker.moves ? [...attacker.moves] : [];
     const rossOnBench = player.bench.find(c => c && c.name === 'Ross Williams');
-    if (rossOnBench && rossOnBench.moves) {
+    if (!abilitiesDisabledFor(game.currentPlayer) && rossOnBench && rossOnBench.moves) {
         rossOnBench.moves.forEach(move => {
             allMoves.push({...move, isRossMove: true});
         });
@@ -5007,7 +5098,7 @@ function showTargetSelection(attacker, move) {
     const opponent = game.players[opponentNum];
 
     // Check if this move can target bench (like Pokemon TCG, only certain movecans can)
-    const benchTargetingMoves = ['Small Ensemble committee', 'Jennie spread attack', 'Rudiments', 'You know what it is'];
+    const benchTargetingMoves = ['Small Ensemble Committee', 'Jennie spread attack', 'Rudiments', 'You know what it is'];
     const canTargetBench = benchTargetingMoves.includes(move.name);
 
     let html = `<h2>Select Target for ${move.name}</h2>`;
@@ -5072,7 +5163,7 @@ function executeAttack(attackerId, moveName, targetId) {
     // Check Ross's moves if not found in attacker's moves
     if (!move) {
         const rossOnBench = player.bench.find(c => c && c.name === 'Ross Williams');
-        if (rossOnBench && rossOnBench.moves) {
+        if (!abilitiesDisabledFor(game.currentPlayer) && rossOnBench && rossOnBench.moves) {
             move = rossOnBench.moves.find(m => m.name === moveName);
         }
     }
@@ -5113,8 +5204,14 @@ function executeAttack(attackerId, moveName, targetId) {
     const waitForModal = performMoveEffect(attacker, target, move);
     if (waitForModal) {
         game.pendingAttackEndTurn = true;
+        game.pendingAttackAttackerId = attacker.id;
         return;
     }
+    if (game.blockAttackEnd) {
+        game.blockAttackEnd = false;
+        return;
+    }
+    attacker.lastAttackTurn = game.turn;
     closeModal('action-modal');
     updateUI();
     endTurn();
@@ -5138,12 +5235,17 @@ function executeDamageAttack(attacker, target, move) {
     }
 
     const finalDamage = calculateDamage(attacker, target, baseDamage, move);
-    game.dealDamage(target, finalDamage, attacker);
+    game.dealDamage(target, finalDamage, attacker, { isAttack: true, baseDamage });
     game.log(`${attacker.name} used ${move.name} on ${target.name} for ${finalDamage} damage!`, 'damage');
 }
 
 function calculateDamage(attacker, defender, baseDamage, move) {
+    game.lastAttackBaseDamage = baseDamage;
     let damage = baseDamage;
+    const attackerPlayerNum = game.findPlayerWithCharacter(attacker);
+    const defenderPlayerNum = game.findPlayerWithCharacter(defender);
+    const attackerAbilitiesAllowed = !abilitiesDisabledFor(attackerPlayerNum);
+    const defenderAbilitiesAllowed = !abilitiesDisabledFor(defenderPlayerNum);
 
     // Apply type super effectiveness (2x damage)
     attacker.type.forEach(attackerType => {
@@ -5190,7 +5292,7 @@ function calculateDamage(attacker, defender, baseDamage, move) {
 
     // Grace's Amplify (bench ability)
     const hasGraceOnBench = currentPlayer.bench.some(char => char && char.name === 'Grace Zhao');
-    if (hasGraceOnBench && attacker.type.includes(TYPES.GUITAR)) {
+    if (attackerAbilitiesAllowed && hasGraceOnBench && attacker.type.includes(TYPES.GUITAR)) {
         damage += 20;
         game.log('Grace\'s Amplify: +20 damage');
     }
@@ -5202,7 +5304,7 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     }
 
     // Ashley Toby's Instagram Viral
-    if (attacker.name === 'Ashley Toby' || attacker.name === 'Ash') {
+    if (attackerAbilitiesAllowed && (attacker.name === 'Ashley Toby' || attacker.name === 'Ash')) {
         const bothBenchesFull = currentPlayer.bench.every(slot => slot !== null) &&
                                  opponent.bench.every(slot => slot !== null);
         if (bothBenchesFull) {
@@ -5212,7 +5314,7 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     }
 
     // Cavin's "Wait no... I'm not into femboys–" - +20 damage per maid in play
-    if (attacker.name === 'Cavin Xue') {
+    if (attackerAbilitiesAllowed && attacker.name === 'Cavin Xue') {
         const allChars = [currentPlayer.active, ...currentPlayer.bench, opponent.active, ...opponent.bench].filter(c => c);
         const maidCount = allChars.filter(char => char.status && char.status.includes('Maid')).length;
         if (maidCount > 0) {
@@ -5222,12 +5324,11 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     }
 
     // Ryan Li's "Moe moe kyun~!" - All maids do +10 damage (both sides)
-    const hasRyanLi = [
-        game.players[1].active,
-        ...game.players[1].bench,
-        game.players[2].active,
-        ...game.players[2].bench
-    ].some(char => char && char.name === 'Ryan Li');
+    const hasRyanLi = [1, 2].some(playerNum => {
+        if (abilitiesDisabledFor(playerNum)) return false;
+        const player = game.players[playerNum];
+        return [player.active, ...player.bench].some(char => char && char.name === 'Ryan Li');
+    });
     if (hasRyanLi && attacker.status && attacker.status.includes('Maid')) {
         damage += 10;
         game.log('Ryan Li ability: +10 damage (maid bonus)');
@@ -5235,13 +5336,13 @@ function calculateDamage(attacker, defender, baseDamage, move) {
 
     // Juan Burgos's "Baking Buff" - While on bench, brass active does +20 damage
     const hasJuanOnBench = currentPlayer.bench.some(char => char && char.name === 'Juan Burgos');
-    if (hasJuanOnBench && currentPlayer.active && currentPlayer.active === attacker && attacker.type.includes(TYPES.BRASS)) {
+    if (attackerAbilitiesAllowed && hasJuanOnBench && currentPlayer.active && currentPlayer.active === attacker && attacker.type.includes(TYPES.BRASS)) {
         damage += 20;
         game.log('Juan Burgos bench ability: +20 damage to brass');
     }
 
     // Daniel Yang's "Delicate Ears" - If no brass in play, +20 damage
-    if (attacker.name === 'Daniel Yang') {
+    if (attackerAbilitiesAllowed && attacker.name === 'Daniel Yang') {
         const allChars = [
             game.players[1].active, ...game.players[1].bench,
             game.players[2].active, ...game.players[2].bench
@@ -5253,18 +5354,12 @@ function calculateDamage(attacker, defender, baseDamage, move) {
         }
     }
 
-    // Carolyn Zheng's "Procrastinate" - +40 damage if didn't attack last turn (stacks)
-    if (attacker.name === 'Carolyn Zheng') {
-        if (!attacker.attackedLastTurn) {
-            if (!attacker.procrastinateStacks) attacker.procrastinateStacks = 1;
-            else attacker.procrastinateStacks++;
-
-            damage += 40 * attacker.procrastinateStacks;
-            game.log(`Carolyn Zheng Procrastinate: +${40 * attacker.procrastinateStacks} damage (${attacker.procrastinateStacks} stacks)`);
-        } else {
-            attacker.procrastinateStacks = 0;
+    // Carolyn Zheng's "Procrastinate" - +30 damage if didn't attack last turn (no stacking)
+    if (attackerAbilitiesAllowed && attacker.name === 'Carolyn Zheng') {
+        if (attacker.lastAttackTurn == null || attacker.lastAttackTurn < game.turn - 2) {
+            damage += 30;
+            game.log('Carolyn Zheng Procrastinate: +30 damage');
         }
-        attacker.attackedLastTurn = true;
     }
 
     // Poppet status (Extension Cord): +20 damage if NOT in a performance space
@@ -5272,6 +5367,15 @@ function calculateDamage(attacker, defender, baseDamage, move) {
         if (!game.stadium || !game.isPerformanceSpace(game.stadium.name)) {
             damage += 20;
             game.log('Poppet Pop-Up: +20 damage (not in performance space)');
+        }
+    }
+
+    // Goon status: +10 damage per music stand used
+    if (attacker.status && attacker.status.includes('Goon')) {
+        const goonBonus = attacker.goonMusicStandBonus || 0;
+        if (goonBonus > 0) {
+            damage += goonBonus;
+            game.log(`Goon status: +${goonBonus} damage from music stands`);
         }
     }
 
@@ -5295,7 +5399,7 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     }
 
     // Yanwan Zhu's Bass Boost - If has 2 Guitar energy, draw after attack
-    if (attacker.name === 'Yanwan Zhu') {
+    if (attackerAbilitiesAllowed && attacker.name === 'Yanwan Zhu') {
         const guitarEnergyCount = attacker.attachedEnergy.filter(e => e.energyType === TYPES.GUITAR).length;
         if (guitarEnergyCount >= 2) {
             attacker.shouldDrawFromBassBoost = true;
@@ -5322,11 +5426,13 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     // Separate Hands delayed damage handled in the move logic
 
         // Anna Brown's Do Not Disturb - On bench, Anna takes 20 less damage
-        const defenderPlayer = game.findPlayerWithCharacter(defender);
-        const defenderPlayerObj = game.players[defenderPlayer];
-        if (defender && defender.name === 'Anna Brown' && defenderPlayerObj && defenderPlayerObj.bench.includes(defender)) {
-            damage = Math.max(0, damage - 20);
-            game.log('Anna Brown\'s Do Not Disturb: -20 damage while benched');
+        if (defenderAbilitiesAllowed) {
+            const defenderPlayer = game.findPlayerWithCharacter(defender);
+            const defenderPlayerObj = game.players[defenderPlayer];
+            if (defender && defender.name === 'Anna Brown' && defenderPlayerObj && defenderPlayerObj.bench.includes(defender)) {
+                damage = Math.max(0, damage - 20);
+                game.log('Anna Brown\'s Do Not Disturb: -20 damage while benched');
+            }
         }
 
     // Damper Pedal effect
@@ -5337,7 +5443,6 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     }
 
     // Felix Chen's Synesthesia - If all characters in play are different types, -10 damage
-    const defenderPlayerNum = attacker === game.players[1].active || game.players[1].bench.includes(attacker) ? 2 : 1;
     const defenderSide = game.players[defenderPlayerNum];
     const felixInPlay = [defenderSide.active, ...defenderSide.bench].some(c => c && c.name === 'Felix Chen');
 
@@ -5353,7 +5458,7 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     // Bokai Bi's Algorithm - Opponent plays duplicate → 50 damage (handled elsewhere)
     // This is checked when opponents play characters, not in damage calculation
 
-    if (felixInPlay) {
+    if (felixInPlay && defenderAbilitiesAllowed) {
         // Check if all characters in play are of different types
         const charsInPlay = [defenderSide.active, ...defenderSide.bench].filter(c => c);
 
@@ -5570,7 +5675,7 @@ function useActivatedAbility(cardId, abilitySlot) {
     const ability = card[abilitySlot];
     if (!ability || ability.type !== 'activated') return;
 
-    if (game.nextTurnEffects[game.currentPlayer].abilitiesDisabled) {
+    if (abilitiesDisabledFor(game.currentPlayer)) {
         alert('Abilities are disabled this turn.');
         game.log('Abilities are disabled this turn (Nullify).', 'warning');
         return;
@@ -5588,8 +5693,8 @@ function useActivatedAbility(cardId, abilitySlot) {
             }
 
             const opponentNum = game.currentPlayer === 1 ? 2 : 1;
-            game.nextTurnEffects[opponentNum].abilitiesDisabled = true;
-            game.log('Nullify: Opponent abilities disabled next turn!', 'info');
+            game.abilitiesDisabledThisTurn = opponentNum;
+            game.log('Nullify: Opponent abilities disabled for the rest of this turn!', 'info');
             closeModal('action-modal');
             updateUI();
             break;
@@ -5647,17 +5752,16 @@ function useActivatedAbility(cardId, abilitySlot) {
         case 'Program Production':
             // Rachel: Retrieve concert programs/tickets from discard
             if (player.active === card) {
+                if (card.usedProgramProductionThisTurn) {
+                    alert('Program Production can only be used once per turn!');
+                    closeModal('action-modal');
+                    break;
+                }
                 const programsAndTickets = player.discard.filter(c =>
-                    c.name === 'Concert program' || c.name === 'Concert ticket'
+                    c.name === 'Concert Program' || c.name === 'Concert Ticket'
                 );
                 if (programsAndTickets.length > 0) {
-                    programsAndTickets.forEach(item => {
-                        player.hand.push(item);
-                        player.discard = player.discard.filter(c => c !== item);
-                        game.log(`Retrieved ${item.name} from discard`);
-                    });
-                    closeModal('action-modal');
-                    updateUI();
+                    showProgramProductionModal(player, programsAndTickets);
                 } else {
                     alert('No Concert Programs or Tickets in discard pile!');
                 }
@@ -5726,9 +5830,11 @@ function useActivatedAbility(cardId, abilitySlot) {
             });
             // Filter for items/tools
             const itemsAndTools = randomThree.filter(c => c.cardType === 'item' || c.cardType === 'tool');
-            // Non-items go to bottom of deck
+            // Non-items/tools return to discard
             const nonItems = randomThree.filter(c => c.cardType !== 'item' && c.cardType !== 'tool');
-            player.deck.push(...nonItems);
+            if (nonItems.length > 0) {
+                player.discard.push(...nonItems);
+            }
 
             if (itemsAndTools.length > 0) {
                 // Put items/tools on top of deck in order
@@ -5741,29 +5847,38 @@ function useActivatedAbility(cardId, abilitySlot) {
             break;
 
         case 'Category Theory':
-            // Joshua Kou: If all cards in hand are items (at least 2), reveal, shuffle to deck, draw 3
-            if (player.hand.length < 2) {
-                alert('Need at least 2 cards in hand!');
+            // Joshua Kou: If this is the only card in your hand, reveal it, shuffle into deck, draw 4
+            if (player.hand.length !== 1 || player.hand[0].id !== card.id) {
+                alert('Category Theory can only be used if this is the only card in your hand!');
                 closeModal('action-modal');
                 break;
             }
 
-            const allItems = player.hand.every(c => c.cardType === 'item');
-            if (allItems) {
-                game.log(`Category Theory: Revealing ${player.hand.length} items: ${player.hand.map(c => c.name).join(', ')}`);
-                // Shuffle hand into deck
-                player.deck.push(...player.hand);
-                player.hand = [];
-                game.shuffleDeck(game.currentPlayer);
-                // Draw 3 cards
-                game.drawCards(game.currentPlayer, 3);
-                game.log('Category Theory: Shuffled items into deck and drew 3 cards!');
+            game.log(`Category Theory: Revealing ${card.name}`);
+            player.hand = [];
+            player.deck.push(card);
+            game.shuffleDeck(game.currentPlayer);
+            game.drawCards(game.currentPlayer, 4);
+            game.log('Category Theory: Shuffled into deck and drew 4 cards!');
+            closeModal('action-modal');
+            updateUI();
+            break;
+
+        case 'BAI Wrangler':
+            // Izzy: Once per turn, move a stadium from discard to bottom of deck
+            if (card.usedBAIWranglerThisTurn) {
+                alert('BAI Wrangler can only be used once per turn!');
                 closeModal('action-modal');
-                updateUI();
-            } else {
-                alert('All cards in hand must be Items to use Category Theory!');
-                closeModal('action-modal');
+                break;
             }
+            if (!player.discard.some(c => c.cardType === 'stadium')) {
+                alert('No Stadium cards in discard pile!');
+                closeModal('action-modal');
+                break;
+            }
+            game.tempSelections = game.tempSelections || {};
+            game.tempSelections.baiWranglerCardId = card.id;
+            showBAIWranglerBottomModal(player);
             break;
 
         case 'Information Advantage':
@@ -5783,6 +5898,12 @@ function useActivatedAbility(cardId, abilitySlot) {
             // Jessica Jung: Shuffle one discard back to deck
             if (card.usedClericSpellThisTurn) {
                 alert('Cleric Spell can only be used once per turn!');
+                closeModal('action-modal');
+                break;
+            }
+            if (!flipCoin()) {
+                card.usedClericSpellThisTurn = true;
+                game.log('Cleric Spell: Tails - no effect');
                 closeModal('action-modal');
                 break;
             }
@@ -5877,6 +5998,92 @@ function executeClericSpell(cardIdx) {
     closeModal('action-modal');
     updateUI();
 }
+
+function showProgramProductionModal(player, cards) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Program Production</h2>`;
+    html += `<p>Select one Concert Program or Ticket to retrieve:</p>`;
+    html += `<div class="target-selection">`;
+
+    cards.forEach(card => {
+        const actualIdx = player.discard.indexOf(card);
+        html += `<div class="target-option" onclick="executeProgramProduction(${actualIdx})">
+            ${card.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeProgramProduction(cardIdx) {
+    const player = game.players[game.currentPlayer];
+    const card = player.discard[cardIdx];
+    if (!card) return;
+
+    player.discard.splice(cardIdx, 1);
+    player.hand.push(card);
+    game.log(`Program Production: Retrieved ${card.name} from discard`);
+
+    const rachel = player.active && player.active.name === 'Rachel Chen' ? player.active : null;
+    if (rachel) {
+        rachel.usedProgramProductionThisTurn = true;
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showBAIWranglerBottomModal(player) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    const stadiums = player.discard.filter(c => c.cardType === 'stadium');
+    let html = `<h2>BAI Wrangler</h2>`;
+    html += `<p>Select a Stadium card to put on the bottom of your deck:</p>`;
+    html += `<div class="target-selection">`;
+
+    stadiums.forEach(card => {
+        const actualIdx = player.discard.indexOf(card);
+        html += `<div class="target-option" onclick="executeBAIWranglerBottom(${actualIdx})">
+            ${card.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeBAIWranglerBottom(cardIdx) {
+    const player = game.players[game.currentPlayer];
+    const card = player.discard[cardIdx];
+    if (!card) return;
+
+    player.discard.splice(cardIdx, 1);
+    player.deck.push(card);
+    game.log(`BAI Wrangler: Placed ${card.name} on the bottom of the deck`);
+
+    const abilityCardId = game.tempSelections && game.tempSelections.baiWranglerCardId;
+    if (abilityCardId) {
+        const abilityCard = [player.active, ...player.bench].find(c => c && c.id === abilityCardId);
+        if (abilityCard) {
+            abilityCard.usedBAIWranglerThisTurn = true;
+        }
+    }
+
+    if (game.tempSelections) {
+        delete game.tempSelections.baiWranglerCardId;
+    }
+    closeModal('action-modal');
+    updateUI();
+}
+
 
 function showToolSelectionForDiscard(card) {
     const modal = document.getElementById('action-modal');
@@ -6063,6 +6270,11 @@ function setupKeyboardShortcuts() {
                 break;
             case 't':
                 endTurnHotkey();
+                break;
+            case 'l':
+                if (game.playtestMode) {
+                    openPlaytestCardLibrary();
+                }
                 break;
             default:
                 break;
@@ -6808,7 +7020,7 @@ function flipCoin() {
     const player = game.players[game.currentPlayer];
     const hasJayden = [player.active, ...player.bench].some(char => char && char.name === 'Jayden Brown');
 
-    if (hasJayden && !game.usedFourLeafClover) {
+    if (!abilitiesDisabledFor(game.currentPlayer) && hasJayden && !game.usedFourLeafClover) {
         game.usedFourLeafClover = true;
         game.log('Jayden Brown\'s Four-leaf Clover: Choose first coin flip result!');
         const rolledHeads = getRandom() < 0.5;
@@ -7074,7 +7286,7 @@ function showDrumKidWorkshopTargetSelection(sourceId, attackerId, moveIndex) {
         return;
     }
 
-    const benchTargetingMoves = ['Small Ensemble committee', 'Jennie spread attack', 'Rudiments', 'You know what it is'];
+    const benchTargetingMoves = ['Small Ensemble Committee', 'Jennie spread attack', 'Rudiments', 'You know what it is'];
     const canTargetBench = benchTargetingMoves.includes(move.name);
 
     const modal = document.getElementById('action-modal');
@@ -7217,7 +7429,7 @@ function showRacketSmashSelection(player, benchChars) {
     const content = document.getElementById('action-content');
 
     let html = `<h2>Racket Smash: Discard Energy</h2>`;
-    html += `<p>Select benched character to discard energy from:</p>`;
+    html += `<p>Select an opponent's benched character to discard energy from:</p>`;
     html += `<div class="target-selection">`;
 
     benchChars.forEach(char => {
@@ -7274,12 +7486,13 @@ function executeSnapPizzDiscard(targetId) {
 }
 
 function executeRacketSmash(charId) {
-    const player = game.players[game.currentPlayer];
-    const char = player.bench.find(c => c && c.id === charId);
+    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const opponent = game.players[opponentNum];
+    const char = opponent.bench.find(c => c && c.id === charId);
 
     if (char && char.attachedEnergy && char.attachedEnergy.length > 0) {
         const energy = char.attachedEnergy.pop();
-        player.discard.push(energy);
+        opponent.discard.push(energy);
         game.log(`Racket Smash: Discarded energy from ${char.name}`);
     }
 
@@ -7824,7 +8037,7 @@ function executeWipeout() {
     targets.forEach(targetId => {
         const target = allChars.find(c => c.id === targetId);
         if (target) {
-            const damage = calculateDamage(attacker, target, 60, { name: 'Wipeout' });
+            const damage = calculateDamage(attacker, target, 80, { name: 'Wipeout' });
             game.dealDamage(target, damage);
             game.log(`Wipeout: ${target.name} takes ${damage} damage!`, 'damage');
         }
@@ -7907,7 +8120,6 @@ function confirmArtistAlley() {
     if (!game.tempSelections || !game.tempSelections.artistAlleySelected) return;
     const selected = Array.from(game.tempSelections.artistAlleySelected);
     const attacker = game.tempSelections.artistAlleyAttacker;
-    const target = game.tempSelections.artistAlleyTarget;
     const move = game.tempSelections.artistAlleyMove;
     const player = game.players[game.currentPlayer];
 
@@ -7924,11 +8136,58 @@ function confirmArtistAlley() {
         }
     });
 
-    const totalDamage = selected.length * 30;
-    const finalDamage = calculateDamage(attacker, target, totalDamage, move);
-    game.dealDamage(target, finalDamage);
-    game.log(`Artist Alley: Discarded ${selected.length} programs/tickets for ${finalDamage} damage!`, 'damage');
+    const totalDamage = selected.length * 40;
+    game.tempSelections.artistAlleyDamage = totalDamage;
 
+    showArtistAlleyTargetSelection(attacker, move);
+}
+
+function showArtistAlleyTargetSelection(attacker, move) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+    const allChars = [
+        game.players[1].active, ...game.players[1].bench,
+        game.players[2].active, ...game.players[2].bench
+    ].filter(c => c);
+
+    let html = `<h2>Artist Alley - Choose Target</h2>`;
+    html += `<p>Select any character in play to take the damage.</p>`;
+    html += `<div class="target-selection">`;
+
+    allChars.forEach(char => {
+        html += `<div class="target-option" onclick="executeArtistAlleyDamage('${char.id}')">
+            ${char.name} (${char === game.players[1].active || char === game.players[2].active ? 'Active' : 'Bench'})
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeArtistAlleyDamage(targetId) {
+    const attacker = game.tempSelections.artistAlleyAttacker;
+    const move = game.tempSelections.artistAlleyMove;
+    const damage = game.tempSelections.artistAlleyDamage || 0;
+    const allChars = [
+        game.players[1].active, ...game.players[1].bench,
+        game.players[2].active, ...game.players[2].bench
+    ].filter(c => c);
+    const target = allChars.find(c => c.id === targetId);
+
+    if (attacker && target && damage > 0) {
+        const finalDamage = calculateDamage(attacker, target, damage, move);
+        game.dealDamage(target, finalDamage);
+        game.log(`Artist Alley: Discarded programs/tickets for ${finalDamage} damage to ${target.name}!`, 'damage');
+    }
+
+    if (game.tempSelections) {
+        delete game.tempSelections.artistAlleySelected;
+        delete game.tempSelections.artistAlleyAttacker;
+        delete game.tempSelections.artistAlleyMove;
+        delete game.tempSelections.artistAlleyDamage;
+    }
     closeModal('action-modal');
     updateUI();
 }
@@ -8019,6 +8278,124 @@ function executeE2Reaction(charId) {
     updateUI();
 }
 
+function showHarmonicsChoice(attacker, opponent, move) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    if (!game.tempSelections) game.tempSelections = {};
+    game.tempSelections.harmonics = {
+        attackerId: attacker.id,
+        moveName: move.name
+    };
+
+    let html = `<h2>Harmonics</h2>`;
+    html += `<p>Choose a targeting option:</p>`;
+    html += `<div class="target-selection">`;
+    html += `<button class="action-btn" onclick="startHarmonicsSelection(3, 60)">3 targets for 60 each</button>`;
+    html += `<button class="action-btn" onclick="startHarmonicsSelection(2, 70)">2 targets for 70 each</button>`;
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function startHarmonicsSelection(targetCount, damage) {
+    if (!game.tempSelections) game.tempSelections = {};
+    game.tempSelections.harmonicsTargetCount = targetCount;
+    game.tempSelections.harmonicsDamage = damage;
+    game.tempSelections.harmonicsSelected = new Set();
+    showHarmonicsTargetSelection();
+}
+
+function showHarmonicsTargetSelection() {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const opponent = game.players[opponentNum];
+    const targets = [opponent.active, ...opponent.bench].filter(c => c);
+
+    if (targets.length === 0) {
+        game.log('Harmonics: No targets available', 'info');
+        closeModal('action-modal');
+        return;
+    }
+
+    const selected = game.tempSelections.harmonicsSelected;
+    const targetCount = game.tempSelections.harmonicsTargetCount;
+    const damage = game.tempSelections.harmonicsDamage;
+
+    let html = `<h2>Harmonics - Select Targets</h2>`;
+    html += `<p>Select ${targetCount} target(s) for ${damage} damage each.</p>`;
+    html += `<div class="target-selection">`;
+
+    targets.forEach(char => {
+        const isSelected = selected.has(char.id);
+        html += `<div class="target-option${isSelected ? ' selected' : ''}" onclick="toggleHarmonicsTarget('${char.id}')">
+            ${char.name}${char === opponent.active ? ' (Active)' : ''}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<p>Selected: ${selected.size}/${targetCount}</p>`;
+    html += `<button class="action-btn" onclick="confirmHarmonicsTargets()">Confirm</button>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function toggleHarmonicsTarget(targetId) {
+    const selected = game.tempSelections && game.tempSelections.harmonicsSelected;
+    if (!selected) return;
+
+    if (selected.has(targetId)) {
+        selected.delete(targetId);
+    } else {
+        selected.add(targetId);
+    }
+
+    showHarmonicsTargetSelection();
+}
+
+function confirmHarmonicsTargets() {
+    const selection = game.tempSelections && game.tempSelections.harmonics;
+    const selected = game.tempSelections && game.tempSelections.harmonicsSelected;
+    if (!selection || !selected) return;
+
+    const targetCount = game.tempSelections.harmonicsTargetCount;
+    if (selected.size !== targetCount) {
+        alert(`Select exactly ${targetCount} targets.`);
+        return;
+    }
+
+    const player = game.players[game.currentPlayer];
+    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const opponent = game.players[opponentNum];
+    const attacker = [player.active, ...player.bench].find(c => c && c.id === selection.attackerId);
+    const move = attacker && attacker.moves ? attacker.moves.find(m => m.name === selection.moveName) : { name: 'Harmonics' };
+    const damage = game.tempSelections.harmonicsDamage;
+
+    if (attacker) {
+        const allTargets = [opponent.active, ...opponent.bench].filter(c => c);
+        selected.forEach(targetId => {
+            const target = allTargets.find(c => c.id === targetId);
+            if (target) {
+                const finalDamage = calculateDamage(attacker, target, damage, move);
+                game.dealDamage(target, finalDamage);
+                game.log(`Harmonics: ${target.name} takes ${finalDamage} damage!`, 'damage');
+            }
+        });
+    }
+
+    delete game.tempSelections.harmonics;
+    delete game.tempSelections.harmonicsTargetCount;
+    delete game.tempSelections.harmonicsDamage;
+    delete game.tempSelections.harmonicsSelected;
+    closeModal('action-modal');
+    updateUI();
+}
+
 function executeOutreach(charId) {
     const player = game.players[game.currentPlayer];
     const char = player.deck.find(c => c.id === charId);
@@ -8102,7 +8479,7 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'SATB':
-            // For each choir in play, choose opponent's character and do 10 damage
+            // For each choir in play, choose opponent's character and do 20 damage
             const choirCount = [player.active, ...player.bench].filter(c => c && c.type.includes(TYPES.CHOIR)).length;
             game.log(`SATB: Found ${choirCount} choir characters`);
 
@@ -8119,7 +8496,7 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Artist Alley':
-            // Discard chosen concert programs/tickets and do 30 damage each
+            // Discard chosen concert programs/tickets and do 40 damage each
             const eligible = player.hand.filter(c => c.name === 'Concert Program' || c.name === 'Concert Ticket');
             if (eligible.length > 0) {
                 showArtistAlleySelection(eligible, attacker, target, move);
@@ -8129,10 +8506,10 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Circular Breathing':
-            // 10 damage, next turn +10 damage (stacks)
+            // 10 damage, next turn +10 damage (stacks up to 50)
             executeDamageAttack(attacker, target, move);
             if (!attacker.circularBreathingBonus) attacker.circularBreathingBonus = 0;
-            attacker.circularBreathingBonus += 10;
+            attacker.circularBreathingBonus = Math.min(50, attacker.circularBreathingBonus + 10);
             attacker.circularBreathingBonusTurn = game.turn + 2;
             game.log('Circular Breathing bonus will apply next turn!');
             break;
@@ -8147,9 +8524,9 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Feedback Loop':
-            // 40 damage to target, each string character takes 10 damage
+            // Damage to target, each benched guitar takes 10 damage
             executeDamageAttack(attacker, target, move);
-            const feedbackLoopChars = [player.active, ...player.bench].filter(c => c && c.type.includes(TYPES.STRINGS));
+            const feedbackLoopChars = player.bench.filter(c => c && c.type.includes(TYPES.GUITAR));
             feedbackLoopChars.forEach(char => {
                 game.dealDamage(char, 10);
                 game.log(`Feedback Loop: ${char.name} took 10 recoil damage`);
@@ -8195,9 +8572,9 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Three Hand Technique':
-            // Three individual attacks of 10 damage each
+            // Three individual attacks of 20 damage each
             for (let i = 0; i < 3; i++) {
-                const damage = calculateDamage(attacker, target, 10, move);
+                const damage = calculateDamage(attacker, target, 20, move);
                 game.dealDamage(target, damage);
                 game.log(`Three Hand Technique hit ${i + 1}: ${damage} damage`);
             }
@@ -8271,20 +8648,20 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Improv':
-            // Discard top 3 of opponent deck, 50 base damage + 20 per item card
-            const improvTopThree = opponent.deck.splice(0, 3);
-            let itemsDiscarded = 0;
-            improvTopThree.forEach(card => {
-                opponent.discard.push(card);
-                if (card.cardType === 'item') {
-                    itemsDiscarded++;
+            // Discard top card of opponent deck, 20 base damage + 80 if item
+            let itemBonus = 0;
+            const improvCard = opponent.deck.shift();
+            if (improvCard) {
+                opponent.discard.push(improvCard);
+                game.log(`Opponent discarded ${improvCard.name}`);
+                if (improvCard.cardType === 'item') {
+                    itemBonus = 80;
                 }
-                game.log(`Opponent discarded ${card.name}`);
-            });
-            const improvBaseDamage = 50 + (itemsDiscarded * 20);
+            }
+            const improvBaseDamage = 20 + itemBonus;
             const improvFinalDamage = calculateDamage(attacker, target, improvBaseDamage, move);
             game.dealDamage(target, improvFinalDamage);
-            game.log(`Improv: ${itemsDiscarded} items for ${improvFinalDamage} damage!`, 'damage');
+            game.log(`Improv: ${itemBonus > 0 ? 'Item discarded' : 'No item discarded'} for ${improvFinalDamage} damage!`, 'damage');
             break;
 
         case 'Conducting':
@@ -8335,7 +8712,7 @@ function performMoveEffect(attacker, target, move) {
 
         case 'Triple Stop':
         case 'Triple Stops':
-            // Flip 3 coins, 30 damage per heads
+            // Flip 3 coins, 40 damage per heads
             let heads = 0;
             for (let i = 0; i < 3; i++) {
                 if (flipCoin()) {
@@ -8346,7 +8723,7 @@ function performMoveEffect(attacker, target, move) {
                 }
             }
             if (heads > 0) {
-                const tripleStopsDamage = heads * 30;
+                const tripleStopsDamage = heads * 40;
                 const tripleStopsFinal = calculateDamage(attacker, target, tripleStopsDamage, move);
                 game.dealDamage(target, tripleStopsFinal);
                 game.log(`Triple Stop: ${heads} heads for ${tripleStopsFinal} damage!`, 'damage');
@@ -8354,12 +8731,13 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Four Mallets':
-            // Four individual attacks of 10 damage each
+            // Four individual attacks of 10 damage each, then draw a card
             for (let i = 0; i < 4; i++) {
                 const fourMalletsDamage = calculateDamage(attacker, target, 10, move);
                 game.dealDamage(target, fourMalletsDamage);
                 game.log(`Four Mallets hit ${i + 1}: ${fourMalletsDamage} damage`);
             }
+            game.drawCards(game.currentPlayer, 1);
             break;
 
         case '30 Emails':
@@ -8375,17 +8753,17 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Ragebaited':
-            // 10 damage, +20 when below 50% HP, +60 when below 20% HP
-            let ragebaseDamage = 10;
+            // 20 damage, +30 when below 50% HP, +80 when below 20% HP
+            let ragebaseDamage = 20;
             const currentHP = attacker.hp - (attacker.damage || 0);
             const hpPercent = currentHP / attacker.hp;
 
             if (hpPercent <= 0.2) {
-                ragebaseDamage += 60;
-                game.log('Ragebaited: +60 damage (below 20% HP)!');
+                ragebaseDamage += 80;
+                game.log('Ragebaited: +80 damage (below 20% HP)!');
             } else if (hpPercent <= 0.5) {
-                ragebaseDamage += 20;
-                game.log('Ragebaited: +20 damage (below 50% HP)!');
+                ragebaseDamage += 30;
+                game.log('Ragebaited: +30 damage (below 50% HP)!');
             }
 
             const rageFinal = calculateDamage(attacker, target, ragebaseDamage, move);
@@ -8394,11 +8772,11 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Rimshot':
-            // Roll d6, if 1-4 do 60 damage
+            // Roll d6, if 1-4 do 70 damage
             const rimshotRoll = randInt(6) + 1;
             game.log(`Rimshot: Rolled ${rimshotRoll}`);
             if (rimshotRoll >= 1 && rimshotRoll <= 4) {
-                const rimshotDamage = calculateDamage(attacker, target, 60, move);
+                const rimshotDamage = calculateDamage(attacker, target, 70, move);
                 game.dealDamage(target, rimshotDamage);
                 game.log(`Rimshot hit for ${rimshotDamage} damage!`, 'damage');
             } else {
@@ -8407,9 +8785,9 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Screech!':
-            // Roll d6, damage = 10 + (10 * number)
+            // Roll d6, damage = 30 + (10 * number)
             const screechRoll = randInt(6) + 1;
-            const screechDamage = 10 + (10 * screechRoll);
+            const screechDamage = 30 + (10 * screechRoll);
             const screechFinal = calculateDamage(attacker, target, screechDamage, move);
             game.dealDamage(target, screechFinal);
             game.log(`Screech!: Rolled ${screechRoll} for ${screechFinal} damage!`, 'damage');
@@ -8425,22 +8803,20 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Harmonics':
-            // Flip 2 coins, if both heads do 100 damage
+            // Flip 2 coins, both heads: choose 3 targets for 60 or 2 targets for 70
             const coin1 = flipCoin();
             const coin2 = flipCoin();
             game.log(`Harmonics: Coin 1 - ${coin1 ? 'Heads' : 'Tails'}, Coin 2 - ${coin2 ? 'Heads' : 'Tails'}`);
             if (coin1 && coin2) {
-                const harmonicsDamage = calculateDamage(attacker, target, 100, move);
-                game.dealDamage(target, harmonicsDamage);
-                game.log(`Harmonics: Both heads! ${harmonicsDamage} damage!`, 'damage');
-            } else {
-                game.log('Harmonics: No damage');
+                showHarmonicsChoice(attacker, opponent, move);
+                return true;
             }
+            game.log('Harmonics: No damage');
             break;
 
         case 'Four Hands':
-            // 30 damage, +30 if another piano on bench
-            let fourHandsDamage = 30;
+            // 50 damage, +30 if another piano on bench
+            let fourHandsDamage = 50;
             const otherPianos = player.bench.filter(char =>
                 char && char.type.includes(TYPES.PIANO) && char.id !== attacker.id
             );
@@ -8540,35 +8916,8 @@ function performMoveEffect(attacker, target, move) {
             game.log(`${attacker.name} used Touhou Ensemble for ${touhouFinal} damage!`, 'damage');
             break;
 
-        case 'Small Ensemble committee':
-            // 10 damage to each opponent if at least one of David/Evelyn/Bokai/Roberto in play
-            // 50 damage to each if all four in play
-            const requiredNames = ['David', 'Evelyn', 'Bokai', 'Roberto'];
-            const playerCharsAll = [player.active, ...player.bench].filter(c => c);
-            const foundNames = requiredNames.filter(name =>
-                playerCharsAll.some(char => char.name === name)
-            );
-
-            if (foundNames.length > 0) {
-                const opponentAll = [opponent.active, ...opponent.bench].filter(c => c);
-                const committeeDamage = foundNames.length === 4 ? 50 : 10;
-
-                opponentAll.forEach(oppChar => {
-                    const committeeFinal = calculateDamage(attacker, oppChar, committeeDamage, move);
-                    game.dealDamage(oppChar, committeeFinal);
-                    game.log(`Small Ensemble: ${oppChar.name} takes ${committeeFinal} damage!`, 'damage');
-                });
-
-                if (foundNames.length === 4) {
-                    game.log('Small Ensemble: All 4 members present! 50 damage each!');
-                }
-            } else {
-                game.log('Small Ensemble: No required members in play');
-            }
-            break;
-
         case 'Guitar Shredding':
-            // 10 damage, discard all guitar energy, discard 2 cards per energy from opponent's deck
+            // 30 damage, discard all guitar energy, discard 1 card per energy from opponent's deck
             const guitarEnergy = attacker.attachedEnergy.filter(e => e.energyType === TYPES.GUITAR);
 
             if (guitarEnergy.length > 0) {
@@ -8579,14 +8928,14 @@ function performMoveEffect(attacker, target, move) {
                 game.log(`Guitar Shredding: Discarded ${guitarEnergy.length} guitar energy`);
 
                 // Discard 2 cards from opponent's deck per energy
-                const cardsToDiscard = guitarEnergy.length * 2;
+                const cardsToDiscard = guitarEnergy.length;
                 for (let i = 0; i < cardsToDiscard && opponent.deck.length > 0; i++) {
                     const discarded = opponent.deck.shift();
                     opponent.discard.push(discarded);
                 }
                 game.log(`Guitar Shredding: Opponent discarded ${Math.min(cardsToDiscard, opponent.deck.length)} cards from deck`);
 
-                const shreddingFinal = calculateDamage(attacker, target, 10, move);
+                const shreddingFinal = calculateDamage(attacker, target, 30, move);
                 game.dealDamage(target, shreddingFinal);
                 game.log(`${attacker.name} used Guitar Shredding for ${shreddingFinal} damage!`, 'damage');
             } else {
@@ -8611,7 +8960,7 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Grand Piano':
-            // 40 damage, +20 if stadium is a performance hall
+            // Base damage +20 if stadium is a performance hall
             let grandPianoDamage = move.damage;
             if (game.stadium && game.isPerformanceSpace(game.stadium.name)) {
                 grandPianoDamage += 20;
@@ -8637,7 +8986,7 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Stick Trick':
-            // 10 damage, swap with benched character for free
+            // Damage, swap with benched character for free
             executeDamageAttack(attacker, target, move);
             const stickTrickBench = player.bench.filter(c => c);
             if (stickTrickBench.length > 0) {
@@ -8653,8 +9002,8 @@ function performMoveEffect(attacker, target, move) {
         case 'Fanfare':
             // Not affected by weakness, resistance, or immunities
             const fanfareDamage = move.damage || 0;
-            game.dealDamage(target, fanfareDamage); // Direct damage, bypass calculateDamage
-            game.log(`${attacker.name} used Fanfare for ${fanfareDamage} damage (ignores resistance/weakness)!`, 'damage');
+            game.dealDamage(target, fanfareDamage, attacker, { ignoreImmunities: true }); // Direct damage, bypass calculateDamage
+            game.log(`${attacker.name} used Fanfare for ${fanfareDamage} damage (ignores weakness, resistance, and immunities)!`, 'damage');
             break;
 
         case 'Drain':
@@ -8671,13 +9020,14 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Embouchure':
-            // Move energy among characters
+            // Deal damage, then move energy among characters
+            executeDamageAttack(attacker, target, move);
             showEmbouchureSelection(player);
             return true;
             break;
 
         case 'Intense Echo':
-            // 30 damage + 10 to each bench
+            // Damage + 10 to each bench
             executeDamageAttack(attacker, target, move);
             opponent.bench.filter(c => c).forEach(benchChar => {
                 const benchDamage = calculateDamage(attacker, benchChar, 10, move);
@@ -8687,13 +9037,10 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Concert Pitch':
-            // 20 damage, +20 per brass if only brass on bench
-            let concertPitchDamage = 20;
-            const benchTypes = player.bench.filter(c => c).map(c => c.type).flat();
-            const onlyBrass = player.bench.filter(c => c).every(c => !c || c.type.includes(TYPES.BRASS));
-
-            if (onlyBrass && player.bench.some(c => c)) {
-                const brassCount = player.bench.filter(c => c && c.type.includes(TYPES.BRASS)).length;
+            // 40 damage, +20 per brass on bench
+            let concertPitchDamage = 40;
+            const brassCount = player.bench.filter(c => c && c.type.includes(TYPES.BRASS)).length;
+            if (brassCount > 0) {
                 concertPitchDamage += 20 * brassCount;
                 game.log(`Concert Pitch: +${20 * brassCount} damage (${brassCount} brass on bench)!`);
             }
@@ -8753,7 +9100,7 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Tabemono King':
-            // Heal all yours 30, opponent's 10, discard energy
+            // Heal all yours 30, opponent's 10, discard 1 energy
             [player.active, ...player.bench].filter(c => c).forEach(char => {
                 if (char.damage > 0) {
                     const healAmount = Math.min(30, char.damage);
@@ -8768,19 +9115,18 @@ function performMoveEffect(attacker, target, move) {
                     game.log(`Opponent's ${char.name} healed ${healAmount} damage!`, 'heal');
                 }
             });
-            // Discard all energy from attacker
+            // Discard 1 energy from attacker
             if (attacker.attachedEnergy.length > 0) {
-                const discardedCount = attacker.attachedEnergy.length;
-                attacker.attachedEnergy.forEach(e => player.discard.push(e));
-                attacker.attachedEnergy = [];
-                game.log(`Tabemono King: Discarded ${discardedCount} energy`);
+                const discarded = attacker.attachedEnergy.pop();
+                player.discard.push(discarded);
+                game.log('Tabemono King: Discarded 1 energy');
             }
             break;
 
         case 'Chorus':
-            // 20 damage + 10 per benched character
+            // 30 damage + 10 per benched character
             const chorusBenchCount = player.bench.filter(c => c).length;
-            const chorusDamage = 20 + (10 * chorusBenchCount);
+            const chorusDamage = 30 + (10 * chorusBenchCount);
             const chorusFinal = calculateDamage(attacker, target, chorusDamage, move);
             game.dealDamage(target, chorusFinal);
             game.log(`${attacker.name} used Chorus for ${chorusFinal} damage (${chorusBenchCount} benched)!`, 'damage');
@@ -8788,21 +9134,21 @@ function performMoveEffect(attacker, target, move) {
 
         // ===== GUITAR MOVES =====
         case 'Domain Expansion':
-            // Discard all energy, 40 damage to all opponents
+            // Discard all energy, 50 damage to all opponents
             const guitarEnergyCount = attacker.attachedEnergy.length;
             attacker.attachedEnergy.forEach(e => player.discard.push(e));
             attacker.attachedEnergy = [];
             game.log(`Domain Expansion: Discarded ${guitarEnergyCount} energy`);
 
             [opponent.active, ...opponent.bench].filter(c => c).forEach(oppChar => {
-                const domainDamage = calculateDamage(attacker, oppChar, 40, move);
+                const domainDamage = calculateDamage(attacker, oppChar, 50, move);
                 game.dealDamage(oppChar, domainDamage);
                 game.log(`Domain Expansion: ${oppChar.name} takes ${domainDamage} damage!`, 'damage');
             });
             break;
 
         case 'Power Chord':
-            // 70 damage, discard 2 energy
+            // 90 damage, discard 2 energy
             executeDamageAttack(attacker, target, move);
             const powerChordEnergy = Math.min(2, attacker.attachedEnergy.length);
             for (let i = 0; i < powerChordEnergy; i++) {
@@ -8815,12 +9161,12 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Fingerstyle':
-            // Only if didn't use Power Chord last turn, flip 8 coins, 20 damage per heads
+            // Only if didn't use Power Chord last turn, flip 5 coins, 20 damage per heads
             if (attacker.usedPowerChordLastTurn) {
                 game.log('Fingerstyle: Cannot use after Power Chord!', 'warning');
             } else {
                 let fingerstyleHeads = 0;
-                for (let i = 0; i < 8; i++) {
+                for (let i = 0; i < 5; i++) {
                     if (flipCoin()) {
                         fingerstyleHeads++;
                     }
@@ -8835,12 +9181,12 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Packet Loss':
-            // Flip coin per energy, discard on tails
+            // Flip coin per energy, discard on heads
             if (target.attachedEnergy && target.attachedEnergy.length > 0) {
                 const energyCount = target.attachedEnergy.length;
                 let discarded = 0;
                 for (let i = energyCount - 1; i >= 0; i--) {
-                    if (!flipCoin()) { // Tails
+                    if (flipCoin()) { // Heads
                         const energy = target.attachedEnergy.splice(i, 1)[0];
                         opponent.discard.push(energy);
                         discarded++;
@@ -8851,7 +9197,7 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Distortion':
-            // 30 damage, plucked strings +40 next turn
+            // Damage, plucked strings +40 next turn
             executeDamageAttack(attacker, target, move);
             if (!game.nextTurnEffects[game.currentPlayer].distortionBonus) {
                 game.nextTurnEffects[game.currentPlayer].distortionBonus = 0;
@@ -8889,8 +9235,8 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Ominous Chimes':
-            // Shuffle self back, 50 damage at end of opponent's turn
-            game.nextTurnEffects[opponentNum].ominousChimesDamage = 50;
+            // Shuffle self back, 70 damage at end of opponent's turn
+            game.nextTurnEffects[opponentNum].ominousChimesDamage = 70;
             game.nextTurnEffects[opponentNum].ominousChimesTarget = target.id;
 
             // Shuffle attacker back into deck
@@ -8903,25 +9249,20 @@ function performMoveEffect(attacker, target, move) {
             attacker.attachedTools = []; // Clear tools
             player.deck.push(attacker);
             game.shuffleDeck(game.currentPlayer);
-            game.log(`Ominous Chimes: ${attacker.name} shuffled back into deck. 50 damage will be dealt at end of opponent's turn!`);
+            game.log(`Ominous Chimes: ${attacker.name} shuffled back into deck. 70 damage will be dealt at end of opponent's turn!`);
             break;
 
         case 'Stickshot':
-            // Roll d6, if 1-4 roll again, damage = 10 × highest
-            let stickshotRoll1 = rollD6();
-            game.log(`Stickshot: First roll ${stickshotRoll1}`);
-            let stickshotFinal = stickshotRoll1;
-
-            if (stickshotRoll1 <= 4) {
-                const stickshotRoll2 = rollD6();
-                game.log(`Stickshot: Second roll ${stickshotRoll2}`);
-                stickshotFinal = Math.max(stickshotRoll1, stickshotRoll2);
+            // Roll d6 four times, damage = 40 × lowest roll
+            const stickshotRolls = [];
+            for (let i = 0; i < 4; i++) {
+                stickshotRolls.push(rollD6());
             }
-
-            const stickshotDamage = stickshotFinal * 10;
+            const lowestRoll = Math.min(...stickshotRolls);
+            const stickshotDamage = lowestRoll * 40;
             const stickshotDamageFinal = calculateDamage(attacker, target, stickshotDamage, move);
             game.dealDamage(target, stickshotDamageFinal);
-            game.log(`Stickshot: ${stickshotDamageFinal} damage (highest roll: ${stickshotFinal})!`, 'damage');
+            game.log(`Stickshot: Rolls ${stickshotRolls.join(', ')} → ${stickshotDamageFinal} damage (lowest roll: ${lowestRoll})!`, 'damage');
             break;
 
         case 'Drum Kid Workshop':
@@ -8938,9 +9279,15 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Tricky Rhythms':
-            // Complex energy discard and damage
-            showTrickyRhythmsModal(attacker, target, move);
-            return true;
+            // Each character in play with a tool attached takes 50 damage
+            const allCharsForTricky = [player.active, ...player.bench, opponent.active, ...opponent.bench].filter(c => c);
+            allCharsForTricky.forEach(char => {
+                if (char.attachedTools && char.attachedTools.length > 0) {
+                    const trickyDamage = calculateDamage(attacker, char, 50, move);
+                    game.dealDamage(char, trickyDamage);
+                    game.log(`Tricky Rhythms: ${char.name} takes ${trickyDamage} damage!`, 'damage');
+                }
+            });
             break;
 
         case 'Rudiments':
@@ -8954,10 +9301,10 @@ function performMoveEffect(attacker, target, move) {
 
         // ===== PIANO MOVES =====
         case 'Nullify':
-            // Benched this turn → opponent abilities no effect
+            // Benched this turn → opponent abilities no effect this turn
             if (attacker.wasJustBenched) {
-                game.nextTurnEffects[opponentNum].abilitiesDisabled = true;
-                game.log('Nullify: Opponent abilities disabled next turn!');
+                game.abilitiesDisabledThisTurn = opponentNum;
+                game.log('Nullify: Opponent abilities disabled for the rest of this turn!');
             } else {
                 game.log('Nullify: Can only use if this character was benched this turn', 'warning');
             }
@@ -8977,7 +9324,7 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Inventory Management':
-            // Flip coin per hand card, 10 damage each heads
+            // Flip coin per hand card, 20 damage each heads to opponent active
             const handSize = player.hand.length;
             let inventoryHeads = 0;
             for (let i = 0; i < handSize; i++) {
@@ -8985,18 +9332,23 @@ function performMoveEffect(attacker, target, move) {
                     inventoryHeads++;
                 }
             }
-            const inventoryDamage = inventoryHeads * 10;
-            const inventoryFinal = calculateDamage(attacker, target, inventoryDamage, move);
-            game.dealDamage(target, inventoryFinal);
-            game.log(`Inventory Management: ${inventoryHeads} heads from ${handSize} cards for ${inventoryFinal} damage!`, 'damage');
+            const inventoryTarget = opponent.active || target;
+            if (inventoryTarget) {
+                const inventoryDamage = inventoryHeads * 20;
+                const inventoryFinal = calculateDamage(attacker, inventoryTarget, inventoryDamage, move);
+                game.dealDamage(inventoryTarget, inventoryFinal);
+                game.log(`Inventory Management: ${inventoryHeads} heads from ${handSize} cards for ${inventoryFinal} damage!`, 'damage');
+            } else {
+                game.log('Inventory Management: No opponent active to target', 'info');
+            }
             break;
 
         case 'Racket Smash':
-            // 10 damage, discard energy from bench
+            // 20 damage, discard energy from opponent's bench
             executeDamageAttack(attacker, target, move);
-            const benchWithEnergy = player.bench.filter(c => c && c.attachedEnergy && c.attachedEnergy.length > 0);
-            if (benchWithEnergy.length > 0) {
-                showRacketSmashSelection(player, benchWithEnergy);
+            const oppBenchWithEnergy = opponent.bench.filter(c => c && c.attachedEnergy && c.attachedEnergy.length > 0);
+            if (oppBenchWithEnergy.length > 0) {
+                showRacketSmashSelection(opponent, oppBenchWithEnergy);
                 return true;
             }
             break;
@@ -9052,8 +9404,8 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'VocaRock!!':
-            // 20 damage, +50 if Miku Otamatone attached
-            let vocaRockDamage = 20;
+            // 30 damage, +50 if Miku Otamatone attached
+            let vocaRockDamage = 30;
             const mikuUsed = !!game.attackModifiers[game.currentPlayer].mikuOtamatoneUsed;
             if (mikuUsed || (attacker.attachedTools && attacker.attachedTools.some(t => t.name === 'Miku Otamatone'))) {
                 vocaRockDamage += 50;
@@ -9081,6 +9433,38 @@ function performMoveEffect(attacker, target, move) {
             return true;
             break;
 
+        case 'Arrangement Speedrun':
+            // If arranger: deal 40 and remove arranger from all opposing characters
+            if (attacker.status && attacker.status.includes('Arranger')) {
+                const targetChar = target || opponent.active;
+                if (targetChar) {
+                    const arrangeDamage = calculateDamage(attacker, targetChar, 40, move);
+                    game.dealDamage(targetChar, arrangeDamage);
+                    game.log(`Arrangement Speedrun: ${targetChar.name} takes ${arrangeDamage} damage!`, 'damage');
+                }
+                [opponent.active, ...opponent.bench].filter(c => c).forEach(char => {
+                    if (char.status && char.status.includes('Arranger')) {
+                        char.status = char.status.filter(s => s !== 'Arranger');
+                    }
+                });
+                game.log('Arrangement Speedrun: Removed Arranger status from all opposing characters');
+            } else {
+                // Not arranger: heal 40 and make all other friendly characters arrangers
+                if (attacker.damage > 0) {
+                    const healAmount = Math.min(40, attacker.damage);
+                    attacker.damage -= healAmount;
+                    game.log(`Arrangement Speedrun: ${attacker.name} healed ${healAmount} damage!`, 'heal');
+                }
+                [player.active, ...player.bench].filter(c => c && c.id !== attacker.id).forEach(char => {
+                    if (!char.status) char.status = [];
+                    if (!char.status.includes('Arranger')) {
+                        char.status.push('Arranger');
+                    }
+                });
+                game.log('Arrangement Speedrun: All other friendly characters are now Arrangers');
+            }
+            break;
+
         case 'Song Voting':
             // Each player selects two cards to reveal, then resolve
             if (!game.tempSelections) game.tempSelections = {};
@@ -9096,7 +9480,7 @@ function performMoveEffect(attacker, target, move) {
 
         // ===== WOODWINDS MOVES =====
         case 'Overblow':
-            // 40 damage, 10 recoil
+            // 50 damage, 10 recoil
             executeDamageAttack(attacker, target, move);
             game.dealDamage(attacker, 10);
             game.log('Overblow: 10 recoil damage', 'damage');
@@ -9112,11 +9496,11 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Speedrun Central':
-            // 20 damage, +70 if came off bench this turn
-            let speedrunDamage = 20;
+            // 40 damage, +60 if came off bench this turn
+            let speedrunDamage = 40;
             if (attacker.cameOffBenchThisTurn) {
-                speedrunDamage += 70;
-                game.log('Speedrun Central: +70 damage (came off bench this turn)!');
+                speedrunDamage += 60;
+                game.log('Speedrun Central: +60 damage (came off bench this turn)!');
             }
             const speedrunFinal = calculateDamage(attacker, target, speedrunDamage, move);
             game.dealDamage(target, speedrunFinal);
@@ -9134,7 +9518,7 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Sparkling run':
-            // 20 damage, heal 20
+            // 30 damage, heal 20
             executeDamageAttack(attacker, target, move);
             if (attacker.damage > 0) {
                 const healAmount = Math.min(20, attacker.damage);
@@ -9160,14 +9544,14 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Wipeout':
-            // 60 damage to 3 different (including self)
+            // 80 damage to 3 different (including self)
             showWipeoutSelection(player, opponent, attacker);
             return true;
             break;
 
         case 'Clarinet Solo':
         case 'Piccolo Solo':
-            // Only usable if opponent has no woodwinds in play; 80 damage if only WW in play
+            // Only usable if no other woodwinds in play; 70 damage if only WW in play
             const allCharsForSolo = [
                 game.players[1].active, ...game.players[1].bench,
                 game.players[2].active, ...game.players[2].bench
@@ -9178,11 +9562,11 @@ function performMoveEffect(attacker, target, move) {
                 game.log(`${move.name}: Cannot be used while another Woodwinds character is in play`, 'warning');
                 break;
             }
-            let soloDamage = move.damage || 30;
+            let soloDamage = move.damage || 0;
 
             if (woodwindCharsForSolo.length === 1 && woodwindCharsForSolo[0].id === attacker.id) {
-                soloDamage = 60;
-                game.log(`${move.name}: Only WW in play, 60 damage!`);
+                soloDamage = 70;
+                game.log(`${move.name}: Only WW in play, 70 damage!`);
             }
 
             const soloFinal = calculateDamage(attacker, target, soloDamage, move);
@@ -9221,7 +9605,7 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Blast':
-            // Standard 50 damage attack
+            // Standard damage attack
             executeDamageAttack(attacker, target, move);
             break;
 
@@ -9231,13 +9615,13 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Seal Attack':
-            // Standard 30 damage attack
+            // Standard damage attack
             executeDamageAttack(attacker, target, move);
             break;
 
         case 'Sparkling Run':
         case 'Sparkling run':
-            // 20 damage and heal 20
+            // 30 damage and heal 20
             executeDamageAttack(attacker, target, move);
             game.dealDamage(attacker, -20); // Negative damage = healing
             game.log(`${attacker.name} healed 20 damage!`);
@@ -9259,7 +9643,7 @@ function performMoveEffect(attacker, target, move) {
             if (characterFound) {
                 const isStringType = characterFound.type && characterFound.type.includes(TYPES.STRINGS);
                 if (!isStringType) {
-                    const synchDamage = calculateDamage(attacker, target, 20, move);
+                    const synchDamage = calculateDamage(attacker, target, 30, move);
                     game.dealDamage(target, synchDamage);
                     game.log(`Synchro Summon: Found non-String character, dealt ${synchDamage} damage!`);
                 }
@@ -9306,39 +9690,64 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Small Ensemble Committee':
-            // Count small ensemble members, deal damage accordingly
-            const ensembleMembers = ['Katie Xiang', 'Jennie Wang', 'Luke Xu', 'Henry Wang', 'David Man'];
-            const membersInPlay = [player.active, ...player.bench, opponent.active, ...opponent.bench]
-                .filter(c => c && ensembleMembers.includes(c.name)).length;
+            // 20 damage to each opponent if another committee member is in play
+            // 40 damage to each if at least two other members are in play
+            const requiredNames = ['Evelyn Wu', 'Luke Xu', 'David Man', 'Roberto Gonzales', 'Bokai Bi', 'Jennie Wang'];
+            const committeeCharsInPlay = [
+                player.active, ...player.bench,
+                opponent.active, ...opponent.bench
+            ].filter(c => c);
+            const normalizeName = name => (name || '')
+                .toLowerCase()
+                .replace(/[^a-z\s]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            const committeeAliases = requiredNames.flatMap(fullName => {
+                const parts = fullName.split(' ');
+                const firstName = parts[0];
+                return [fullName, firstName];
+            });
+            committeeAliases.push('Bokai');
+            const committeeNameSet = new Set(committeeAliases.map(normalizeName));
+            const committeeMembersInPlay = committeeCharsInPlay.filter(char => committeeNameSet.has(normalizeName(char.name)));
+            const committeeCount = committeeMembersInPlay.length;
+            const committeeMemberNames = committeeMembersInPlay.map(char => char.name);
+            game.log(`Small Ensemble Committee: Members in play (${committeeCount}) - ${committeeMemberNames.join(', ') || 'none'}`, 'info');
 
-            if (membersInPlay >= 1) {
-                const ensembleDamage = membersInPlay >= 3 ? 30 : 10;
-                [opponent.active, ...opponent.bench].filter(c => c).forEach(oppChar => {
-                    const dmg = calculateDamage(attacker, oppChar, ensembleDamage, move);
-                    game.dealDamage(oppChar, dmg);
-                    game.log(`Small Ensemble Committee: ${dmg} damage to ${oppChar.name}`);
+            if (committeeCount >= 2) {
+                const opponentAll = [opponent.active, ...opponent.bench].filter(c => c);
+                const committeeDamage = committeeCount >= 3 ? 40 : 20;
+
+                opponentAll.forEach(oppChar => {
+                    const committeeFinal = calculateDamage(attacker, oppChar, committeeDamage, move);
+                    game.dealDamage(oppChar, committeeFinal);
+                    game.log(`Small Ensemble Committee: ${oppChar.name} takes ${committeeFinal} damage!`, 'damage');
                 });
+
+                if (committeeCount >= 3) {
+                    game.log('Small Ensemble Committee: At least three members present! 40 damage each!');
+                }
             } else {
-                game.log('No ensemble members in play');
+                game.log('Small Ensemble Committee: Need another committee member in play');
             }
             break;
 
         case 'Multiphonics':
-            // Flip 2 coins - both heads = 40 to each bench, both tails = 80 to active
+            // Flip 2 coins - both heads = 50 to each bench, both tails = 100 to active
             const multiCoin1 = flipCoin();
             const multiCoin2 = flipCoin();
             game.log(`Multiphonics: Flipped ${multiCoin1 ? 'heads' : 'tails'} and ${multiCoin2 ? 'heads' : 'tails'}`);
 
             if (multiCoin1 && multiCoin2) {
-                // Both heads - 40 to each benched
+                // Both heads - 50 to each benched
                 opponent.bench.filter(c => c).forEach(benchChar => {
-                    const benchDmg = calculateDamage(attacker, benchChar, 40, move);
+                    const benchDmg = calculateDamage(attacker, benchChar, 50, move);
                     game.dealDamage(benchChar, benchDmg);
                     game.log(`Multiphonics: ${benchDmg} damage to ${benchChar.name}`, 'damage');
                 });
             } else if (!multiCoin1 && !multiCoin2) {
-                // Both tails - 80 to active
-                const activeDmg = calculateDamage(attacker, opponent.active, 80, move);
+                // Both tails - 100 to active
+                const activeDmg = calculateDamage(attacker, opponent.active, 100, move);
                 game.dealDamage(opponent.active, activeDmg);
                 game.log(`Multiphonics: ${activeDmg} damage to ${opponent.active.name}!`, 'damage');
             } else {
@@ -9347,8 +9756,8 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Four Hands Piano':
-            // 30 damage, +30 if piano on bench
-            let fourHandsBaseDamage = 30;
+            // 50 damage, +30 if piano on bench
+            let fourHandsBaseDamage = 50;
             const hasPianoOnBench = player.bench.some(c => c && c.type.includes(TYPES.PIANO));
             if (hasPianoOnBench) {
                 fourHandsBaseDamage += 30;
@@ -9360,20 +9769,19 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'E2 Reaction':
-            // Only works if opponent has 2+ benched
+            // Only works if opponent has 2+ benched characters
             const benchedCount = opponent.bench.filter(c => c).length;
             if (benchedCount >= 2) {
                 executeDamageAttack(attacker, target, move);
                 showE2ReactionSelection(opponent, attacker, move);
                 return true;
-            } else {
-                game.log('E2 Reaction: Opponent needs at least 2 benched characters');
             }
+            game.log('E2 Reaction: Opponent needs at least 2 benched characters');
             break;
 
         case 'Cherry Flavored Valve Oil':
-            // 30 damage, heal one benched character for same amount dealt
-            const cherryDamage = calculateDamage(attacker, target, 30, move);
+            // 40 damage, heal one benched character for same amount dealt
+            const cherryDamage = calculateDamage(attacker, target, 40, move);
             game.dealDamage(target, cherryDamage);
             game.log(`Cherry Flavored Valve Oil: ${cherryDamage} damage dealt!`, 'damage');
 
@@ -9411,7 +9819,7 @@ function showAttackTargeting(attacker, target) {
     // Include Ross Williams' moves if he is on the bench
     const availableMoves = [...attacker.moves];
     const rossOnBench = player.bench.find(c => c && c.name === 'Ross Williams');
-    if (rossOnBench && rossOnBench.moves) {
+    if (!abilitiesDisabledFor(game.currentPlayer) && rossOnBench && rossOnBench.moves) {
         availableMoves.push(...rossOnBench.moves);
     }
 

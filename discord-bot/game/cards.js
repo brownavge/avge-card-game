@@ -49,8 +49,8 @@ const CHARACTERS = {
             type: 'activated'
         },
         moves: [
-            { name: 'Chorus', cost: ['C', 'C'], damage: 20, effect: 'Does 10 more damage per benched character you have in play.' },
-            { name: 'SATB', cost: ['C', 'X'], damage: 0, effect: 'For each of your choir in play, choose one of your opponent\'s characters and do 10 damage to it.' }
+            { name: 'Chorus', cost: ['C', 'C'], damage: 30, effect: 'Does 10 more damage per benched character you have in play.' },
+            { name: 'SATB', cost: ['C', 'X'], damage: 0, effect: 'For each of your choir in play, choose one of your opponent\'s characters and do 20 damage to it.' }
         ],
         retreatCost: 1
     },
@@ -60,7 +60,7 @@ const CHARACTERS = {
         hp: 110,
         gradYear: 2027,
         moves: [
-            { name: 'Multiphonics', cost: ['W', 'W', 'W'], damage: 0, effect: 'Flip two coins. If both of them are heads, do 40 damage to each of your opponent\'s benched characters. If both of them are tails, do 80 damage to your opponent\'s active character.' },
+            { name: 'Multiphonics', cost: ['W', 'W', 'W'], damage: 0, effect: 'Flip two coins. If both are heads, do 50 damage to each of your opponent\'s benched characters. If both are tails, do 100 damage to your opponent\'s active character.' },
             { name: 'Circular Breathing', cost: ['W'], damage: 10, effect: 'During your next turn, this attack does 10 more damage. Effect stacks if used consecutively.' }
         ],
         retreatCost: 2
@@ -97,7 +97,7 @@ const CHARACTERS = {
             effect: 'Strings, woodwinds, and brass do −10 damage; choir, guitars, percussion, and pianos do +10 damage.',
             description: 'Amp Diff: Strings, woodwinds and brass do −10 damage; choir, guitars, percussion, pianos do +10 damage.'
         moves: [
-            { name: 'Harmonics', cost: ['S', 'S'], damage: 0, effect: 'Flip two coins. If both of them are heads, do 80 damage. Otherwise, do nothing.' },
+            { name: 'Harmonics', cost: ['S', 'S'], damage: 0, effect: 'Flip two coins. If both are heads, choose 3 targets to do 60 damage each, or 2 targets to do 70 damage each.' },
             { name: 'Open Strings', cost: ['S'], damage: 10, effect: 'Draw a card. If it is an energy, attach it to this character.' }
         ],
             effect: 'If all of your benched characters share a type with your active character, your attacks take 1 less energy.',
@@ -173,7 +173,7 @@ const CHARACTERS = {
         },
         moves: [
             { name: 'Conducting', cost: ['W', 'W', 'X'], damage: 0, effect: 'For each type in play, do 20 damage.' },
-            { name: 'Screech!', cost: ['W', 'X', 'X'], damage: 0, effect: 'Roll a d6. Damage is equal to 10 + (10 * the number on the D6)' }
+            { name: 'Screech!', cost: ['W', 'X', 'X'], damage: 0, effect: 'Roll a d6. Damage is equal to 30 + (10 * the number on the D6)' }
         ],
         retreatCost: 3
     },
@@ -200,7 +200,7 @@ const CHARACTERS = {
         },
         moves: [
             { name: 'Vibrato', cost: ['S', 'X'], damage: 30 },
-            { name: 'Triple Stops', cost: ['S', 'X', 'X'], damage: 0, effect: 'Flip three coins. Does 30 damage for each heads.' }
+            { name: 'Triple Stops', cost: ['S', 'X', 'X'], damage: 0, effect: 'Flip three coins. Does 40 damage for each heads.' }
         ],
         retreatCost: 1
     },
@@ -268,8 +268,8 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Ragebaited', cost: ['P', 'X', 'X'], damage: 40, effect: 'When below 50% hp this attack does +20 damage. When below 20% hp, double damage.' },
-            { name: 'Rimshot', cost: ['P', 'X'], damage: 0, effect: 'Roll a d6. If you roll a 1-4, do 60 damage.' }
+            { name: 'Ragebaited', cost: ['P', 'X', 'X'], damage: 20, effect: 'When 50 hp or below, this attack does 30 more damage. When 20 hp or below, 80 more damage.' },
+            { name: 'Rimshot', cost: ['P', 'X'], damage: 0, effect: 'Roll a d6. If you roll a 1-4, do 70 damage.' }
         ],
         retreatCost: 2
     },
@@ -285,7 +285,7 @@ const CHARACTERS = {
         },
         moves: [
             { name: 'Excused Absence', cost: ['P', 'X'], damage: 0, effect: 'Heals all your other cards in play' },
-            { name: 'Four Mallets', cost: ['P', 'X', 'X'], damage: 0, effect: 'Four individual attacks of 10 damage each.' }
+            { name: 'Four Mallets', cost: ['P', 'X', 'X'], damage: 0, effect: 'Four individual attacks of 10 damage each. Draw a card.' }
         ],
         retreatCost: 1
     },
@@ -338,7 +338,7 @@ const CHARACTERS = {
         gradYear: 2026,
         moves: [
             { name: 'Algorithm', cost: ['P', 'X', 'X'], damage: 0, effect: 'If any of your opponent\'s characters have a duplicate on your side, they take 50 damage each.' },
-            { name: 'Ominous Chimes', cost: ['P', 'X', 'X'], damage: 0, effect: 'Shuffle this character back into your deck. At the end of your opponent\'s next turn, their Active character takes 50 damage.' }
+            { name: 'Ominous Chimes', cost: ['P', 'X', 'X'], damage: 0, effect: 'Shuffle this character back into your deck. At the end of your opponent\'s next turn, their Active character takes 70 damage.' }
         ],
         retreatCost: 2
     },
@@ -359,8 +359,8 @@ const CHARACTERS = {
         hp: 120,
         gradYear: 2025,
         moves: [
-            { name: 'Power Chord', cost: ['G', 'G', 'G'], damage: 70, effect: 'Discard 2 Energy from this character.' },
-            { name: 'Fingerstyle', cost: ['G', 'X'], damage: 0, effect: 'You can only use this attack if this character did not use Turn Up, Power Chord, or Distortion during your last turn. Flip 8 coins and do 10 damage for each heads.' }
+            { name: 'Power Chord', cost: ['G', 'G', 'G'], damage: 90, effect: 'Discard 2 Energy from this character.' },
+            { name: 'Fingerstyle', cost: ['G', 'X'], damage: 0, effect: 'You can only use this attack if this character did not use Turn Up, Power Chord, or Distortion during your last turn. Flip 5 coins and do 20 damage for each heads.' }
         ],
         retreatCost: 2
     },
@@ -376,12 +376,12 @@ const CHARACTERS = {
         },
         ability2: {
             name: 'BAI wrangler',
-            description: 'If a concert hall is in play, take 20 less damage from any attack.',
-            type: 'passive'
+            description: 'Once during your turn, you may discard a card from your hand. If you do, take a Stadium card and either a Character or Item card from your discard and put them into your hand.',
+            type: 'activated'
         },
         moves: [
-            { name: 'Sparkling Run', cost: ['W', 'X'], damage: 20, effect: 'Heal 20 damage.' },
-            { name: 'Overblow', cost: ['W', 'X'], damage: 40, effect: 'You take 10 recoil damage' }
+            { name: 'Sparkling Run', cost: ['W', 'X'], damage: 30, effect: 'Heal 20 damage.' },
+            { name: 'Overblow', cost: ['W', 'X'], damage: 50, effect: 'You take 10 recoil damage' }
         ],
         retreatCost: 1
     },
@@ -391,9 +391,9 @@ const CHARACTERS = {
         hp: 110,
         gradYear: 2027,
         moves: [
-            { name: 'Blast', cost: ['B', 'B', 'B'], damage: 50 },
+            { name: 'Blast', cost: ['B', 'B', 'B'], damage: 70 },
             { name: 'Fanfare', cost: ['B'], damage: 20 },
-            { name: 'Concert Pitch', cost: ['B', 'B'], damage: 20, effect: 'If you have zero non-brass characters on your bench, this attack does 20 more damage.' }
+            { name: 'Concert Pitch', cost: ['B', 'B'], damage: 40, effect: 'This attack does 20 more damage for each Brass character on your bench.' }
         ],
         retreatCost: 2
     },
