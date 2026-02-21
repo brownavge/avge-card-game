@@ -3,6 +3,30 @@ import { getCostSymbol, getTypeFromSymbol } from './src/utils/energy.js';
 
 // Game State Management
 
+function createRng(seed) {
+    let t = seed >>> 0;
+    return function rng() {
+        t += 0x6D2B79F5;
+        let r = Math.imul(t ^ (t >>> 15), 1 | t);
+        r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+        return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    };
+}
+
+function getRandom() {
+    if (game && Number.isFinite(game.randomState)) {
+        game.randomState = (game.randomState + 0x6D2B79F5) >>> 0;
+        let r = Math.imul(game.randomState ^ (game.randomState >>> 15), 1 | game.randomState);
+        r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+        return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    }
+    return Math.random();
+}
+
+function randInt(max) {
+    return Math.floor(getRandom() * max);
+}
+
 class GameState {
     constructor() {
         this.currentPlayer = 1;
@@ -12,7 +36,8 @@ class GameState {
         this.energyAttachedThisTurn = 0; // Track how many energy attached (Eugenia allows 3)
         this.supporterPlayedThisTurn = false;
         this.attackedThisTurn = false;
-        this.helperCardsPlayedThisTurn = 0; // For Main Hall stadium
+        this.cardsPlayedThisTurn = 0; // For Main Hall stadium
+        this.mainHallActivatedTurn = null;
         this.borrowABowUsedThisTurn = false;
         this.pendingAttackEndTurn = false;
 
@@ -59,9 +84,13 @@ class GameState {
 
         // Clear next turn effects for the player who just finished their turn
         const preservedTricksterSelfBonus = this.nextTurnEffects[previousPlayer].tricksterSelfBonus;
+        const preservedAvgeBirbPenalty = this.nextTurnEffects[previousPlayer].avgebBirbPenalty;
         this.nextTurnEffects[previousPlayer] = {};
         if (preservedTricksterSelfBonus) {
             this.nextTurnEffects[previousPlayer].tricksterSelfBonus = preservedTricksterSelfBonus;
+        }
+        if (preservedAvgeBirbPenalty) {
+            this.nextTurnEffects[previousPlayer].avgebBirbPenalty = preservedAvgeBirbPenalty;
         }
 
         // After player 1's first turn, set isFirstTurn to false
@@ -73,7 +102,7 @@ class GameState {
         this.energyAttachedThisTurn = 0;
         this.supporterPlayedThisTurn = false;
         this.attackedThisTurn = false;
-        this.helperCardsPlayedThisTurn = 0;
+        this.cardsPlayedThisTurn = 0;
         this.borrowABowUsedThisTurn = false;
         this.firstEnergyAttached = false; // Reset for Sophia S. Wang
         this.turn++;
@@ -81,6 +110,11 @@ class GameState {
         this.log(`═════════════════════════════════════`, 'turn-change');
         this.log(`Turn ${this.turn}: Player ${this.currentPlayer}'s turn begins`, 'turn-change');
         this.log(`═════════════════════════════════════`, 'turn-change');
+
+        if (this.stadium && this.stadium.name === 'Main Hall' && this.mainHallActivatedTurn !== null && this.turn > this.mainHallActivatedTurn) {
+            const remaining = Math.max(0, 3 - this.cardsPlayedThisTurn);
+            this.log(`Main Hall: ${remaining} card play${remaining === 1 ? '' : 's'} remaining this turn`, 'info');
+        }
 
         // Clear attack modifiers from previous player's turn
         this.attackModifiers[previousPlayer] = {};
@@ -119,9 +153,11 @@ class GameState {
             game.nextTurnEffects[this.currentPlayer].ominousChimesDamage = 0;
         }
 
-        // Katie Xiang's Nausicaa's Undying Heartbeat - At ≤40 HP, heal 20 from all
+        // Katie Xiang's Nausicaa's Undying Heartbeat - At ≤50 HP, heal 20 from all
+        let katieHeartbeatTriggered = false;
         [player.active, ...player.bench].filter(c => c).forEach(char => {
-            if (char.name === 'Katie Xiang' && (char.hp - (char.damage || 0)) <= 40) {
+            if (!katieHeartbeatTriggered && char.name === 'Katie Xiang' && (char.hp - (char.damage || 0)) <= 50) {
+                katieHeartbeatTriggered = true;
                 // Heal 20 damage from all your characters
                 [player.active, ...player.bench].filter(c => c).forEach(healChar => {
                     if (healChar.damage && healChar.damage > 0) {
@@ -140,19 +176,7 @@ class GameState {
             player.active.shouldDrawFromBassBoost = false;
         }
 
-        // Katie Xiang's Nausicaa's Undying Heartbeat - At ≤40 HP, heal 20 from all (end of her player's turn)
-        [player.active, ...player.bench].filter(c => c && c.name === 'Katie Xiang').forEach(katie => {
-            const currentHP = katie.hp - (katie.damage || 0);
-            if (currentHP <= 40 && currentHP > 0) {
-                [player.active, ...player.bench].filter(c => c).forEach(char => {
-                    if (char.damage && char.damage > 0) {
-                        const healAmount = Math.min(20, char.damage);
-                        char.damage -= healAmount;
-                        this.log(`Katie's Nausicaa's Undying Heartbeat: ${char.name} healed ${healAmount}!`, 'heal');
-                    }
-                });
-            }
-        });
+        // (Handled above)
 
         // Trickster opponent bonus lasts only for this turn
         if (this.nextTurnEffects[this.currentPlayer].tricksterOpponentBonus) {
@@ -165,6 +189,8 @@ class GameState {
                 char.tricksterBonusThisTurn = 0;
             }
         });
+
+        // Alice Wang discard handled in endTurn to ensure modal triggers on end turn
     }
 
     beginAttackPhase() {
@@ -203,19 +229,28 @@ class GameState {
             const player = this.players[playerNum];
             const hasFionaOnBench = player.bench.some(char => char && char.name === 'Fiona Li');
 
-            if (player.active) {
-                if (hasFionaOnBench) {
-                    if (!player.active.status) player.active.status = [];
-                    if (!player.active.status.includes('Maid')) {
-                        player.active.status.push('Maid');
-                    }
-                } else {
-                    // Remove maid status if Fiona is not on bench (unless from equipment)
-                    if (player.active.status && !player.active.attachedTools?.some(t => t.grantStatus === 'Maid')) {
-                        player.active.status = player.active.status.filter(s => s !== 'Maid');
-                    }
+            const activeChar = player.active;
+            if (hasFionaOnBench && activeChar) {
+                if (!activeChar.status) activeChar.status = [];
+                if (!activeChar.status.includes('Maid')) {
+                    activeChar.status.push('Maid');
                 }
             }
+
+            const allChars = [];
+            if (activeChar) allChars.push(activeChar);
+            player.bench.forEach(char => {
+                if (char) allChars.push(char);
+            });
+
+            allChars.forEach(char => {
+                if (!char.status || !char.status.includes('Maid')) return;
+                const hasMaidTool = char.attachedTools?.some(t => t.grantStatus === 'Maid');
+                const shouldHaveFromFiona = hasFionaOnBench && char === activeChar;
+                if (!hasMaidTool && !shouldHaveFromFiona) {
+                    char.status = char.status.filter(s => s !== 'Maid');
+                }
+            });
         });
     }
 
@@ -287,13 +322,10 @@ class GameState {
 
         // Stadium effects at start of turn
         if (this.stadium) {
-            if (this.stadium.name === 'Petteruti Lounge' && player.active) {
-                this.dealDamage(player.active, 10);
-                this.log('Petteruti Lounge: Active character takes 10 damage');
-            } else if (this.stadium.name === 'Friedman Hall') {
+            if (this.stadium.name === 'Friedman Hall') {
                 // Draw two cards, opponent chooses one to keep
                 if (player.deck.length >= 2) {
-                    const drawn = [player.deck.pop(), player.deck.pop()];
+                    const drawn = [player.deck.shift(), player.deck.shift()];
                     game.tempSelections = game.tempSelections || {};
                     game.tempSelections.friedmanCards = drawn;
                     game.tempSelections.friedmanPlayer = this.currentPlayer;
@@ -303,26 +335,33 @@ class GameState {
                     this.log('Friedman Hall: Drew 1 card (only 1 left in deck)');
                 }
             } else if (this.stadium.name === 'Riley Hall') {
-                // Take 10 damage per empty bench slot
+                // Take 10 nonlethal damage per empty bench slot
                 const emptyBenchSlots = player.bench.filter(slot => !slot).length;
                 if (emptyBenchSlots > 0) {
                     const allChars = [player.active, ...player.bench].filter(c => c);
                     allChars.forEach(char => {
-                        this.dealDamage(char, 10 * emptyBenchSlots);
-                        this.log(`Riley Hall: ${char.name} takes ${10 * emptyBenchSlots} damage (${emptyBenchSlots} empty bench slots)`, 'damage');
+                        const totalDamage = 10 * emptyBenchSlots;
+                        const currentHP = char.hp - (char.damage || 0);
+                        if (currentHP > totalDamage) {
+                            this.dealDamage(char, totalDamage);
+                            this.log(`Riley Hall: ${char.name} takes ${totalDamage} nonlethal damage (${emptyBenchSlots} empty bench slots)`, 'damage');
+                        } else if (currentHP > 1) {
+                            this.dealDamage(char, currentHP - 1);
+                            this.log(`Riley Hall: ${char.name} takes ${currentHP - 1} nonlethal damage (${emptyBenchSlots} empty bench slots)`, 'damage');
+                        }
                     });
                 }
             } else if (this.stadium.name === 'Steinert Basement Studio') {
-                // If you have exactly two pianos on bench, draw 2 cards
-                const pianoCount = player.bench.filter(char =>
-                    char && char.type.includes(TYPES.PIANO)
-                ).length;
-
-                if (pianoCount === 2) {
+                // If you have exactly two characters in play, draw 2 cards
+                const charactersInPlay = [player.active, ...player.bench].filter(c => c).length;
+                if (charactersInPlay === 2) {
                     this.drawCards(this.currentPlayer, 2);
                     this.log('Steinert Basement Studio (Duo Queue): Drew 2 cards', 'info');
                     this.turnDrawSkipped = true; // Skip regular draw
                 }
+            } else if (this.stadium.name === 'Steinert Practice Room') {
+                const opponentNum = this.currentPlayer === 1 ? 2 : 1;
+                queueSteinertPracticeDiscards([this.currentPlayer, opponentNum]);
             }
         }
 
@@ -588,26 +627,34 @@ class GameState {
             const card = player.deck.shift();
             player.hand.push(card);
 
-            // Yuelin Hu's Musical Cat - Draw AVGE birb → discard
-            if (card.name === 'AVGE Birb' && [player.active, ...player.bench].some(c => c && c.name === 'Yuelin Hu')) {
-                this.log('Yuelin Hu\'s Musical Cat: Drew AVGE Birb!');
-                player.discard.push(card);
-                player.hand = player.hand.filter(c => c.id !== card.id);
+            // Alumnae Hall: Whenever a player draws a card, all their characters take 10 nonlethal damage
+            if (this.stadium && this.stadium.name === 'Alumnae Hall') {
+                const allChars = [player.active, ...player.bench].filter(c => c);
+                allChars.forEach(char => {
+                    const currentHP = char.hp - (char.damage || 0);
+                    if (currentHP > 10) {
+                        this.dealDamage(char, 10);
+                        this.log(`Alumnae Hall: ${char.name} takes 10 nonlethal damage`, 'damage');
+                    } else if (currentHP > 1) {
+                        this.dealDamage(char, currentHP - 1);
+                        this.log(`Alumnae Hall: ${char.name} takes ${currentHP - 1} nonlethal damage`, 'damage');
+                    }
+                });
             }
 
-            // Alice Wang's Euclidean Algorithm - Hand size equalization
-            const opponentNum = playerNum === 1 ? 2 : 1;
-            const opponent = this.players[opponentNum];
-            const hasAlice = [player.active, ...player.bench].some(c => c && c.name === 'Alice Wang');
-
-            if (hasAlice && opponent.hand.length > player.hand.length) {
-                const discardCount = opponent.hand.length - player.hand.length;
-                // Let the opponent (who just ended their turn) choose which cards to discard
-                if (discardCount > 0) {
-                    showOpponentDiscardChoice(opponentNum, discardCount, () => {
-                        this.log(`Alice Wang's Euclidean Algorithm: Player ${opponentNum} discarded ${discardCount} cards to equalize hand sizes`);
-                    });
-                    // Note: This will be async, but that's okay for end of turn
+            // Yuelin Hu's Musical Cat - Draw AVGE Birb → discard and deal 30 to opponent active
+            if (card.name === 'AVGE Birb' && [player.active, ...player.bench].some(c => c && c.name === 'Yuelin Hu')) {
+                this.log('Yuelin Hu\'s Musical Cat: Drew AVGE Birb!');
+                const useAbility = confirm('Yuelin Hu: Discard AVGE Birb to deal 30 damage to opponent active?');
+                if (useAbility) {
+                    player.discard.push(card);
+                    player.hand = player.hand.filter(c => c.id !== card.id);
+                    const opponentNum = playerNum === 1 ? 2 : 1;
+                    const opponent = this.players[opponentNum];
+                    if (opponent.active) {
+                        this.dealDamage(opponent.active, 30);
+                        this.log('Yuelin Hu\'s Musical Cat: Dealt 30 damage to opponent active!', 'damage');
+                    }
                 }
             }
         }
@@ -617,7 +664,7 @@ class GameState {
     shuffleDeck(playerNum) {
         const player = this.players[playerNum];
         for (let i = player.deck.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
+            const j = randInt(i + 1);
             [player.deck[i], player.deck[j]] = [player.deck[j], player.deck[i]];
         }
     }
@@ -656,11 +703,193 @@ class GameState {
 // Global game state
 let game = new GameState();
 
+const multiplayer = {
+    enabled: false,
+    socket: null,
+    roomId: null,
+    seed: null,
+    config: null,
+    isApplyingRemote: false,
+    playerNumber: null,
+    sessionToken: null,
+    clientSeq: 0,
+    serverSeq: 0,
+    pingInterval: null
+};
+
+function canCurrentClientAct() {
+    if (!multiplayer.enabled) return true;
+    if (!multiplayer.playerNumber) return false;
+    if (multiplayer.playerNumber === game.currentPlayer) return true;
+    const songVoting = game.tempSelections && game.tempSelections.songVoting;
+    if (songVoting && songVoting.pendingForPlayer === multiplayer.playerNumber) {
+        return true;
+    }
+    return false;
+}
+
+function connectMultiplayer({ roomId, deck1Name, deck2Name, playtestMode }) {
+    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const socket = new WebSocket(`${protocol}://${window.location.host}`);
+    multiplayer.socket = socket;
+    multiplayer.enabled = true;
+    multiplayer.roomId = roomId;
+    multiplayer.sessionToken = localStorage.getItem(`cardgame_session_${roomId}`) || null;
+    if (multiplayer.pingInterval) {
+        clearInterval(multiplayer.pingInterval);
+    }
+
+    socket.addEventListener('open', () => {
+        if (multiplayer.sessionToken) {
+            socket.send(JSON.stringify({
+                type: 'RESUME',
+                roomId,
+                sessionToken: multiplayer.sessionToken
+            }));
+        } else {
+            socket.send(JSON.stringify({
+                type: 'JOIN',
+                roomId,
+                deck1Name,
+                deck2Name,
+                playtestMode
+            }));
+        }
+    });
+
+    multiplayer.pingInterval = setInterval(() => {
+        if (multiplayer.socket && multiplayer.socket.readyState === WebSocket.OPEN) {
+            multiplayer.socket.send(JSON.stringify({ type: 'PING', time: Date.now() }));
+        }
+    }, 15000);
+
+    socket.addEventListener('message', (event) => {
+        let msg;
+        try {
+            msg = JSON.parse(event.data);
+        } catch (error) {
+            return;
+        }
+
+        if (msg.type === 'ROOM_JOINED') {
+            multiplayer.seed = msg.seed;
+            multiplayer.config = msg.config;
+            multiplayer.playerNumber = msg.playerNumber;
+            if (msg.sessionToken) {
+                multiplayer.sessionToken = msg.sessionToken;
+                localStorage.setItem(`cardgame_session_${roomId}`, msg.sessionToken);
+            }
+            setupEventListeners();
+            if (multiplayer.playerNumber === 1) {
+                initGame(
+                    msg.config.deck1Name,
+                    msg.config.deck2Name,
+                    msg.config.playtestMode,
+                    msg.seed
+                );
+                sendMultiplayerAction('STATE_SNAPSHOT', []);
+            }
+            return;
+        }
+
+        if (msg.type === 'FULL_STATE') {
+            multiplayer.serverSeq = msg.serverSeq || 0;
+            applyStateSnapshot(msg.state);
+            return;
+        }
+
+        if (msg.type === 'STATE_UPDATE') {
+            multiplayer.serverSeq = msg.serverSeq || multiplayer.serverSeq;
+            applyStateSnapshot(msg.state);
+            return;
+        }
+
+        if (msg.type === 'ACTION_BROADCAST') {
+            multiplayer.serverSeq = msg.serverSeq || multiplayer.serverSeq;
+            const incoming = msg.action;
+            if (incoming && incoming.type === 'CALL' && incoming.payload) {
+                const { name, args } = incoming.payload;
+                if (name && typeof window[name] === 'function') {
+                    const wasApplying = multiplayer.isApplyingRemote;
+                    multiplayer.isApplyingRemote = true;
+                    try {
+                        window[name](...(Array.isArray(args) ? args : []));
+                    } finally {
+                        multiplayer.isApplyingRemote = wasApplying;
+                    }
+                }
+            }
+            return;
+        }
+
+        if (msg.type === 'ACTION_REJECTED') {
+            game.log(`Action rejected: ${msg.reason || 'Unknown reason'}`, 'warning');
+            return;
+        }
+    });
+
+    socket.addEventListener('close', () => {
+        if (multiplayer.pingInterval) {
+            clearInterval(multiplayer.pingInterval);
+            multiplayer.pingInterval = null;
+        }
+    });
+}
+
+function sendMultiplayerAction(fn, args) {
+    if (!multiplayer.enabled || !multiplayer.socket || multiplayer.isApplyingRemote) return;
+    if (multiplayer.socket.readyState !== WebSocket.OPEN) return;
+    const snapshot = getStateSnapshot();
+    multiplayer.clientSeq += 1;
+    multiplayer.socket.send(JSON.stringify({
+        type: 'ACTION',
+        roomId: multiplayer.roomId,
+        clientSeq: multiplayer.clientSeq,
+        action: {
+            type: 'CALL',
+            payload: {
+                name: fn,
+                args,
+                state: snapshot
+            },
+            playerNumber: multiplayer.playerNumber
+        }
+    }));
+}
+
+function getStateSnapshot() {
+    return JSON.parse(JSON.stringify(game));
+}
+
+function applyStateSnapshot(snapshot) {
+    if (!snapshot) return;
+    const wasApplying = multiplayer.isApplyingRemote;
+    multiplayer.isApplyingRemote = true;
+    const restored = new GameState();
+    Object.assign(restored, snapshot);
+    game = restored;
+    setupEventListeners();
+    updateUI();
+
+    multiplayer.isApplyingRemote = wasApplying;
+
+    const sv = game.tempSelections && game.tempSelections.songVoting;
+    if (sv && multiplayer.enabled && multiplayer.playerNumber) {
+        const needsSelection = sv.selections[multiplayer.playerNumber]?.length !== 2;
+        if (needsSelection) {
+            showSongVotingSelectionModal(multiplayer.playerNumber);
+        }
+    }
+}
+
 // Initialize game
-function initGame(deck1Name = 'strings-aggro', deck2Name = 'piano-control', playtestMode = false) {
+function initGame(deck1Name = 'strings-aggro', deck2Name = 'piano-control', playtestMode = false, seed = null) {
     // Reset game state completely
     game = new GameState();
     game.playtestMode = !!playtestMode;
+    const resolvedSeed = Number.isFinite(seed) ? seed : Date.now();
+    game.randomSeed = resolvedSeed;
+    game.randomState = resolvedSeed >>> 0;
 
     // Create sample decks for testing
     createSampleDecks(deck1Name, deck2Name);
@@ -1295,7 +1524,10 @@ function renderCharacterSlot(characterCard, slotElement) {
 
 function renderHand() {
     const handElement = document.getElementById('hand-cards');
-    const currentPlayer = game.players[game.currentPlayer];
+    const handOwner = (multiplayer.enabled && multiplayer.playerNumber)
+        ? multiplayer.playerNumber
+        : game.currentPlayer;
+    const currentPlayer = game.players[handOwner];
 
     handElement.innerHTML = '';
     currentPlayer.hand.forEach(card => {
@@ -1459,6 +1691,10 @@ function renderCard(card) {
 
 // Event Handlers
 function selectCard(card) {
+    if (!canCurrentClientAct()) {
+        game.log('Not your turn.', 'warning');
+        return;
+    }
     if (game.selectedCard === card) {
         game.selectedCard = null;
     } else {
@@ -1594,10 +1830,18 @@ function showCardActions(card) {
 
             // Show bench-activated abilities
             if (card.ability && card.ability.type === 'activated') {
-                html += `<button class="action-btn" onclick="useActivatedAbility('${card.id}', 'ability')">Use ${card.ability.name}</button>`;
+                if (game.nextTurnEffects[game.currentPlayer].abilitiesDisabled) {
+                    html += `<p style="color: red;">Abilities disabled this turn</p>`;
+                } else {
+                    html += `<button class="action-btn" onclick="useActivatedAbility('${card.id}', 'ability')">Use ${card.ability.name}</button>`;
+                }
             }
             if (card.ability2 && card.ability2.type === 'activated') {
-                html += `<button class="action-btn" onclick="useActivatedAbility('${card.id}', 'ability2')">Use ${card.ability2.name}</button>`;
+                if (game.nextTurnEffects[game.currentPlayer].abilitiesDisabled) {
+                    html += `<p style="color: red;">Abilities disabled this turn</p>`;
+                } else {
+                    html += `<button class="action-btn" onclick="useActivatedAbility('${card.id}', 'ability2')">Use ${card.ability2.name}</button>`;
+                }
             }
         }
     } else if (card.cardType === 'energy') {
@@ -1620,7 +1864,9 @@ function showCardActions(card) {
             html += `<p style="color: red;">Can only play supporters during Main Phase</p>`;
         }
     } else if (card.cardType === 'stadium') {
-        if (canPlayAnytime) {
+        if (game.nextTurnEffects[game.currentPlayer].cannotPlayStadium) {
+            html += `<p style="color: red;">Cannot play stadiums this turn (BAI Email)</p>`;
+        } else if (canPlayAnytime) {
             html += `<button class="action-btn" onclick="playStadium('${card.id}')">Play Stadium</button>`;
         } else {
             html += `<p style="color: red;">Can only play stadiums during Main Phase</p>`;
@@ -1794,7 +2040,14 @@ function playCharacterToActive(cardId) {
     const opponent = game.players[opponentNum];
     const card = player.hand.find(c => c.id === cardId);
 
+    if (!canPlayCardThisTurn()) {
+        game.log('Main Hall: Cannot play more than 3 cards per turn', 'info');
+        return;
+    }
+
     if (card && !player.active) {
+        game.cardsPlayedThisTurn++;
+        logMainHallRemaining();
         player.active = card;
         player.hand = player.hand.filter(c => c.id !== cardId);
         game.log(`${card.name} played to Active`);
@@ -1824,7 +2077,19 @@ function playCharacterToBench(cardId, slotIndex) {
     const opponent = game.players[opponentNum];
     const card = player.hand.find(c => c.id === cardId);
 
+    if (!canAddToBench(player)) {
+        game.log('Steinert Practice Room: Bench limit is 2', 'info');
+        return;
+    }
+
+    if (!canPlayCardThisTurn()) {
+        game.log('Main Hall: Cannot play more than 3 cards per turn', 'info');
+        return;
+    }
+
     if (card && player.bench[slotIndex] === null) {
+        game.cardsPlayedThisTurn++;
+        logMainHallRemaining();
         player.bench[slotIndex] = card;
         player.hand = player.hand.filter(c => c.id !== cardId);
         game.log(`${card.name} played to Bench`);
@@ -1859,9 +2124,34 @@ function playCharacterToBench(cardId, slotIndex) {
             }
         }
 
+        if (game.stadium && game.stadium.name === 'Steinert Practice Room') {
+            queueSteinertPracticeDiscards([game.currentPlayer]);
+        }
+
         closeModal('action-modal');
         updateUI();
     }
+}
+
+function canPlayCardThisTurn() {
+    if (!game.stadium || game.stadium.name !== 'Main Hall') return true;
+    if (game.mainHallActivatedTurn === null) return true;
+    if (game.turn <= game.mainHallActivatedTurn) return true;
+    return game.cardsPlayedThisTurn < 3;
+}
+
+function canAddToBench(player) {
+    if (!game.stadium || game.stadium.name !== 'Steinert Practice Room') return true;
+    const benchCount = player.bench.filter(c => c).length;
+    return benchCount < 2;
+}
+
+function logMainHallRemaining() {
+    if (!game.stadium || game.stadium.name !== 'Main Hall') return;
+    if (game.mainHallActivatedTurn === null) return;
+    if (game.turn <= game.mainHallActivatedTurn) return;
+    const remaining = Math.max(0, 3 - game.cardsPlayedThisTurn);
+    game.log(`Main Hall: ${remaining} card play${remaining === 1 ? '' : 's'} remaining this turn`, 'info');
 }
 
 // New energy system: attach generic energy counters for free
@@ -1923,14 +2213,15 @@ function playItem(cardId) {
 
     if (!card) return;
 
-    // Check Main Hall limit (3 helper cards per turn)
-    if (!game.playtestMode && game.stadium && game.stadium.name === 'Main Hall' && game.helperCardsPlayedThisTurn >= 3) {
-        game.log('Main Hall: Cannot play more than 3 helper cards per turn', 'info');
+    if (!canPlayCardThisTurn()) {
+        game.log('Main Hall: Cannot play more than 3 cards per turn', 'info');
         return;
     }
 
-    // Track helper card usage
-    game.helperCardsPlayedThisTurn++;
+    game.cardsPlayedThisTurn++;
+    logMainHallRemaining();
+    logMainHallRemaining();
+    logMainHallRemaining();
 
     // Check if this is a tool card (needs attachment)
     const isToolCard = card.cardType === 'tool';
@@ -1941,22 +2232,6 @@ function playItem(cardId) {
     // If we need to wait for modal input, don't discard yet
     if (waitForModal) {
         return;
-    }
-
-    // Alumnae Hall: Deal 10 nonlethal damage to all your characters
-    if (game.stadium && game.stadium.name === 'Alumnae Hall') {
-        const allChars = [player.active, ...player.bench].filter(c => c);
-        allChars.forEach(char => {
-            // Nonlethal damage means it can't KO
-            const currentHP = char.hp - (char.damage || 0);
-            if (currentHP > 10) {
-                game.dealDamage(char, 10);
-                game.log(`Alumnae Hall: ${char.name} takes 10 nonlethal damage`, 'damage');
-            } else {
-                game.dealDamage(char, currentHP - 1);
-                game.log(`Alumnae Hall: ${char.name} takes ${currentHP - 1} nonlethal damage`, 'damage');
-            }
-        });
     }
 
     // Don't discard tool cards yet - they'll be discarded after attachment
@@ -2331,21 +2606,20 @@ function showDeckSelection(player, viewCount, selectCount) {
     const topCards = player.deck.slice(0, Math.min(viewCount, player.deck.length));
 
     if (topCards.length === 0) {
-        game.log('No cards in deck to view', 'info');
+        alert('No cards to view!');
         return;
     }
 
-    // Show modal to let player choose
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
     let html = `<h2>Dress Rehearsal Roster</h2>`;
-    html += `<p>Choose 1 card to keep, the rest will be discarded:</p>`;
+    html += `<p>Choose ${selectCount} card to keep, the rest will be discarded:</p>`;
     html += `<div class="target-selection">`;
 
     topCards.forEach(card => {
         html += `<div class="target-option" onclick="selectDeckCard('${card.id}')">
-            ${card.name} (${card.cardType})
+            ${card.name}
         </div>`;
     });
 
@@ -2358,25 +2632,18 @@ function showDeckSelection(player, viewCount, selectCount) {
 
 function selectDeckCard(cardId) {
     const player = game.players[game.currentPlayer];
-
-    // Find the card in the top 3
     const topCards = player.deck.slice(0, 3);
     const selected = topCards.find(c => c.id === cardId);
 
     if (selected) {
-        // Add selected to hand
+        // Remove the top cards from the deck
+        player.deck.splice(0, topCards.length);
+
+        // Keep selected, discard rest
         player.hand.push(selected);
-        player.deck = player.deck.filter(c => c.id !== selected.id);
-
-        // Discard the rest of the top 3
-        topCards.forEach(c => {
-            if (c.id !== cardId) {
-                player.discard.push(c);
-                player.deck = player.deck.filter(card => card.id !== c.id);
-            }
+        topCards.filter(c => c.id !== selected.id).forEach(card => {
+            player.discard.push(card);
         });
-
-        game.log(`Dress Rehearsal Roster: Kept ${selected.name}, discarded ${topCards.length - 1} card(s)`, 'info');
     }
 
     // Discard the Dress Rehearsal Roster card
@@ -2389,6 +2656,7 @@ function selectDeckCard(cardId) {
     closeModal('action-modal');
     updateUI();
 }
+
 
 function selectFromDiscard(player, cardType, callback) {
     const eligibleCards = player.discard.filter(c => c.cardType === cardType);
@@ -2499,6 +2767,84 @@ function showDiscardSelectionModal(player, cards, cardType, maxSelect, callback)
 
     content.innerHTML = html;
     modal.classList.remove('hidden');
+}
+
+// Photograph: select an item from opponent hand to copy
+function showPhotographSelectionModal(itemCards, opponentNum) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    if (!game.tempSelections) game.tempSelections = {};
+    game.tempSelections.photographItems = itemCards.map(c => c.id);
+    game.tempSelections.photographSelected = null;
+    game.tempSelections.photographOpponentNum = opponentNum;
+
+    let html = `<h2>Photograph</h2>`;
+    html += `<p>Select an item from your opponent's hand to copy</p>`;
+    html += `<div id="photograph-selection">`;
+
+    itemCards.forEach(card => {
+        html += `<div class="target-option" id="photograph-card-${card.id}" onclick="selectPhotographItem('${card.id}')">
+            ${card.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<div class="action-buttons">`;
+    html += `<button class="action-btn" onclick="confirmPhotographSelection()">Confirm</button>`;
+    html += `<button class="action-btn" onclick="cancelPhotographSelection()">Cancel</button>`;
+    html += `</div>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function selectPhotographItem(cardId) {
+    if (!game.tempSelections) return;
+    const previous = game.tempSelections.photographSelected;
+    if (previous) {
+        const prevEl = document.getElementById(`photograph-card-${previous}`);
+        if (prevEl) prevEl.classList.remove('selected');
+    }
+
+    game.tempSelections.photographSelected = cardId;
+    const element = document.getElementById(`photograph-card-${cardId}`);
+    if (element) element.classList.add('selected');
+}
+
+function confirmPhotographSelection() {
+    const player = game.players[game.currentPlayer];
+    if (!game.tempSelections || !game.tempSelections.photographSelected) {
+        game.log('Photograph: No item selected', 'info');
+        return;
+    }
+
+    const opponentNum = game.tempSelections.photographOpponentNum;
+    const opponent = game.players[opponentNum];
+    const chosenItem = opponent.hand.find(c => c.id === game.tempSelections.photographSelected);
+
+    if (!chosenItem) {
+        game.log('Photograph: Selected item no longer in opponent hand', 'warning');
+        closeModal('action-modal');
+        return;
+    }
+
+    game.log(`Photograph: Copying ${chosenItem.name} effect`, 'info');
+    const tempItem = { ...chosenItem, id: generateCardId() };
+    player.hand.push(tempItem);
+    game.tempSelections.photographTempItemId = tempItem.id;
+
+    const waitForModal = executeItemEffect(tempItem);
+    if (!waitForModal) {
+        player.hand = player.hand.filter(c => c.id !== tempItem.id);
+        delete game.tempSelections.photographTempItemId;
+        closeModal('action-modal');
+        updateUI();
+    }
+}
+
+function cancelPhotographSelection() {
+    closeModal('action-modal');
 }
 
 function toggleDiscardCard(cardId, maxSelect) {
@@ -2777,11 +3123,17 @@ function confirmOpponentDiscard() {
         game.tempSelections.opponentDiscardCallback();
     }
 
+    const shouldEndTurn = game.tempSelections.pendingEndTurn;
+
     // Clean up
     game.tempSelections = {};
 
     closeModal('action-modal');
     updateUI();
+
+    if (shouldEndTurn) {
+        endTurn();
+    }
 }
 
 // Annotated score modal
@@ -2982,19 +3334,76 @@ function showFriedmanHallChoice(cards) {
     modal.classList.remove('hidden');
 }
 
+function queueSteinertPracticeDiscards(playerOrder) {
+    if (!game.tempSelections) game.tempSelections = {};
+    const queue = playerOrder.filter(playerNum => {
+        const player = game.players[playerNum];
+        return player && player.bench.filter(c => c).length > 2;
+    });
+    if (queue.length === 0) return;
+    game.tempSelections.steinertPracticeQueue = queue;
+    showSteinertPracticeDiscardModal(queue[0]);
+}
+
+function showSteinertPracticeDiscardModal(playerNum) {
+    const player = game.players[playerNum];
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Steinert Practice Room</h2>`;
+    html += `<p>Player ${playerNum}: Choose a benched character to discard (max 2 bench)</p>`;
+    html += `<div class="target-selection">`;
+
+    player.bench.forEach((char, idx) => {
+        if (char) {
+            html += `<div class="target-option" onclick="executeSteinertPracticeDiscard(${playerNum}, ${idx})">
+                ${char.name}
+            </div>`;
+        }
+    });
+
+    html += `</div>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeSteinertPracticeDiscard(playerNum, benchIndex) {
+    const player = game.players[playerNum];
+    const char = player.bench[benchIndex];
+    if (char) {
+        player.bench[benchIndex] = null;
+        player.discard.push(char);
+        game.log(`Steinert Practice Room: Player ${playerNum} discarded ${char.name} from bench`, 'info');
+    }
+
+    if (game.tempSelections && game.tempSelections.steinertPracticeQueue) {
+        game.tempSelections.steinertPracticeQueue.shift();
+        const nextPlayer = game.tempSelections.steinertPracticeQueue[0];
+        if (nextPlayer) {
+            showSteinertPracticeDiscardModal(nextPlayer);
+            return;
+        }
+        delete game.tempSelections.steinertPracticeQueue;
+    }
+
+    closeModal('action-modal');
+    updateUI();
+}
+
 function chooseFriedmanCard(cardIndex) {
     const cards = game.tempSelections.friedmanCards;
     const playerNum = game.tempSelections.friedmanPlayer;
     const player = game.players[playerNum];
 
-    // Keep the chosen card, discard the other
+    // Keep the chosen card, shuffle the other back into deck
     const keptCard = cards[cardIndex];
     const discardedCard = cards[1 - cardIndex];
 
     player.hand.push(keptCard);
-    player.discard.push(discardedCard);
+    player.deck.push(discardedCard);
+    game.shuffleDeck(playerNum);
 
-    game.log(`Friedman Hall: Drew ${keptCard.name}, discarded ${discardedCard.name}`);
+    game.log(`Friedman Hall: Drew ${keptCard.name}, shuffled ${discardedCard.name} back into deck`);
 
     delete game.tempSelections.friedmanCards;
     delete game.tempSelections.friedmanPlayer;
@@ -3160,6 +3569,9 @@ function selectSearchedCharacter(charId) {
     const char = player.deck.find(c => c.id === charId);
 
     if (char) {
+        if (!canAddToBench(player)) {
+            game.log('Steinert Practice Room: Bench limit is 2', 'info');
+        } else {
         // Check if there's an empty bench slot
         const emptyBenchSlot = player.bench.indexOf(null);
         if (emptyBenchSlot !== -1) {
@@ -3168,6 +3580,7 @@ function selectSearchedCharacter(charId) {
             game.log(`Played ${char.name} to bench from deck`, 'info');
         } else {
             game.log('No empty bench slots', 'info');
+        }
         }
     }
 
@@ -3248,13 +3661,8 @@ function showFoldingStandModal(player) {
 
     const energyCards = player.discard.filter(c => c.cardType === 'energy');
     if (energyCards.length === 0) {
-        game.log('No energy cards in discard pile', 'info');
-        const foldingStand = player.hand.find(c => c.name === 'Folding Stand');
-        if (foldingStand) {
-            player.hand = player.hand.filter(c => c.id !== foldingStand.id);
-            player.discard.push(foldingStand);
-        }
-        updateUI();
+        alert('No energy cards in discard pile!');
+        closeModal('action-modal');
         return;
     }
 
@@ -3277,47 +3685,6 @@ function showFoldingStandModal(player) {
 
     content.innerHTML = html;
     modal.classList.remove('hidden');
-}
-
-function toggleFoldingStandCard(cardId) {
-    if (!game.tempSelections.foldingStandSelected) game.tempSelections.foldingStandSelected = [];
-
-    const index = game.tempSelections.foldingStandSelected.indexOf(cardId);
-    const element = document.getElementById(`folding-${cardId}`);
-
-    if (index === -1 && game.tempSelections.foldingStandSelected.length < 3) {
-        game.tempSelections.foldingStandSelected.push(cardId);
-        element.classList.add('selected');
-    } else if (index !== -1) {
-        game.tempSelections.foldingStandSelected.splice(index, 1);
-        element.classList.remove('selected');
-    }
-}
-
-function confirmFoldingStand() {
-    const player = game.players[game.currentPlayer];
-    const selected = game.tempSelections.foldingStandSelected || [];
-
-    selected.forEach(cardId => {
-        const card = player.discard.find(c => c.id === cardId);
-        if (card) {
-            player.discard = player.discard.filter(c => c.id !== cardId);
-            player.deck.push(card);
-            game.log(`Shuffled ${card.name} into deck`, 'info');
-        }
-    });
-
-    game.shuffleDeck(game.currentPlayer);
-
-    // Discard Folding Stand
-    const foldingStand = player.hand.find(c => c.name === 'Folding Stand');
-    if (foldingStand) {
-        player.hand = player.hand.filter(c => c.id !== foldingStand.id);
-        player.discard.push(foldingStand);
-    }
-
-    closeModal('action-modal');
-    updateUI();
 }
 
 // BUO Stand: Energy placement modal
@@ -3345,6 +3712,46 @@ function showBUOStandModal(player) {
 
     content.innerHTML = html;
     modal.classList.remove('hidden');
+}
+
+function toggleFoldingStandCard(cardId) {
+    if (!game.tempSelections || !game.tempSelections.foldingStandSelected) return;
+    const index = game.tempSelections.foldingStandSelected.indexOf(cardId);
+    const element = document.getElementById(`folding-${cardId}`);
+
+    if (index === -1 && game.tempSelections.foldingStandSelected.length < 3) {
+        game.tempSelections.foldingStandSelected.push(cardId);
+        if (element) element.classList.add('selected');
+    } else if (index !== -1) {
+        game.tempSelections.foldingStandSelected.splice(index, 1);
+        if (element) element.classList.remove('selected');
+    } else {
+        alert('You can only select up to 3 cards.');
+    }
+}
+
+function confirmFoldingStand() {
+    const player = game.players[game.currentPlayer];
+    const selected = game.tempSelections?.foldingStandSelected || [];
+
+    selected.forEach(cardId => {
+        const card = player.discard.find(c => c.id === cardId);
+        if (card) {
+            player.deck.push(card);
+            player.discard = player.discard.filter(c => c.id !== cardId);
+        }
+    });
+
+    game.shuffleDeck(game.currentPlayer);
+
+    const foldingStand = player.hand.find(c => c.name === 'Folding Stand');
+    if (foldingStand) {
+        player.hand = player.hand.filter(c => c.id !== foldingStand.id);
+        player.discard.push(foldingStand);
+    }
+
+    closeModal('action-modal');
+    updateUI();
 }
 
 function selectBUOStandCard(cardId) {
@@ -3476,6 +3883,9 @@ function selectConcertRosterCharacter(charId) {
     const char = player.deck.find(c => c.id === charId);
 
     if (char) {
+        if (!canAddToBench(player)) {
+            game.log('Steinert Practice Room: Bench limit is 2', 'info');
+        } else {
         const emptyBenchSlot = player.bench.indexOf(null);
         if (emptyBenchSlot !== -1) {
             player.bench[emptyBenchSlot] = char;
@@ -3483,6 +3893,7 @@ function selectConcertRosterCharacter(charId) {
             game.log(`Placed ${char.name} on bench from deck`, 'info');
         } else {
             game.log('No empty bench slots', 'error');
+        }
         }
     }
 
@@ -3607,6 +4018,10 @@ function confirmVictoriaSelection() {
     game.tempSelections.victoriaSelected.forEach(charId => {
         const char = player.deck.find(c => c.id === charId);
         if (char) {
+            if (!canAddToBench(player)) {
+                game.log('Steinert Practice Room: Bench limit is 2', 'info');
+                return;
+            }
             const emptySlot = player.bench.findIndex(slot => slot === null);
             if (emptySlot !== -1) {
                 player.bench[emptySlot] = char;
@@ -3700,7 +4115,7 @@ function toggleLucasCharacter(charId) {
     const element = document.getElementById(`lucas-char-${charId}`);
 
     if (!game.tempSelections.lucasSelected) game.tempSelections.lucasSelected = [];
-
+can
     const index = game.tempSelections.lucasSelected.findIndex(id => id === charId);
     if (index > -1) {
         // Deselect
@@ -3747,6 +4162,10 @@ function confirmLucasSelection() {
         game.tempSelections.lucasSelected.forEach(charId => {
             const char = player.deck.find(c => c.id === charId);
             if (char) {
+                if (!canAddToBench(player)) {
+                    game.log('Steinert Practice Room: Bench limit is 2', 'info');
+                    return;
+                }
                 const emptyBenchSlot = player.bench.indexOf(null);
                 if (emptyBenchSlot !== -1) {
                     player.bench[emptyBenchSlot] = char;
@@ -3839,18 +4258,8 @@ function show440HzSelectionModal(player, energyCards, benchedChars) {
     game.tempSelections.hz440Target = null;
     game.tempSelections.hz440Player = player;
 
-    let html = `<h2>440 Hz - Select Energy and Target</h2>`;
-    html += `<h3>Step 1: Select Energy from Hand</h3>`;
-    html += `<div id="hz440-energy-selection">`;
-
-    energyCards.forEach(energy => {
-        html += `<div class="target-option" id="hz440-energy-${energy.id}" onclick="select440HzEnergy('${energy.id}')">
-            ${energy.name}
-        </div>`;
-    });
-
-    html += `</div>`;
-    html += `<h3>Step 2: Select Benched Character</h3>`;
+    let html = `<h2>440 Hz - Select Target</h2>`;
+    html += `<p>Select a benched character to attach 1 energy.</p>`;
     html += `<div id="hz440-target-selection">`;
 
     benchedChars.forEach(char => {
@@ -3870,15 +4279,8 @@ function show440HzSelectionModal(player, energyCards, benchedChars) {
 }
 
 function select440HzEnergy(energyId) {
-    // Deselect previous
-    if (game.tempSelections.hz440Energy) {
-        const prevElement = document.getElementById(`hz440-energy-${game.tempSelections.hz440Energy}`);
-        if (prevElement) prevElement.classList.remove('selected');
-    }
-
+    // No-op (energy cards removed)
     game.tempSelections.hz440Energy = energyId;
-    const element = document.getElementById(`hz440-energy-${energyId}`);
-    if (element) element.classList.add('selected');
 }
 
 function select440HzTarget(targetId) {
@@ -3895,21 +4297,16 @@ function select440HzTarget(targetId) {
 
 function confirm440HzSelection() {
     const player = game.players[game.currentPlayer];
+    const target = player.bench.find(c => c && c.id === game.tempSelections.hz440Target);
 
-    if (!game.tempSelections.hz440Energy || !game.tempSelections.hz440Target) {
-        game.log('Must select both energy and target');
+    if (!target) {
+        game.log('Must select a benched character');
         return;
     }
 
-    const energy = player.hand.find(c => c.id === game.tempSelections.hz440Energy);
-    const target = player.bench.find(c => c && c.id === game.tempSelections.hz440Target);
-
-    if (energy && target) {
-        if (!target.attachedEnergy) target.attachedEnergy = [];
-        target.attachedEnergy.push(energy);
-        player.hand = player.hand.filter(c => c.id !== energy.id);
-        game.log(`440 Hz: Attached ${energy.name} to ${target.name}`, 'info');
-    }
+    if (!target.attachedEnergy) target.attachedEnergy = [];
+    target.attachedEnergy.push({ generic: true });
+    game.log(`440 Hz: Attached 1 energy to ${target.name}`, 'info');
 
     delete game.tempSelections.hz440Energy;
     delete game.tempSelections.hz440Target;
@@ -4143,14 +4540,12 @@ function playSupporter(cardId) {
 
     if (!card || (game.supporterPlayedThisTurn && !game.playtestMode)) return;
 
-    // Check Main Hall limit (3 helper cards per turn)
-    if (!game.playtestMode && game.stadium && game.stadium.name === 'Main Hall' && game.helperCardsPlayedThisTurn >= 3) {
-        game.log('Main Hall: Cannot play more than 3 helper cards per turn', 'info');
+    if (!canPlayCardThisTurn()) {
+        game.log('Main Hall: Cannot play more than 3 cards per turn', 'info');
         return;
     }
 
-    // Track helper card usage
-    game.helperCardsPlayedThisTurn++;
+    game.cardsPlayedThisTurn++;
 
     // Implement specific supporter effects - returns true if we should wait for modal
     const waitForModal = executeSupporterEffect(card);
@@ -4158,22 +4553,6 @@ function playSupporter(cardId) {
     // If we need to wait for modal input, don't discard yet
     if (waitForModal) {
         return;
-    }
-
-    // Alumnae Hall: Deal 10 nonlethal damage to all your characters
-    if (game.stadium && game.stadium.name === 'Alumnae Hall') {
-        const allChars = [player.active, ...player.bench].filter(c => c);
-        allChars.forEach(char => {
-            // Nonlethal damage means it can't KO
-            const currentHP = char.hp - (char.damage || 0);
-            if (currentHP > 10) {
-                game.dealDamage(char, 10);
-                game.log(`Alumnae Hall: ${char.name} takes 10 nonlethal damage`, 'damage');
-            } else {
-                game.dealDamage(char, currentHP - 1);
-                game.log(`Alumnae Hall: ${char.name} takes ${currentHP - 1} nonlethal damage`, 'damage');
-            }
-        });
     }
 
     player.hand = player.hand.filter(c => c.id !== cardId);
@@ -4314,11 +4693,18 @@ function playStadium(cardId) {
     if (!card) return;
 
     // Check if BAI Email prevents playing stadiums this turn
-    if (!game.playtestMode && game.nextTurnEffects[game.currentPlayer].cannotPlayStadium) {
+    if (game.nextTurnEffects[game.currentPlayer].cannotPlayStadium) {
         alert('Cannot play stadiums this turn (BAI Email effect)');
         game.log('Cannot play stadiums this turn (BAI Email effect)', 'error');
         return;
     }
+
+    if (!canPlayCardThisTurn()) {
+        game.log('Main Hall: Cannot play more than 3 cards per turn', 'info');
+        return;
+    }
+
+    game.cardsPlayedThisTurn++;
 
     // Discard old stadium if exists
     if (game.stadium) {
@@ -4326,41 +4712,45 @@ function playStadium(cardId) {
     }
 
     game.stadium = card;
+    game.mainHallActivatedTurn = card.name === 'Main Hall' ? game.turn : null;
     player.hand = player.hand.filter(c => c.id !== cardId);
     game.log(`Played stadium: ${card.name}`);
 
-    // Alumnae Hall: Both players discard all music stands when played
+    // Alumnae Hall: Both players discard all items when played
     if (card.name === 'Alumnae Hall') {
         [1, 2].forEach(playerNum => {
             const p = game.players[playerNum];
-            const allChars = [p.active, ...p.bench].filter(c => c);
-
-            allChars.forEach(char => {
-                if (char.attachedTools) {
-                    const musicStands = char.attachedTools.filter(tool =>
-                        tool.name === 'Folding stand' || tool.name === 'BUO stand'
-                    );
-
-                    musicStands.forEach(stand => {
-                        removeToolEffects(char, stand);
-                        p.discard.push(stand);
-                        game.log(`Player ${playerNum}: Discarded ${stand.name} from ${char.name}`, 'info');
-                    });
-
-                    char.attachedTools = char.attachedTools.filter(tool =>
-                        tool.name !== 'Folding stand' && tool.name !== 'BUO stand'
-                    );
-                }
-            });
+            const itemsInHand = p.hand.filter(c => c.cardType === 'item');
+            if (itemsInHand.length > 0) {
+                itemsInHand.forEach(item => p.discard.push(item));
+                p.hand = p.hand.filter(c => c.cardType !== 'item');
+                game.log(`Player ${playerNum}: Discarded ${itemsInHand.length} item(s) from hand`, 'info');
+            }
         });
     }
 
-    closeModal('action-modal');
-    updateUI();
+    if (card.name === 'Steinert Practice Room') {
+        const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+        queueSteinertPracticeDiscards([game.currentPlayer, opponentNum]);
+    }
+
+    if (!(game.tempSelections && game.tempSelections.steinertPracticeQueue && game.tempSelections.steinertPracticeQueue.length > 0)) {
+        closeModal('action-modal');
+        updateUI();
+    }
 }
 
 function closeModal(modalId) {
     document.getElementById(modalId).classList.add('hidden');
+
+    if (modalId === 'action-modal' && game.tempSelections && game.tempSelections.photographTempItemId) {
+        const player = game.players[game.currentPlayer];
+        player.hand = player.hand.filter(c => c.id !== game.tempSelections.photographTempItemId);
+        delete game.tempSelections.photographTempItemId;
+        delete game.tempSelections.photographSelected;
+        delete game.tempSelections.photographItems;
+        delete game.tempSelections.photographOpponentNum;
+    }
 
     if (modalId === 'action-modal' && game.tempSelections && game.tempSelections.foresightPending) {
         const cards = game.tempSelections.foresightOriginal;
@@ -4400,6 +4790,12 @@ function closeModal(modalId) {
 
     if (modalId === 'action-modal') {
         game.lastAttackSource = null;
+    }
+
+    if (modalId === 'action-modal' && game.tempSelections && game.tempSelections.pendingEndTurn && game.tempSelections.opponentDiscardCount) {
+        game.tempSelections.pendingEndTurn = false;
+        game.tempSelections = {};
+        endTurn();
     }
 
     if (modalId === 'action-modal' && game.pendingAttackEndTurn) {
@@ -4497,6 +4893,11 @@ function getEffectiveRetreatCost(character) {
         cost *= 2;
     }
 
+    // Petteruti Lounge: Maids have no retreat cost
+    if (game.stadium && game.stadium.name === 'Petteruti Lounge' && character.status && character.status.includes('Maid')) {
+        cost = 0;
+    }
+
     return cost;
 }
 
@@ -4531,8 +4932,22 @@ function canUseMove(character, move) {
 
 function getMoveEnergyCost(move) {
     const baseCost = Array.isArray(move.cost) ? move.cost.length : (move.cost || 0);
-    const extraCost = (game.stadium && game.stadium.name === 'Steinert Basement Studio') ? 1 : 0;
-    return baseCost + extraCost;
+    const extraCost = (game.stadium && (game.stadium.name === 'Steinert Basement Studio' || game.stadium.name === 'Steinert Practice Room')) ? 1 : 0;
+    let cost = baseCost + extraCost;
+
+    if (game.stadium && game.stadium.name === 'Lindemann Big Practice Room') {
+        const player = game.players[game.currentPlayer];
+        const active = player.active;
+        const benchChars = player.bench.filter(c => c);
+        if (active) {
+            const allMatch = benchChars.every(char => char.type.some(t => active.type.includes(t)));
+            if (allMatch) {
+                cost = Math.max(0, cost - 1);
+            }
+        }
+    }
+
+    return cost;
 }
 
 function selectMove(cardId, moveIndex) {
@@ -4741,58 +5156,29 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     // Apply stadium effects
     if (game.stadium) {
         if (game.stadium.name === 'Red Room') {
-            if (attacker.type.includes(TYPES.STRINGS) || attacker.type.includes(TYPES.WOODWINDS)) {
+            if (attacker.type.includes(TYPES.STRINGS) || attacker.type.includes(TYPES.WOODWINDS) || attacker.type.includes(TYPES.BRASS)) {
                 damage -= 10;
             }
-            if (attacker.type.includes(TYPES.GUITAR) || attacker.type.includes(TYPES.PERCUSSION)) {
+            if (attacker.type.includes(TYPES.CHOIR) || attacker.type.includes(TYPES.GUITAR) || attacker.type.includes(TYPES.PERCUSSION) || attacker.type.includes(TYPES.PIANO)) {
                 damage += 10;
             }
-        } else if (game.stadium.name === 'Lindemann Big Practice Room') {
-            if (attacker.type.includes(TYPES.WOODWINDS) || attacker.type.includes(TYPES.BRASS)) {
-                damage += 10;
-            }
-        } else if (game.stadium.name === 'Matcha Maid Cafe') {
+        } else if (game.stadium.name === 'Petteruti Lounge') {
             if (attacker.status && attacker.status.includes('Maid')) {
-                damage += 10;
-            }
-        } else if (game.stadium.name === 'Steinert Practice Room') {
-            if (attacker.type.includes(TYPES.PIANO)) {
-                damage += 10;
-            }
-        } else if (game.stadium.name === 'Friedman Hall') {
-            if (attacker.type.includes(TYPES.CHOIR)) {
                 damage += 10;
             }
         } else if (game.stadium.name === 'Salomon DECI') {
             // Roll a die and modify damage for Guitar, Piano, Percussion
             if (attacker.type.includes(TYPES.GUITAR) ||
                 attacker.type.includes(TYPES.PIANO) ||
+                attacker.type.includes(TYPES.CHOIR) ||
                 attacker.type.includes(TYPES.PERCUSSION)) {
 
-                // Only roll once per stadium (store the result on the stadium object)
-                if (!game.stadium.diceRoll) {
-                    game.stadium.diceRoll = Math.floor(Math.random() * 6) + 1;
-                    game.log(`Salomon DECI: Rolled ${game.stadium.diceRoll}`, 'info');
+                const roll = randInt(6) + 1;
+                game.log(`Salomon DECI: Rolled ${roll}`, 'info');
+                if (roll >= 3) {
+                    damage = Math.max(0, damage - 30);
+                    game.log('Salomon DECI: -30 damage modifier');
                 }
-
-                // On 1-2: +10 damage, On 3-6: -10 damage
-                const modifier = (game.stadium.diceRoll <= 2) ? 10 : -10;
-                damage = Math.max(0, damage + modifier);
-                game.log(`Salomon DECI: ${modifier > 0 ? '+' : ''}${modifier} damage modifier`);
-            }
-        } else if (game.stadium.name === 'Steinert Basement Studio') {
-            // String Ensemble: +10 damage if 2+ string players in play (across both sides)
-            const allChars = [
-                game.players[1].active, ...game.players[1].bench,
-                game.players[2].active, ...game.players[2].bench
-            ].filter(c => c);
-
-            const stringPlayerCount = allChars.filter(char =>
-                char.type.includes(TYPES.STRINGS)
-            ).length;
-
-            if (stringPlayerCount >= 2) {
-                damage += 10;
             }
         }
     }
@@ -4835,11 +5221,16 @@ function calculateDamage(attacker, defender, baseDamage, move) {
         }
     }
 
-    // Ryan Li's "Moe moe kyun~!" - All your maids do +20 damage
-    const hasRyanLi = [currentPlayer.active, ...currentPlayer.bench].some(char => char && char.name === 'Ryan Li');
+    // Ryan Li's "Moe moe kyun~!" - All maids do +10 damage (both sides)
+    const hasRyanLi = [
+        game.players[1].active,
+        ...game.players[1].bench,
+        game.players[2].active,
+        ...game.players[2].bench
+    ].some(char => char && char.name === 'Ryan Li');
     if (hasRyanLi && attacker.status && attacker.status.includes('Maid')) {
-        damage += 20;
-        game.log('Ryan Li ability: +20 damage (maid bonus)');
+        damage += 10;
+        game.log('Ryan Li ability: +10 damage (maid bonus)');
     }
 
     // Juan Burgos's "Baking Buff" - While on bench, brass active does +20 damage
@@ -5179,10 +5570,30 @@ function useActivatedAbility(cardId, abilitySlot) {
     const ability = card[abilitySlot];
     if (!ability || ability.type !== 'activated') return;
 
+    if (game.nextTurnEffects[game.currentPlayer].abilitiesDisabled) {
+        alert('Abilities are disabled this turn.');
+        game.log('Abilities are disabled this turn (Nullify).', 'warning');
+        return;
+    }
+
     game.log(`${card.name} uses ${ability.name}!`, 'info');
 
     // Implement specific activated abilities
     switch (ability.name) {
+        case 'Nullify': {
+            // Luke Xu: If benched this turn, opponent abilities have no effect during their next turn
+            if (!card.wasJustBenched) {
+                alert('Nullify can only be used if Luke Xu was benched this turn.');
+                break;
+            }
+
+            const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+            game.nextTurnEffects[opponentNum].abilitiesDisabled = true;
+            game.log('Nullify: Opponent abilities disabled next turn!', 'info');
+            closeModal('action-modal');
+            updateUI();
+            break;
+        }
         case 'Leave Rehearsal Early':
             // Happy Ruth: Bench only, no tools attached
             if (!player.bench.includes(card)) {
@@ -5301,7 +5712,11 @@ function useActivatedAbility(cardId, abilitySlot) {
             }
 
             // Shuffle discard
-            const shuffledDiscard = [...player.discard].sort(() => Math.random() - 0.5);
+            const shuffledDiscard = [...player.discard];
+            for (let i = shuffledDiscard.length - 1; i > 0; i--) {
+                const j = randInt(i + 1);
+                [shuffledDiscard[i], shuffledDiscard[j]] = [shuffledDiscard[j], shuffledDiscard[i]];
+            }
             // Pick random 3
             const randomThree = shuffledDiscard.slice(0, 3);
             // Remove these 3 from discard
@@ -5502,6 +5917,8 @@ function discardToolForProfitMargins(cardId, toolIndex) {
 }
 
 function setupEventListeners() {
+    if (eventListenersInitialized) return;
+    eventListenersInitialized = true;
     setupKeyboardShortcuts();
 
     // End turn button
@@ -5549,7 +5966,32 @@ function setupEventListeners() {
     });
 }
 
+let eventListenersInitialized = false;
+
 function endTurn() {
+    if (!canCurrentClientAct()) return;
+
+    const currentPlayerNum = game.currentPlayer;
+    const currentPlayerObj = game.players[currentPlayerNum];
+    const opponentNum = currentPlayerNum === 1 ? 2 : 1;
+    const opponentObj = game.players[opponentNum];
+
+    // Alice Wang's Euclidean Algorithm - while Alice is active, opponent discards to equalize hand size at end of their turn
+    const aliceInPlay = [opponentObj.active, ...opponentObj.bench].some(c => c && c.name === 'Alice Wang');
+    if (aliceInPlay) {
+        if (currentPlayerObj.hand.length > opponentObj.hand.length) {
+            const discardCount = currentPlayerObj.hand.length - opponentObj.hand.length;
+            if (discardCount > 0) {
+                game.tempSelections = game.tempSelections || {};
+                game.tempSelections.pendingEndTurn = true;
+                showOpponentDiscardChoice(currentPlayerNum, discardCount, () => {
+                    game.log(`Alice Wang's Euclidean Algorithm: Player ${currentPlayerNum} discarded ${discardCount} cards to equalize hand sizes`);
+                });
+                return;
+            }
+        }
+    }
+
     game.switchPlayer();
 
     // Don't auto-draw if Friedman Hall is active (it handles its own draw) or if draw was skipped
@@ -5558,6 +6000,7 @@ function endTurn() {
     }
 
     updateUI();
+    sendMultiplayerAction('STATE_SNAPSHOT', []);
 }
 
 let hotkeysInitialized = false;
@@ -5573,6 +6016,10 @@ function setupKeyboardShortcuts() {
 
         if (key === 'escape') {
             closeTopModal();
+            return;
+        }
+
+        if (!canCurrentClientAct()) {
             return;
         }
 
@@ -5764,6 +6211,8 @@ function setupStartScreen() {
     const player1Desc = document.getElementById('player1-deck-description');
     const player2Desc = document.getElementById('player2-deck-description');
     const playtestToggle = document.getElementById('playtest-mode-toggle');
+    const multiplayerToggle = document.getElementById('multiplayer-toggle');
+    const multiplayerRoomInput = document.getElementById('multiplayer-room');
 
     // Update deck descriptions when selection changes
     player1Select.addEventListener('change', () => {
@@ -5787,13 +6236,17 @@ function setupStartScreen() {
         const deck1Name = player1Select.value;
         const deck2Name = player2Select.value;
         const playtestMode = playtestToggle ? playtestToggle.checked : false;
+        const roomId = (multiplayerRoomInput?.value || '').trim() || 'default';
 
         // Hide start screen and show game
         startScreen.classList.add('hidden');
         gameContainer.classList.remove('hidden');
 
-        // Initialize game with selected decks
-        initGame(deck1Name, deck2Name, playtestMode);
+        if (multiplayerToggle?.checked) {
+            connectMultiplayer({ roomId, deck1Name, deck2Name, playtestMode });
+        } else {
+            initGame(deck1Name, deck2Name, playtestMode);
+        }
     });
 
     // Deck builder button
@@ -6358,16 +6811,16 @@ function flipCoin() {
     if (hasJayden && !game.usedFourLeafClover) {
         game.usedFourLeafClover = true;
         game.log('Jayden Brown\'s Four-leaf Clover: Choose first coin flip result!');
-        const rolledHeads = Math.random() < 0.5;
+        const rolledHeads = getRandom() < 0.5;
         const forceHeads = confirm(`Four-leaf Clover: Rolled ${rolledHeads ? 'Heads' : 'Tails'}. Force Heads? (OK = Heads, Cancel = Keep Result)`);
         return forceHeads ? true : rolledHeads;
     }
 
-    return Math.random() < 0.5;
+    return getRandom() < 0.5;
 }
 
 function rollD6() {
-    return Math.floor(Math.random() * 6) + 1;
+    return randInt(6) + 1;
 }
 
 // ===== MODAL FUNCTIONS FOR NEW MOVES =====
@@ -7007,17 +7460,11 @@ function showGachaGamingModal(player, attacker) {
     const content = document.getElementById('action-content');
 
     let html = `<h2>Gacha Gaming</h2>`;
-    html += `<p>Draw cards and take 10 damage each. Choose number (1-3):</p>`;
-    html += `<div class="target-selection">`;
-
-    for (let i = 1; i <= 3; i++) {
-        html += `<div class="target-option" onclick="executeGachaGaming(${i})">
-            Draw ${i} card${i > 1 ? 's' : ''} (${i * 10} damage)
-        </div>`;
-    }
-
-    html += `</div>`;
+    html += `<p>Draw one card at a time. Stop any time. Each draw deals 20 damage (cannot KO).</p>`;
+    html += `<div class="action-buttons">`;
+    html += `<button class="action-btn" onclick="executeGachaGaming(1)">Start Drawing</button>`;
     html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    html += `</div>`;
     content.innerHTML = html;
     modal.classList.remove('hidden');
 }
@@ -7025,35 +7472,87 @@ function showGachaGamingModal(player, attacker) {
 function executeGachaGaming(drawCount) {
     const player = game.players[game.currentPlayer];
     const attacker = player.active;
-
-    // Draw cards
-    for (let i = 0; i < drawCount && player.deck.length > 0; i++) {
-        const card = player.deck.shift();
-        player.hand.push(card);
-        game.log(`Gacha Gaming: Drew ${card.name}`);
+    if (!game.tempSelections) game.tempSelections = {};
+    if (!game.tempSelections.gachaGaming) {
+        game.tempSelections.gachaGaming = {
+            drawn: [],
+            resolved: false
+        };
     }
 
-    // Take damage
-    const damage = drawCount * 10;
-    game.dealDamage(attacker, damage);
-    game.log(`Gacha Gaming: Took ${damage} damage`, 'damage');
+    executeGachaGamingStep();
+}
 
-    // Heal option: discard cards to heal
-    const handSize = player.hand.length;
-    if (handSize > 0) {
-        setTimeout(() => {
-            const discardCount = parseInt(prompt(`Gacha Gaming: Discard how many cards to heal? (0-${handSize}, 10 HP each)`)) || 0;
-            if (discardCount > 0 && discardCount <= handSize) {
-                for (let i = 0; i < discardCount; i++) {
-                    const card = player.hand.pop();
-                    player.discard.push(card);
-                }
-                const healAmount = Math.min(discardCount * 10, attacker.damage);
-                attacker.damage = Math.max(0, attacker.damage - healAmount);
-                game.log(`Gacha Gaming: Discarded ${discardCount} cards, healed ${healAmount}`, 'heal');
-                updateUI();
-            }
-        }, 100);
+function executeGachaGamingStep() {
+    const player = game.players[game.currentPlayer];
+    const attacker = player.active;
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    if (!game.tempSelections || !game.tempSelections.gachaGaming || game.tempSelections.gachaGaming.resolved) {
+        return;
+    }
+
+    if (player.deck.length === 0) {
+        finalizeGachaGaming(false);
+        return;
+    }
+
+    const card = player.deck.shift();
+    game.tempSelections.gachaGaming.drawn.push(card);
+    game.log(`Gacha Gaming: Drew ${card.name}`);
+
+    const currentHp = attacker.hp - (attacker.damage || 0);
+    const maxDamage = Math.max(0, currentHp - 10);
+    const damage = Math.min(20, maxDamage);
+    if (damage > 0) {
+        game.dealDamage(attacker, damage);
+        game.log(`Gacha Gaming: Took ${damage} damage`, 'damage');
+    }
+
+    if (card.name === 'AVGE Birb') {
+        finalizeGachaGaming(true);
+        return;
+    }
+
+    let html = `<h2>Gacha Gaming</h2>`;
+    html += `<p>Last draw: ${card.name}</p>`;
+    const remainingHp = attacker.hp - (attacker.damage || 0);
+    const canDrawAgain = remainingHp > 20;
+    html += `<div class="action-buttons">`;
+    if (canDrawAgain) {
+        html += `<button class="action-btn" onclick="executeGachaGamingStep()">Draw Again</button>`;
+    } else {
+        html += `<p style="margin: 0; color: #b00020;">Cannot draw again (would KO).</p>`;
+    }
+    html += `<button class="action-btn" onclick="finalizeGachaGaming(false)">Stop Drawing</button>`;
+    html += `</div>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+    updateUI();
+}
+
+function finalizeGachaGaming(drewBirb) {
+    const player = game.players[game.currentPlayer];
+    const attacker = player.active;
+    const drawn = game.tempSelections?.gachaGaming?.drawn || [];
+
+    if (drewBirb) {
+        attacker.damage = 0;
+        game.log('Gacha Gaming: Drew AVGE Birb, healed all damage and kept drawn cards!');
+        drawn.forEach(card => {
+            player.hand.push(card);
+        });
+    } else {
+        player.deck.push(...drawn);
+        game.shuffleDeck(game.currentPlayer);
+        game.log('Gacha Gaming: Stopped drawing, shuffled drawn cards back into deck');
+    }
+
+    if (game.tempSelections && game.tempSelections.gachaGaming) {
+        game.tempSelections.gachaGaming.resolved = true;
+        delete game.tempSelections.gachaGaming;
     }
 
     closeModal('action-modal');
@@ -7077,6 +7576,119 @@ function showSongVotingModal(opponent, attacker, target, move) {
     html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
     content.innerHTML = html;
     modal.classList.remove('hidden');
+}
+
+function showSongVotingSelectionModal(playerNum) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+    const player = game.players[playerNum];
+    if (!game.tempSelections || !game.tempSelections.songVoting) return;
+
+    game.tempSelections.songVoting.pendingForPlayer = playerNum;
+    game.tempSelections.songVoting.prompted[playerNum] = true;
+
+    let html = `<h2>Song Voting - Select 2 Cards</h2>`;
+    html += `<p>Player ${playerNum}: Choose exactly two cards to reveal.</p>`;
+    html += `<p>Selected: <span id="song-voting-count">0</span>/2</p>`;
+    html += `<div class="target-selection">`;
+
+    player.hand.forEach(card => {
+        html += `<div class="target-option" id="song-voting-${playerNum}-${card.id}" onclick="toggleSongVotingCard(${playerNum}, '${card.id}')">
+            ${card.name}
+        </div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="confirmSongVotingSelection(${playerNum})">Confirm Selection</button>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function toggleSongVotingCard(playerNum, cardId) {
+    if (!game.tempSelections || !game.tempSelections.songVoting) return;
+    const selection = game.tempSelections.songVoting.selections[playerNum];
+    const cardElement = document.getElementById(`song-voting-${playerNum}-${cardId}`);
+
+    const index = selection.indexOf(cardId);
+    if (index >= 0) {
+        selection.splice(index, 1);
+        if (cardElement) cardElement.classList.remove('selected');
+    } else {
+        if (selection.length >= 2) {
+            alert('You can only select 2 cards.');
+            return;
+        }
+        selection.push(cardId);
+        if (cardElement) cardElement.classList.add('selected');
+    }
+
+    const counter = document.getElementById('song-voting-count');
+    if (counter) counter.textContent = selection.length;
+}
+
+function confirmSongVotingSelection(playerNum) {
+    if (!game.tempSelections || !game.tempSelections.songVoting) return;
+    const selection = game.tempSelections.songVoting.selections[playerNum];
+    if (selection.length !== 2) {
+        alert('Select exactly 2 cards.');
+        return;
+    }
+
+    const otherPlayer = playerNum === 1 ? 2 : 1;
+    if (!game.tempSelections.songVoting.selections[otherPlayer] || game.tempSelections.songVoting.selections[otherPlayer].length !== 2) {
+        if (!multiplayer.enabled) {
+            showSongVotingSelectionModal(otherPlayer);
+        }
+        closeModal('action-modal');
+        updateUI();
+        return;
+    }
+
+    resolveSongVoting();
+}
+
+function resolveSongVoting() {
+    const sv = game.tempSelections && game.tempSelections.songVoting;
+    if (!sv) return;
+    const player1 = game.players[1];
+    const player2 = game.players[2];
+
+    const p1Cards = sv.selections[1].map(id => player1.hand.find(c => c.id === id)).filter(Boolean);
+    const p2Cards = sv.selections[2].map(id => player2.hand.find(c => c.id === id)).filter(Boolean);
+
+    const revealed = [...p1Cards, ...p2Cards];
+    const supporterCount = revealed.filter(c => c.cardType === 'supporter').length;
+    const characterCount = revealed.filter(c => c.cardType === 'character').length;
+
+    const currentPlayerNum = game.currentPlayer;
+    const opponentNum = currentPlayerNum === 1 ? 2 : 1;
+    const opponent = game.players[opponentNum];
+    const attacker = game.players[currentPlayerNum].active;
+
+    if (supporterCount === 0 || supporterCount === 2) {
+        if (opponent.active && attacker) {
+            const dmg = calculateDamage(attacker, opponent.active, 50, { name: 'Song Voting' });
+            game.dealDamage(opponent.active, dmg);
+            game.log(`Song Voting: ${supporterCount} supporter cards → ${dmg} damage to opponent active`, 'damage');
+        }
+    }
+
+    if (characterCount === 0 || characterCount === 2) {
+        const benchTargets = opponent.bench.filter(c => c);
+        if (benchTargets.length > 0 && attacker) {
+            benchTargets.forEach(target => {
+                const dmg = calculateDamage(attacker, target, 50, { name: 'Song Voting' });
+                game.dealDamage(target, dmg);
+                game.log(`Song Voting: ${characterCount} character cards → ${dmg} damage to ${target.name}`, 'damage');
+            });
+        }
+    }
+
+    delete game.tempSelections.songVoting;
+    closeModal('action-modal');
+    updateUI();
 }
 
 function executeSongVoting(cardType, targetId) {
@@ -7710,15 +8322,14 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case '440 Hz':
-            // Attach energy from hand to benched character
-            const handEnergy = player.hand.filter(c => c.cardType === 'energy');
+            // Attach free energy to your benched character
             const benchedChars = player.bench.filter(c => c);
-            if (handEnergy.length > 0 && benchedChars.length > 0) {
-                game.log('440 Hz: Select energy from hand and benched character');
-                show440HzSelectionModal(player, handEnergy, benchedChars);
+            if (benchedChars.length > 0) {
+                game.log('440 Hz: Select a benched character to attach energy');
+                show440HzSelectionModal(player, [], benchedChars);
                 return true;
             } else {
-                game.log('Need energy in hand and benched characters to use 440 Hz');
+                game.log('Need a benched character to use 440 Hz');
             }
             break;
 
@@ -7784,7 +8395,7 @@ function performMoveEffect(attacker, target, move) {
 
         case 'Rimshot':
             // Roll d6, if 1-4 do 60 damage
-            const rimshotRoll = Math.floor(Math.random() * 6) + 1;
+            const rimshotRoll = randInt(6) + 1;
             game.log(`Rimshot: Rolled ${rimshotRoll}`);
             if (rimshotRoll >= 1 && rimshotRoll <= 4) {
                 const rimshotDamage = calculateDamage(attacker, target, 60, move);
@@ -7797,7 +8408,7 @@ function performMoveEffect(attacker, target, move) {
 
         case 'Screech!':
             // Roll d6, damage = 10 + (10 * number)
-            const screechRoll = Math.floor(Math.random() * 6) + 1;
+            const screechRoll = randInt(6) + 1;
             const screechDamage = 10 + (10 * screechRoll);
             const screechFinal = calculateDamage(attacker, target, screechDamage, move);
             game.dealDamage(target, screechFinal);
@@ -8471,8 +9082,15 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Song Voting':
-            // Updated: Reveal opponent's hand, choose card type, damage based on count
-            showSongVotingModal(opponent, attacker, target, move);
+            // Each player selects two cards to reveal, then resolve
+            if (!game.tempSelections) game.tempSelections = {};
+            game.tempSelections.songVoting = {
+                attackerId: attacker.id,
+                targetId: target ? target.id : null,
+                selections: { 1: [], 2: [] },
+                prompted: { 1: false, 2: false }
+            };
+            showSongVotingSelectionModal(game.currentPlayer);
             return true;
             break;
 
@@ -8665,7 +9283,8 @@ function performMoveEffect(attacker, target, move) {
             executeDamageAttack(attacker, target, move);
             opponent.bench.filter(c => c).forEach(benchChar => {
                 if (benchChar.attachedEnergy && benchChar.attachedEnergy.length > 0) {
-                    benchChar.attachedEnergy.pop();
+                    const discarded = benchChar.attachedEnergy.pop();
+                    opponent.discard.push(discarded);
                     game.log(`Spike: Discarded energy from ${benchChar.name}`);
                 }
             });
@@ -8676,21 +9295,8 @@ function performMoveEffect(attacker, target, move) {
             if (opponent.hand.length > 0) {
                 const itemCards = opponent.hand.filter(c => c.cardType === 'item');
                 if (itemCards.length > 0) {
-                    const itemNames = itemCards.map(c => c.name).join(', ');
-                    const chosenName = prompt(`Photograph: Choose an item card from opponent's hand to copy:\n${itemNames}`);
-                    const chosenItem = itemCards.find(c => c.name === chosenName);
-                    if (chosenItem) {
-                        game.log(`Photograph: Copying ${chosenItem.name} effect`, 'info');
-                        // Temporarily add the item to current player's hand, execute it, then remove it
-                        const tempItem = { ...chosenItem, id: generateCardId() };
-                        player.hand.push(tempItem);
-                        const waitForModal = executeItemEffect(tempItem);
-                        if (!waitForModal) {
-                            // Remove temp item immediately if no modal
-                            player.hand = player.hand.filter(c => c.id !== tempItem.id);
-                        }
-                        // Note: If modal is shown, the item will be removed when modal closes
-                    }
+                    showPhotographSelectionModal(itemCards, opponentNum);
+                    return true;
                 } else {
                     game.log('Photograph: No items in opponent hand');
                 }
@@ -8843,7 +9449,7 @@ function showAttackTargeting(attacker, target) {
     });
 }
 
-Object.assign(window, {
+const EXPORTED_ACTIONS = {
     playCharacterToActive,
     playCharacterToBench,
     showAttackMenu,
@@ -8866,6 +9472,8 @@ Object.assign(window, {
     discardOpponentCard,
     toggleOpponentDiscardCard,
     confirmOpponentDiscard,
+    showSteinertPracticeDiscardModal,
+    executeSteinertPracticeDiscard,
     placeAnnotatedCard,
     shuffleBenchIntoDeck,
     forceOpponentSwitch,
@@ -8907,6 +9515,10 @@ Object.assign(window, {
     selectEmbouchureSource,
     selectEmbouchureEnergy,
     completeEmbouchure,
+    showPhotographSelectionModal,
+    selectPhotographItem,
+    confirmPhotographSelection,
+    cancelPhotographSelection,
     showDrumKidWorkshopMoves,
     showDrumKidWorkshopTargetSelection,
     executeDrumKidWorkshop,
@@ -8919,6 +9531,11 @@ Object.assign(window, {
     completeForesight,
     moveForesightCard,
     executeGachaGaming,
+    executeGachaGamingStep,
+    finalizeGachaGaming,
+    showSongVotingSelectionModal,
+    toggleSongVotingCard,
+    confirmSongVotingSelection,
     executeSongVoting,
     executeAnalysisParalysis,
     addWipeoutTarget,
@@ -8930,4 +9547,28 @@ Object.assign(window, {
     confirmArtistAlley,
     executeRossAttackTarget,
     executeE2Reaction
+};
+
+Object.assign(window, EXPORTED_ACTIONS);
+
+const MULTIPLAYER_ACTION_BLACKLIST = new Set([
+    'closeModal',
+    'copyDeckCode',
+    'processDeckImport'
+]);
+
+Object.keys(EXPORTED_ACTIONS).forEach((name) => {
+    const original = EXPORTED_ACTIONS[name];
+    window[name] = (...args) => {
+        if (MULTIPLAYER_ACTION_BLACKLIST.has(name)) {
+            return original(...args);
+        }
+
+        if (multiplayer.enabled && !multiplayer.isApplyingRemote) {
+            sendMultiplayerAction(name, args);
+            return;
+        }
+
+        return original(...args);
+    };
 });

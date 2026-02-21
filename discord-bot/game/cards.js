@@ -70,62 +70,62 @@ const CHARACTERS = {
         type: [TYPES.GUITAR],
         hp: 100,
         gradYear: 2028,
-        ability: {
-            name: 'Amplify',
+            effect: 'If this Stadium is active at the beginning of your turn, each of your characters takes 10 nonlethal damage for each empty bench slot you have.',
+            description: 'Attendance Policy: If this Stadium is active at the beginning of your turn, each of your characters takes 10 nonlethal damage for each empty bench slot you have.'
             description: 'If Grace is on your bench, your guitars do +20 damage.',
             type: 'passive'
         },
         ability2: {
-            name: 'Royalties',
-            description: 'If Grace is active, any opposing character with any AVGE patch or t-shirt takes 20 damage.',
+            effect: 'Upon this Stadium being played, both players discard all items. While active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.',
+            description: 'Return by 4pm: Upon this Stadium being played, both players discard all items. Intense Reverb: While active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.'
             type: 'passive'
         },
         moves: [
             { name: 'Distortion', cost: ['G', 'G', 'G'], damage: 30, effect: 'During your next turn, your guitars do 40 more damage.' },
-            { name: 'Strum', cost: ['G'], damage: 20 }
-        ],
+            effect: 'Each player may only play up to three cards per turn, starting the turn after this is played.',
+            description: 'Small Ensemble Limit: Each player may only play up to three cards per turn, starting the turn after this is played.'
         retreatCost: 1
     },
     MASON: {
         name: 'Mason',
-        type: [TYPES.STRINGS],
-        hp: 80,
+            effect: 'For every guitar, piano, choir, or percussion attack, roll a d6. On 3–6: −30 damage.',
+            description: 'Electric Acoustics: For every guitar, piano, choir or percussion attack, roll a d6. On 3–6: −30 damage.'
         gradYear: 2026,
         ability: {
             name: 'Katie Synergy',
             description: 'If Katie is in play, take 10 less damage.',
-            type: 'passive'
-        },
+            effect: 'Strings, woodwinds, and brass do −10 damage; choir, guitars, percussion, and pianos do +10 damage.',
+            description: 'Amp Diff: Strings, woodwinds and brass do −10 damage; choir, guitars, percussion, pianos do +10 damage.'
         moves: [
             { name: 'Harmonics', cost: ['S', 'S'], damage: 0, effect: 'Flip two coins. If both of them are heads, do 80 damage. Otherwise, do nothing.' },
             { name: 'Open Strings', cost: ['S'], damage: 10, effect: 'Draw a card. If it is an energy, attach it to this character.' }
         ],
-        retreatCost: 1
-    },
+            effect: 'If all of your benched characters share a type with your active character, your attacks take 1 less energy.',
+            description: 'Sectionals: If all of your benched characters share a type with your active character, your attacks take 1 less energy.'
     KATIE: {
         name: 'Katie',
         type: [TYPES.PIANO],
         hp: 110,
-        gradYear: 2026,
-        ability: {
+            effect: 'Maids do +10 damage and have no retreat cost. Matcha heals +10 additional health.',
+            description: 'Matcha Maid Cafe: Maids do +10 damage and have no retreat cost. Matcha heals +10 additional health.'
             name: 'Nausicaa\'s heartbeat',
             description: 'If this character is at exactly 10 health at the end of a turn, heal 10 damage from each of your characters.',
             type: 'passive'
         },
-        ability2: {
-            name: 'Mason Synergy',
+            effect: 'Each player may not have more than 2 benched characters. If a player has 3, they discard one (the player who played this stadium discards first). Each attack costs 1 additional energy.',
+            description: 'Practice Prison: Each player may not have more than 2 benched characters. If a player has 3, they discard one (the player who played this stadium discards first). 15 Minute Walk: Each attack costs 1 additional energy.'
             description: 'If Mason is in play, take 10 less damage per attack.',
             type: 'passive'
         },
         moves: [
-            { name: 'Grand Piano', cost: ['K', 'X', 'X'], damage: 60, effect: 'You may only use this attack if the stadium in play is a performance stadium.' },
-            { name: 'Four Hands', cost: ['K', 'K', 'X'], damage: 30, effect: '+30 damage if you have another piano on your bench.' }
+            effect: 'If you have exactly two character cards in play at the start of your turn, draw two cards instead of one. Each attack costs 1 additional energy.',
+            description: 'Duo Queue: If you have exactly two character cards in play at the start of your turn, draw two cards instead of one. 15 Minute Walk: Each attack costs 1 additional energy.'
         ],
         retreatCost: 2
     },
     KEI: {
-        name: 'Kei',
-        type: [TYPES.PERCUSSION],
+            effect: 'Draw two cards per turn. Your opponent chooses one for you to keep; shuffle the other back into your deck.',
+            description: 'Democratic Process: Draw two cards per turn. Your opponent chooses one for you to keep; shuffle the other back into your deck.'
         hp: 100,
         gradYear: 2027,
         ability: {
@@ -296,7 +296,7 @@ const CHARACTERS = {
         gradYear: 2027,
         ability: {
             name: 'Getting dressed',
-            description: 'While on your bench, your active character gains maid status.',
+            description: 'While Fiona is on your bench, your active character has Maid status.',
             type: 'passive'
         },
         moves: [

@@ -605,7 +605,7 @@ const CHARACTERS = {
         hp: 100,
         ability: {
             name: 'Musical Cat Summoned!',
-            description: 'Any time you draw an AVGE birb, you may instantly discard it and deal 30 damage to your opponent\'s active character.',
+            description: 'While this character is in play, whenever you draw an AVGE birb, you may instantly discard it and deal 30 damage to your opponent\'s active character.',
             type: 'passive'
         },
         moves: [
@@ -619,7 +619,7 @@ const CHARACTERS = {
         hp: 110,
         ability: {
             name: 'Euclidean Algorithm',
-            description: 'While this character is active, if your opponent has more cards in their hand than you at the end of their next turn, they must discard cards until they have the same number.',
+            description: 'While this character is in play, if your opponent has more cards in their hand than you at the end of their next turn, they must discard cards until they have the same number.',
             type: 'passive'
         },
         moves: [
@@ -633,7 +633,7 @@ const CHARACTERS = {
         hp: 100,
         moves: [
             { name: '440 Hz', cost: 1, damage: 0, effect: 'Attach an energy to one of your benched characters.' },
-            { name: 'Song Voting', cost: 3, damage: 0, effect: 'Each player places two cards from their hand face down and reveals them at the same time. If there are an even number of supporter cards, do 50 damage to your opponent\'s active character. If there are an even number of character cards, do 50 damage to your opponent\'s benched character. (zero is an even number)' }
+            { name: 'Song Voting', cost: 3, damage: 0, effect: 'Each player places two cards from their hand face down and reveals them at the same time. If there are 0 or 2 supporter cards, do 50 damage to your opponent\'s active character. If there are 0 or 2 character cards, do 50 damage to your opponent\'s benched character.' }
         ],
         retreatCost: 2
     },
@@ -642,7 +642,7 @@ const CHARACTERS = {
         type: [TYPES.STRINGS],
         hp: 100,
         moves: [
-            { name: 'Gacha Gaming', cost: 1, damage: 0, effect: 'You may choose to draw cards, taking 20 damage for each card drawn. If you get AVGE Birb, heal all damage from this card, and you get to keep all other cards you drew. If you ever choose to stop drawing cards, you must shuffle them back into the deck. You may not knock yourself out doing this.' },
+            { name: 'Gacha Gaming', cost: 1, damage: 0, effect: 'You may choose to draw cards, taking 20 damage for each card drawn (unaffected by any modifiers). If you get AVGE Birb, heal all damage from this card, and you get to keep all cards you drew. If you ever choose to stop drawing cards, you must shuffle them back into the deck. You may not knock yourself out doing this.' },
             { name: 'Snap Pizz', cost: 3, damage: 20, effect: 'Discard 2 energy from one of your opponent\'s characters.' }
         ],
         retreatCost: 2
@@ -653,7 +653,7 @@ const CHARACTERS = {
         hp: 90,
         ability: {
             name: 'Getting Dressed',
-            description: 'While on your bench, your active character gains maid status.',
+            description: 'While Fiona is on your bench, your active character has Maid status.',
             type: 'passive'
         },
         moves: [
@@ -908,62 +908,62 @@ const STADIUMS = {
     RILEY_HALL: {
         name: 'Riley Hall',
         type: 'stadium',
-        effect: 'If this Stadium is active at the beginning of your turn, each of your characters take 10 nonlethal damage for each of your empty bench slots.',
-        description: 'Attendance Policy: If this Stadium is active at the beginning of your turn, each of your characters take 10 nonlethal damage for each empty bench slot you have.'
+        effect: 'If this Stadium is active at the beginning of your turn, each of your characters takes 10 nonlethal damage for each empty bench slot you have.',
+        description: 'Attendance Policy: If this Stadium is active at the beginning of your turn, each of your characters takes 10 nonlethal damage for each empty bench slot you have.'
     },
     ALUMNAE_HALL: {
         name: 'Alumnae Hall',
         type: 'stadium',
-        effect: 'Upon this Stadium being played, both players discard all Music Stands. While active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.',
-        description: 'Return by 4pm: Upon this Stadium being played, both players discard all Music Stands. Intense Reverb: While active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.'
+        effect: 'Upon this Stadium being played, both players discard all items. While active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.',
+        description: 'Return by 4pm: Upon this Stadium being played, both players discard all items. Intense Reverb: While active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.'
     },
     MAIN_HALL: {
         name: 'Main Hall',
         type: 'stadium',
-        effect: 'Each player may only play up to three Helper Cards per turn, starting the turn after this is played.',
-        description: 'Small Ensemble Limit: Each player may only play up to three Helper Cards per turn, starting the turn after this is played.'
+        effect: 'Each player may only play up to three cards per turn, starting the turn after this is played.',
+        description: 'Small Ensemble Limit: Each player may only play up to three cards per turn, starting the turn after this is played.'
     },
     SALOMON_DECI: {
         name: 'Salomon DECI',
         type: 'stadium',
-        effect: 'For every guitar, piano, or percussion attack, roll a d6. On 1–2: +10 damage. On 3–6: −10 damage.',
-        description: 'Electric Acoustics: For every guitar, piano, or percussion attack, roll a d6. On 1–2: +10 damage. On 3–6: −10 damage.'
+        effect: 'For every guitar, piano, choir, or percussion attack, roll a d6. On 3–6: −30 damage.',
+        description: 'Electric Acoustics: For every guitar, piano, choir or percussion attack, roll a d6. On 3–6: −30 damage.'
     },
     RED_ROOM: {
         name: 'Red Room',
         type: 'stadium',
-        effect: 'Strings and woodwinds do −10 damage; guitars and percussion do +10 damage.',
-        description: 'Amp Diff: Strings and woodwinds do −10 damage; guitars and percussion do +10 damage.'
+        effect: 'Strings, woodwinds, and brass do −10 damage; choir, guitars, percussion, and pianos do +10 damage.',
+        description: 'Amp Diff: Strings, woodwinds and brass do −10 damage; choir, guitars, percussion, pianos do +10 damage.'
     },
     LINDEMANN: {
         name: 'Lindemann Big Practice Room',
         type: 'stadium',
-        effect: 'Woodwinds and brass do +10 damage.',
-        description: 'Wind Sectionals: Woodwinds and brass do +10 damage.'
+        effect: 'If all of your benched characters share a type with your active character, your attacks take 1 less energy.',
+        description: 'Sectionals: If all of your benched characters share a type with your active character, your attacks take 1 less energy.'
     },
     PETTERUTI: {
         name: 'Petteruti Lounge',
         type: 'stadium',
-        effect: 'At the start of each player\'s turn, their active character takes 10 nonlethal damage. Maids do +10 damage. Matcha heals +10 additional health.',
-        description: 'Powerpoint Night: At the start of each player\'s turn, their active character takes 10 nonlethal damage. Matcha Maid Cafe: Maids do +10 damage. Matcha heals +10 additional health.'
+        effect: 'Maids do +10 damage and have no retreat cost. Matcha heals +10 additional health.',
+        description: 'Matcha Maid Cafe: Maids do +10 damage and have no retreat cost. Matcha heals +10 additional health.'
     },
     STEINERT_PRACTICE: {
         name: 'Steinert Practice Room',
         type: 'stadium',
-        effect: 'Each player may not have more than 2 benched characters. If a player has 3, they discard one (the player who played this stadium discards first). Pianos do +10 damage.',
-        description: 'Practice Prison: Each player may not have more than 2 benched characters. If a player has 3, they discard one (the player who played this stadium discards first). Piano Practice: Pianos do +10 damage.'
+        effect: 'Each player may not have more than 2 benched characters. If a player has 3, they discard one (the player who played this stadium discards first). Each attack costs 1 additional energy.',
+        description: 'Practice Prison: Each player may not have more than 2 benched characters. If a player has 3, they discard one (the player who played this stadium discards first). 15 Minute Walk: Each attack costs 1 additional energy.'
     },
     STEINERT_BASEMENT: {
         name: 'Steinert Basement Studio',
         type: 'stadium',
-        effect: 'If you have exactly two pianos on your bench, draw two cards instead of one at the start of your turn. Each attack costs 1 additional energy.',
-        description: 'Duo Queue: If you have exactly two pianos on your bench, draw two cards instead of one at the start of your turn. 15 Minute Walk: Each attack costs 1 additional energy.'
+        effect: 'If you have exactly two character cards in play at the start of your turn, draw two cards instead of one. Each attack costs 1 additional energy.',
+        description: 'Duo Queue: If you have exactly two character cards in play at the start of your turn, draw two cards instead of one. 15 Minute Walk: Each attack costs 1 additional energy.'
     },
     FRIEDMAN: {
         name: 'Friedman Hall',
         type: 'stadium',
-        effect: 'Draw two cards per turn. Your opponent chooses one for you to keep; shuffle the other back into your deck. All Choir characters do +10 damage.',
-        description: 'Democratic Process: Draw two cards per turn. Your opponent chooses one for you to keep; shuffle the other back into your deck. A Capella: All Choir characters do +10 damage.'
+        effect: 'Draw two cards per turn. Your opponent chooses one for you to keep; shuffle the other back into your deck.',
+        description: 'Democratic Process: Draw two cards per turn. Your opponent chooses one for you to keep; shuffle the other back into your deck.'
     }
 };
 
