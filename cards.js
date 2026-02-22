@@ -163,7 +163,7 @@ const CHARACTERS = {
         hp: 110,
         moves: [
             { name: 'Packet Loss', cost: 2, damage: 0, effect: 'Flip a coin for each energy attached to your opponent\'s active character. For each heads, discard one of those energies.' },
-            { name: 'Distortion', cost: 3, damage: 40, effect: 'During your next turn, your plucked strings do 40 more damage.' }
+            { name: 'Distortion', cost: 3, damage: 40, effect: '40 damage. During your next turn, your guitars do 40 more damage.' }
         ],
         retreatCost: 2
     },
@@ -187,7 +187,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Distortion', cost: 3, damage: 40, effect: 'During your next turn, your plucked strings do 40 more damage.' }
+            { name: 'Distortion', cost: 3, damage: 40, effect: '40 damage. During your next turn, your guitars do 40 more damage.' }
         ],
         retreatCost: 2
     },
@@ -197,7 +197,7 @@ const CHARACTERS = {
         hp: 110,
         moves: [
             { name: 'Guitar Shredding', cost: 2, damage: 30, effect: 'Discard all energy attached to this character. For each energy, discard 1 card from the top of your opponent\'s deck.' },
-            { name: 'Distortion', cost: 3, damage: 40, effect: 'During your next turn, your plucked strings do 40 more damage.' }
+            { name: 'Distortion', cost: 3, damage: 40, effect: '40 damage. During your next turn, your guitars do 40 more damage.' }
         ],
         retreatCost: 2
     },
@@ -315,7 +315,7 @@ const CHARACTERS = {
         hp: 110,
         ability: {
             name: 'Algorithm',
-            description: 'If your opponent plays a card that has a duplicate on your bench, they take 60 damage.',
+            description: 'While Bokai is in play, if your opponent plays a character you already have in play, that character on your opponent\'s side takes 60 damage.',
             type: 'passive'
         },
         moves: [

@@ -37,7 +37,9 @@ class GameState {
         this.phase = 'setup'; // setup, main, attack
         this.turn = 1;
         this.isFirstTurn = true; // Track if it's player 1's first turn
-        this.energyAttachedThisTurn = 0; // Track how many energy attached (Eugenia allows 3)
+        this.energyAttachedThisTurn = 0; // Track how many energy attached (Eugenia allows 2 to one benched character)
+        this.energyAttachedToActiveThisTurn = false;
+        this.energyAttachedBenchTargetId = null;
         this.supporterPlayedThisTurn = false;
         this.attackedThisTurn = false;
         this.cardsPlayedThisTurn = 0; // For Main Hall stadium
@@ -91,12 +93,20 @@ class GameState {
         // Clear next turn effects for the player who just finished their turn
         const preservedTricksterSelfBonus = this.nextTurnEffects[previousPlayer].tricksterSelfBonus;
         const preservedAvgeBirbPenalty = this.nextTurnEffects[previousPlayer].avgebBirbPenalty;
+        const preservedDistortionBonus = this.nextTurnEffects[previousPlayer].distortionBonus;
+        const preservedCannotAttack = this.nextTurnEffects[previousPlayer].cannotAttack;
         this.nextTurnEffects[previousPlayer] = {};
         if (preservedTricksterSelfBonus) {
             this.nextTurnEffects[previousPlayer].tricksterSelfBonus = preservedTricksterSelfBonus;
         }
         if (preservedAvgeBirbPenalty) {
             this.nextTurnEffects[previousPlayer].avgebBirbPenalty = preservedAvgeBirbPenalty;
+        }
+        if (preservedDistortionBonus) {
+            this.nextTurnEffects[previousPlayer].distortionBonus = preservedDistortionBonus;
+        }
+        if (preservedCannotAttack) {
+            this.nextTurnEffects[previousPlayer].cannotAttack = preservedCannotAttack;
         }
 
         // After player 1's first turn, set isFirstTurn to false
@@ -106,6 +116,8 @@ class GameState {
 
         this.currentPlayer = this.currentPlayer === 1 ? 2 : 1;
         this.energyAttachedThisTurn = 0;
+        this.energyAttachedToActiveThisTurn = false;
+        this.energyAttachedBenchTargetId = null;
         this.supporterPlayedThisTurn = false;
         this.attackedThisTurn = false;
         this.cardsPlayedThisTurn = 0;
@@ -182,12 +194,7 @@ class GameState {
             });
         }
 
-        // Yanwan Zhu's Bass Boost - draw after attack
-        if (!abilitiesDisabledFor(this.currentPlayer) && player.active && player.active.shouldDrawFromBassBoost) {
-            this.drawCards(this.currentPlayer, 1);
-            this.log('Yanwan Zhu\'s Bass Boost: Drew 1 card!');
-            player.active.shouldDrawFromBassBoost = false;
-        }
+        // (Handled at start of turn)
 
         // (Handled above)
 
@@ -293,6 +300,15 @@ class GameState {
             }
         }
 
+        // Yanwan Zhu's Bass Boost - At start of turn, if active with exactly 2 energy, draw 1
+        if (!abilitiesDisabledFor(this.currentPlayer) && player.active && player.active.name === 'Yanwan Zhu') {
+            const energyCount = player.active.attachedEnergy ? player.active.attachedEnergy.length : 0;
+            if (energyCount === 2) {
+                this.drawCards(this.currentPlayer, 1);
+                this.log('Yanwan Zhu\'s Bass Boost: Drew 1 card!');
+            }
+        }
+
         // Trickster self-bonus (applies on your next turn)
         if (game.nextTurnEffects[this.currentPlayer].tricksterSelfBonus) {
             const { attackerId, bonus } = game.nextTurnEffects[this.currentPlayer].tricksterSelfBonus;
@@ -390,15 +406,13 @@ class GameState {
 
         // Grace Zhao's Royalties ability
         if (!abilitiesDisabledFor(opponentNum) && opponent.active && opponent.active.name === 'Grace Zhao') {
-            if (player.active && player.active.attachedTools) {
-                const hasAVGEItem = player.active.attachedTools.some(tool =>
-                    tool.name === 'AVGE T-Shirt' || tool.name === 'AVGE T-shirt' || tool.name === 'AVGE Showcase Sticker' || tool.name === 'AVGE showcase sticker'
-                );
-                if (hasAVGEItem) {
-                    this.dealDamage(player.active, 10);
-                    this.log('Grace Zhao\'s Royalties: Active character takes 10 damage!');
-                }
-            }
+            const affectedChars = [player.active, ...player.bench].filter(c => c && c.attachedTools && c.attachedTools.some(tool =>
+                tool.name === 'AVGE T-Shirt' || tool.name === 'AVGE T-shirt' || tool.name === 'AVGE Showcase Sticker' || tool.name === 'AVGE showcase sticker'
+            ));
+            affectedChars.forEach(char => {
+                this.dealDamage(char, 10);
+                this.log(`Grace Zhao's Royalties: ${char.name} takes 10 damage!`);
+            });
         }
     }
 
@@ -1457,7 +1471,7 @@ function updateUI() {
 
     // Show energy attached count (normal is 1, Eugenia allows 3)
     const player = game.players[game.currentPlayer];
-    const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 3 : 1;
+    const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 2 : 1;
     document.getElementById('energy-status').textContent = `${game.energyAttachedThisTurn}/${maxEnergy}`;
 
     document.getElementById('supporter-status').textContent = game.supporterPlayedThisTurn ? 'Yes' : 'No';
@@ -1807,6 +1821,13 @@ function showCardActions(card) {
             html += `<p style="color: red;">Can only play characters during Main Phase</p>`;
         }
 
+        // Hand-activated abilities (Category Theory)
+        if (player.hand.includes(card) && card.ability && card.ability.name === 'Category Theory') {
+            const canUseCategoryTheory = canPlayAnytime && !abilitiesDisabledFor(game.currentPlayer) && player.hand.length === 1 && player.hand[0].id === card.id;
+            const categoryDisabled = canUseCategoryTheory ? '' : 'disabled';
+            html += `<button class="action-btn" ${categoryDisabled} onclick="useCategoryTheoryFromHand('${card.id}')">Use Category Theory</button>`;
+        }
+
         // If character is in play, show other actions
         if (player.active === card) {
             const cannotAttackFirstTurn = game.isFirstTurn && game.currentPlayer === 1;
@@ -1820,7 +1841,7 @@ function showCardActions(card) {
 
             // Show attach energy button (only during main phase)
             if (game.phase === 'main') {
-                const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 3 : 1;
+                const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 2 : 1;
                 const energyDisabled = (game.energyAttachedThisTurn >= maxEnergy) ? 'disabled' : '';
                 const energyLabel = (game.energyAttachedThisTurn >= maxEnergy) ? ' (Max Reached)' : ` (${game.energyAttachedThisTurn}/${maxEnergy})`;
                 html += `<button class="action-btn" ${energyDisabled} onclick="attachEnergy('active')">⚡ Attach Energy${energyLabel}</button>`;
@@ -1848,7 +1869,7 @@ function showCardActions(card) {
 
             // Show attach energy button for bench (only during main phase)
             if (game.phase === 'main') {
-                const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 3 : 1;
+                const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 2 : 1;
                 const energyDisabled = (game.energyAttachedThisTurn >= maxEnergy) ? 'disabled' : '';
                 const energyLabel = (game.energyAttachedThisTurn >= maxEnergy) ? ' (Max Reached)' : ` (${game.energyAttachedThisTurn}/${maxEnergy})`;
                 html += `<button class="action-btn" ${energyDisabled} onclick="attachEnergy(${benchIndex})">⚡ Attach Energy${energyLabel}</button>`;
@@ -2079,12 +2100,12 @@ function playCharacterToActive(cardId) {
         game.log(`${card.name} played to Active`);
         game.applyPassiveStatuses();
 
-        // Bokai Bi's Algorithm - If opponent has this character, deal 50 damage
-        const hasBokaiOnOppBench = opponent.bench.some(c => c && c.name === 'Bokai Bi');
+        // Bokai Bi's Algorithm - If opponent has this character, deal 60 damage
+        const hasBokaiInPlay = [opponent.active, ...opponent.bench].some(c => c && (c.name === 'Bokai Bi' || c.name === 'Bokai'));
         const oppHasThisChar = [opponent.active, ...opponent.bench].some(c => c && c.name === card.name);
-        if (!abilitiesDisabledFor(opponentNum) && hasBokaiOnOppBench && oppHasThisChar) {
-            game.dealDamage(card, 50);
-            game.log(`Bokai Bi's Algorithm: ${card.name} takes 50 damage for being a duplicate!`, 'damage');
+        if (!abilitiesDisabledFor(opponentNum) && hasBokaiInPlay && oppHasThisChar) {
+            game.dealDamage(card, 60);
+            game.log(`Bokai Bi's Algorithm: ${card.name} takes 60 damage for being a duplicate!`, 'damage');
         }
 
         // Barron Lee's Get Served - enforce energy cap on opponent
@@ -2123,12 +2144,12 @@ function playCharacterToBench(cardId, slotIndex) {
         // Mark character as just benched (for Luke Xu's Nullify and other abilities)
         card.wasJustBenched = true;
 
-        // Bokai Bi's Algorithm - If opponent has this character, deal 50 damage
-        const hasBokaiOnOppBench = opponent.bench.some(c => c && c.name === 'Bokai Bi');
+        // Bokai Bi's Algorithm - If opponent has this character, deal 60 damage
+        const hasBokaiInPlay = [opponent.active, ...opponent.bench].some(c => c && (c.name === 'Bokai Bi' || c.name === 'Bokai'));
         const oppHasThisChar = [opponent.active, ...opponent.bench].some(c => c && c.name === card.name);
-        if (!abilitiesDisabledFor(opponentNum) && hasBokaiOnOppBench && oppHasThisChar) {
-            game.dealDamage(card, 50);
-            game.log(`Bokai Bi's Algorithm: ${card.name} takes 50 damage for being a duplicate!`, 'damage');
+        if (!abilitiesDisabledFor(opponentNum) && hasBokaiInPlay && oppHasThisChar) {
+            game.dealDamage(card, 60);
+            game.log(`Bokai Bi's Algorithm: ${card.name} takes 60 damage for being a duplicate!`, 'damage');
         }
 
         // Barron Lee's Get Served - enforce energy cap on opponent
@@ -2136,9 +2157,9 @@ function playCharacterToBench(cardId, slotIndex) {
             enforceBarronGetServed(opponentNum);
         }
 
-        // Ben Cherek's Loudmouth - Free switch when first played
-        if (!abilitiesDisabledFor(game.currentPlayer) && card.name === 'Ben Cherek' && player.active) {
-            const shouldSwitch = confirm(`Ben Cherek's Loudmouth: Switch ${card.name} with your active character ${player.active.name} for free?`);
+        // Ben Jose Cherek III's Loudmouth - Free switch when first played
+        if (!abilitiesDisabledFor(game.currentPlayer) && (card.name === 'Ben Jose Cherek III' || card.name === 'Ben Cherek') && player.active) {
+            const shouldSwitch = confirm(`Loudmouth: Switch ${card.name} with your active character ${player.active.name} for free?`);
             if (shouldSwitch) {
                 const benchIndex = player.bench.indexOf(card);
                 const temp = player.active;
@@ -2186,13 +2207,6 @@ function attachEnergy(target) {
     const opponentNum = game.currentPlayer === 1 ? 2 : 1;
     const opponent = game.players[opponentNum];
 
-    // Check if we've already attached max energy this turn
-    const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 3 : 1;
-    if (!game.playtestMode && game.energyAttachedThisTurn >= maxEnergy) {
-        alert(`You've already attached ${game.energyAttachedThisTurn} energy this turn!`);
-        return;
-    }
-
     let targetChar;
     if (target === 'active') {
         targetChar = player.active;
@@ -2203,6 +2217,35 @@ function attachEnergy(target) {
     if (!targetChar) {
         alert('Invalid target for energy attachment!');
         return;
+    }
+
+    // Check if we've already attached max energy this turn
+    const fermentationActive = player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer);
+    if (fermentationActive) {
+        if (targetChar === player.active) {
+            if (game.energyAttachedThisTurn >= 1) {
+                alert('Fermentation: You may only attach 1 energy to your active this turn.');
+                return;
+            }
+        } else {
+            if (game.energyAttachedToActiveThisTurn) {
+                alert('Fermentation: You already attached energy to your active this turn.');
+                return;
+            }
+            if (game.energyAttachedBenchTargetId && game.energyAttachedBenchTargetId !== targetChar.id) {
+                alert('Fermentation: You may only attach to one benched character this turn.');
+                return;
+            }
+            if (game.energyAttachedThisTurn >= 2) {
+                alert('Fermentation: You may only attach 2 energy to one benched character this turn.');
+                return;
+            }
+        }
+    } else {
+        if (!game.playtestMode && game.energyAttachedThisTurn >= 1) {
+            alert(`You've already attached ${game.energyAttachedThisTurn} energy this turn!`);
+            return;
+        }
     }
 
     // Check for Barron Lee's Get Served - Opponent cannot exceed 3 energy
@@ -2216,6 +2259,13 @@ function attachEnergy(target) {
     // Add generic energy counter (just a simple object)
     targetChar.attachedEnergy.push({ generic: true });
     game.energyAttachedThisTurn++;
+    if (fermentationActive) {
+        if (targetChar === player.active) {
+            game.energyAttachedToActiveThisTurn = true;
+        } else {
+            game.energyAttachedBenchTargetId = targetChar.id;
+        }
+    }
     game.log(`Attached energy to ${targetChar.name} (${targetChar.attachedEnergy.length} total)`);
 
     if (barronOnOppSide) {
@@ -2875,6 +2925,119 @@ function confirmPhotographSelection() {
 
 function cancelPhotographSelection() {
     closeModal('action-modal');
+}
+
+function showSurpriseDeliveryModal(player, target, topThree, attacker, move) {
+    if (!game.tempSelections) game.tempSelections = {};
+
+    const characterCards = topThree.filter(c => c.cardType === 'character');
+    const remainingCards = topThree.filter(c => c.cardType !== 'character');
+
+    if (characterCards.length > 0) {
+        characterCards.forEach(card => player.hand.push(card));
+    }
+
+    game.tempSelections.surpriseDeliveryRemaining = remainingCards;
+    game.tempSelections.surpriseDeliveryOrder = [];
+    game.tempSelections.surpriseDeliveryTargetId = target ? target.id : null;
+    game.tempSelections.surpriseDeliveryAttackerId = attacker ? attacker.id : null;
+    game.tempSelections.surpriseDeliveryMoveName = move ? move.name : 'Surprise Delivery';
+    game.tempSelections.surpriseDeliveryCharacterCount = characterCards.length;
+
+    if (remainingCards.length === 0) {
+        confirmSurpriseDelivery();
+        return;
+    }
+
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Surprise Delivery</h2>`;
+    html += `<p>Revealed: ${topThree.map(c => c.name).join(', ')}</p>`;
+    html += `<p>Characters to hand: ${characterCards.length}</p>`;
+    html += `<p>Select order to place remaining cards on top of your deck:</p>`;
+    html += `<div class="target-selection" id="surprise-delivery-remaining">`;
+    remainingCards.forEach(card => {
+        html += `<div class="target-option" onclick="selectSurpriseDeliveryCard('${card.id}')">${card.name}</div>`;
+    });
+    html += `</div>`;
+    html += `<div style="margin-top: 8px;"><strong>Top Order:</strong></div>`;
+    html += `<div id="surprise-delivery-order" class="target-selection"></div>`;
+    html += `<button class="action-btn" onclick="confirmSurpriseDelivery()">Confirm</button>`;
+    html += `<button class="action-btn" onclick="cancelSurpriseDelivery()">Cancel</button>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function selectSurpriseDeliveryCard(cardId) {
+    if (!game.tempSelections) return;
+    const remaining = game.tempSelections.surpriseDeliveryRemaining || [];
+    const order = game.tempSelections.surpriseDeliveryOrder || [];
+    const cardIndex = remaining.findIndex(c => c.id === cardId);
+    if (cardIndex === -1) return;
+    const [card] = remaining.splice(cardIndex, 1);
+    order.push(card);
+    game.tempSelections.surpriseDeliveryRemaining = remaining;
+    game.tempSelections.surpriseDeliveryOrder = order;
+
+    const remainingEl = document.getElementById('surprise-delivery-remaining');
+    if (remainingEl) {
+        remainingEl.innerHTML = remaining.map(c => `<div class="target-option" onclick="selectSurpriseDeliveryCard('${c.id}')">${c.name}</div>`).join('');
+    }
+    const orderEl = document.getElementById('surprise-delivery-order');
+    if (orderEl) {
+        orderEl.innerHTML = order.map(c => `<div class="target-option selected">${c.name}</div>`).join('');
+    }
+}
+
+function confirmSurpriseDelivery() {
+    if (!game.tempSelections) return;
+    const player = game.players[game.currentPlayer];
+    const remaining = game.tempSelections.surpriseDeliveryRemaining || [];
+    const order = game.tempSelections.surpriseDeliveryOrder || [];
+    const orderedCards = [...order, ...remaining];
+
+    for (let i = orderedCards.length - 1; i >= 0; i--) {
+        player.deck.unshift(orderedCards[i]);
+    }
+
+    const charCount = game.tempSelections.surpriseDeliveryCharacterCount || 0;
+    if (charCount > 0) {
+        const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+        const opponent = game.players[opponentNum];
+        const targetId = game.tempSelections.surpriseDeliveryTargetId;
+        const target = targetId ? ([opponent.active, ...opponent.bench].find(c => c && c.id === targetId)) : opponent.active;
+        if (target) {
+            const baseDamage = charCount * 10;
+            const attacker = [player.active, ...player.bench].find(c => c && c.id === game.tempSelections.surpriseDeliveryAttackerId) || player.active;
+            const move = attacker && attacker.moves ? attacker.moves.find(m => m.name === game.tempSelections.surpriseDeliveryMoveName) : { name: 'Surprise Delivery' };
+            const finalDamage = calculateDamage(attacker, target, baseDamage, move);
+            game.dealDamage(target, finalDamage, attacker);
+            game.log(`Surprise Delivery: ${charCount} characters for ${finalDamage} damage!`, 'damage');
+        }
+    }
+
+    closeModal('action-modal');
+    game.tempSelections = {};
+    updateUI();
+}
+
+function cancelSurpriseDelivery() {
+    if (!game.tempSelections) {
+        closeModal('action-modal');
+        return;
+    }
+    const player = game.players[game.currentPlayer];
+    const remaining = game.tempSelections.surpriseDeliveryRemaining || [];
+    const order = game.tempSelections.surpriseDeliveryOrder || [];
+    const orderedCards = [...order, ...remaining];
+    for (let i = orderedCards.length - 1; i >= 0; i--) {
+        player.deck.unshift(orderedCards[i]);
+    }
+    closeModal('action-modal');
+    game.tempSelections = {};
+    updateUI();
 }
 
 function toggleDiscardCard(cardId, maxSelect) {
@@ -5398,15 +5561,7 @@ function calculateDamage(attacker, defender, baseDamage, move) {
         game.log(`Item bonus: +${game.attackModifiers[game.currentPlayer].damageBonus} damage`);
     }
 
-    // Yanwan Zhu's Bass Boost - If has 2 Guitar energy, draw after attack
-    if (attackerAbilitiesAllowed && attacker.name === 'Yanwan Zhu') {
-        const guitarEnergyCount = attacker.attachedEnergy.filter(e => e.energyType === TYPES.GUITAR).length;
-        if (guitarEnergyCount >= 2) {
-            attacker.shouldDrawFromBassBoost = true;
-        }
-    }
-
-
+    
     // Ross Williams's I Am Become Ross - Active can use Ross's attacks from bench
     const rossOnBench = currentPlayer.bench.find(c => c && c.name === 'Ross Williams');
     if (rossOnBench && currentPlayer.active && move && move.name) {
@@ -5415,8 +5570,8 @@ function calculateDamage(attacker, defender, baseDamage, move) {
 
     // Distortion bonus - applies to plucked string attacks (guitar and strings types)
     if (game.nextTurnEffects[game.currentPlayer].distortionBonus) {
-        const isPluckedString = attacker.type && (attacker.type.includes(TYPES.GUITAR) || attacker.type.includes(TYPES.STRINGS));
-        if (isPluckedString) {
+        const isGuitar = attacker.type && attacker.type.includes(TYPES.GUITAR);
+        if (isGuitar) {
             damage += game.nextTurnEffects[game.currentPlayer].distortionBonus;
             game.log(`Distortion bonus: +${game.nextTurnEffects[game.currentPlayer].distortionBonus} damage`);
             game.nextTurnEffects[game.currentPlayer].distortionBonus = 0;
@@ -5940,6 +6095,34 @@ function useActivatedAbility(cardId, abilitySlot) {
             closeModal('action-modal');
             break;
     }
+}
+
+function useCategoryTheoryFromHand(cardId) {
+    const player = game.players[game.currentPlayer];
+    const card = player.hand.find(c => c.id === cardId);
+
+    if (!card) return;
+
+    if (abilitiesDisabledFor(game.currentPlayer)) {
+        alert('Abilities are disabled this turn.');
+        game.log('Abilities are disabled this turn (Nullify).', 'warning');
+        return;
+    }
+
+    if (player.hand.length !== 1 || player.hand[0].id !== card.id) {
+        alert('Category Theory can only be used if this is the only card in your hand!');
+        closeModal('action-modal');
+        return;
+    }
+
+    game.log(`Category Theory: Revealing ${card.name}`);
+    player.hand = [];
+    player.deck.push(card);
+    game.shuffleDeck(game.currentPlayer);
+    game.drawCards(game.currentPlayer, 4);
+    game.log('Category Theory: Shuffled into deck and drew 4 cards!');
+    closeModal('action-modal');
+    updateUI();
 }
 
 function showClericSpellModal(player) {
@@ -8918,17 +9101,17 @@ function performMoveEffect(attacker, target, move) {
 
         case 'Guitar Shredding':
             // 30 damage, discard all guitar energy, discard 1 card per energy from opponent's deck
-            const guitarEnergy = attacker.attachedEnergy.filter(e => e.energyType === TYPES.GUITAR);
+            const shreddingEnergy = attacker.attachedEnergy.slice();
 
-            if (guitarEnergy.length > 0) {
-                guitarEnergy.forEach(energy => {
+            if (shreddingEnergy.length > 0) {
+                shreddingEnergy.forEach(energy => {
                     attacker.attachedEnergy = attacker.attachedEnergy.filter(e => e.id !== energy.id);
                     player.discard.push(energy);
                 });
-                game.log(`Guitar Shredding: Discarded ${guitarEnergy.length} guitar energy`);
+                game.log(`Guitar Shredding: Discarded ${shreddingEnergy.length} energy`);
 
-                // Discard 2 cards from opponent's deck per energy
-                const cardsToDiscard = guitarEnergy.length;
+                // Discard 1 card from opponent's deck per energy
+                const cardsToDiscard = shreddingEnergy.length;
                 for (let i = 0; i < cardsToDiscard && opponent.deck.length > 0; i++) {
                     const discarded = opponent.deck.shift();
                     opponent.discard.push(discarded);
@@ -8939,7 +9122,7 @@ function performMoveEffect(attacker, target, move) {
                 game.dealDamage(target, shreddingFinal);
                 game.log(`${attacker.name} used Guitar Shredding for ${shreddingFinal} damage!`, 'damage');
             } else {
-                game.log('Guitar Shredding: No guitar energy to discard!');
+                game.log('Guitar Shredding: No energy to discard!');
             }
             break;
 
@@ -9157,7 +9340,7 @@ function performMoveEffect(attacker, target, move) {
             }
             game.log(`Power Chord: Discarded ${powerChordEnergy} energy`);
             // Mark that Power Chord was used
-            attacker.usedPowerChordLastTurn = true;
+            attacker.usedPowerChord = true;
             break;
 
         case 'Fingerstyle':
@@ -9863,6 +10046,7 @@ const EXPORTED_ACTIONS = {
     showAttackMenu,
     showRetreatMenu,
     attachEnergy,
+    useCategoryTheoryFromHand,
     useActivatedAbility,
     switchToActive,
     playItem,
@@ -9927,6 +10111,9 @@ const EXPORTED_ACTIONS = {
     selectPhotographItem,
     confirmPhotographSelection,
     cancelPhotographSelection,
+    selectSurpriseDeliveryCard,
+    confirmSurpriseDelivery,
+    cancelSurpriseDelivery,
     showDrumKidWorkshopMoves,
     showDrumKidWorkshopTargetSelection,
     executeDrumKidWorkshop,
