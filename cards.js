@@ -11,7 +11,7 @@ const CHARACTERS = {
         hp: 130,
         moves: [
             { name: 'Fanfare', cost: 1, damage: 20, effect: 'Not affected by weakness, resistance, or immunities.' },
-            { name: 'Cherry Flavored Valve Oil', cost: 3, damage: 40, effect: 'Heal one benched character for the same amount of damage you dealt this turn.' }
+            { name: 'Cherry Flavored Valve Oil', cost: 3, damage: 40, effect: 'Deal 40 damage. Heal one benched character of your choice for the same amount of damage this attack actually dealt.' }
         ],
         retreatCost: 3
     },
@@ -116,8 +116,8 @@ const CHARACTERS = {
         type: [TYPES.CHOIR],
         hp: 100,
         moves: [
-            { name: 'Tabemono King', cost: 2, damage: 0, effect: 'All your characters heal by 30 damage. All your opponent\'s characters heal by 10 damage. Discard 1 energy from this character.' },
-            { name: 'Chorus', cost: 2, damage: 30, effect: 'Does 10 more damage per benched character you have in play.' }
+            { name: 'Chorus', cost: 2, damage: 30, effect: 'Does 10 more damage per benched character you have in play.' },
+            { name: 'Tabemono King', cost: 3, damage: 0, effect: 'All your characters heal 40 damage. All your opponent\'s characters heal 10 damage. Discard 1 energy from this character.' }
         ],
         retreatCost: 1
     },
@@ -207,7 +207,7 @@ const CHARACTERS = {
         hp: 110,
         ability: {
             name: 'Royalties',
-            description: 'If Grace is active, any opposing character with any AVGE showcase sticker or t-shirt takes 10 damage at the end of every turn.',
+            description: 'If Grace is in play, any opposing character with any AVGE showcase sticker or t-shirt takes 10 damage at the end of your turn.',
             type: 'passive'
         },
         moves: [
@@ -221,7 +221,7 @@ const CHARACTERS = {
         hp: 120,
         ability: {
             name: 'Loudmouth',
-            description: 'When you first play this character, you may switch it with your active character for free.',
+            description: 'When you play this character from your hand to your bench, you may switch him with your active character for free.',
             type: 'passive'
         },
         moves: [
@@ -236,7 +236,7 @@ const CHARACTERS = {
         type: [TYPES.PERCUSSION],
         hp: 100,
         moves: [
-            { name: 'Stick Trick', cost: 2, damage: 20, effect: 'Swap with one of your Benched characters for free.' },
+            { name: 'Stick Trick', cost: 2, damage: 20, effect: '20 damage. You may swap with one of your Benched characters for free.' },
             { name: 'Tricky Rhythms', cost: 3, damage: 0, effect: 'Each character in play with a tool attached to it takes 50 damage.' }
         ],
         retreatCost: 2
@@ -333,7 +333,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Stick Trick', cost: 2, damage: 20, effect: 'Swap with one of your Benched characters for free.' }
+            { name: 'Stick Trick', cost: 2, damage: 20, effect: '20 damage. You may swap with one of your Benched characters for free.' }
         ],
         retreatCost: 2
     },
@@ -342,7 +342,7 @@ const CHARACTERS = {
         type: [TYPES.PERCUSSION],
         hp: 110,
         moves: [
-            { name: 'Stick Trick', cost: 2, damage: 20, effect: 'Swap with one of your Benched characters for free.' },
+            { name: 'Stick Trick', cost: 2, damage: 20, effect: '20 damage. You may swap with one of your Benched characters for free.' },
             { name: 'Excused Absence', cost: 3, damage: 0, effect: 'Heal 30 damage from each of your characters.' }
         ],
         retreatCost: 2
@@ -383,7 +383,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Separate Hands', cost: 1, damage: 0, effect: '0 damage. During your next turn, this attack does 40 damage.' }
+            { name: 'Separate Hands', cost: 1, damage: 0, effect: 'If you used this move the previous turn, 40 damage. Else, 0 damage.' }
         ],
         retreatCost: 2
     },
@@ -393,7 +393,7 @@ const CHARACTERS = {
         hp: 110,
         ability: {
               name: 'Nausicaa\'s Undying Heartbeat',
-              description: '(Ability) Nausicaa\'s Undying Heartbeat: If this character is at 50 or less health at the end of your turn, heal 20 damage from each of your characters.',
+              description: '(Ability) Nausicaa\'s Undying Heartbeat: If this character is at 60 or less health at the end of a turn, heal 20 damage from all of your other characters.',
               type: 'passive'
         },
         moves: [
@@ -445,7 +445,7 @@ const CHARACTERS = {
         hp: 100,
         moves: [
             { name: 'Glissando', cost: 1, damage: 30, effect: 'You cannot use this attack during your next turn.' },
-            { name: 'Inventory Management', cost: 3, damage: 0, effect: 'Flip a coin for every card in your hand. For each heads, do 20 damage to your opponent\'s active character.' }
+            { name: 'Inventory Management', cost: 3, damage: 0, effect: 'Flip a coin for every card in your hand. For each heads, do 30 damage to your opponent\'s active character.' }
         ],
         retreatCost: 2
     },
@@ -497,7 +497,7 @@ const CHARACTERS = {
             type: 'activated'
         },
         moves: [
-            { name: 'Separate Hands', cost: 1, damage: 0, effect: '0 damage. During your next turn, this attack does 40 damage.' }
+            { name: 'Separate Hands', cost: 1, damage: 0, effect: 'If you used this move the previous turn, 40 damage. Else, 0 damage.' }
         ],
         retreatCost: 1
     },
@@ -713,7 +713,7 @@ const CHARACTERS = {
         hp: 100,
         moves: [
             { name: 'Analysis Paralysis', cost: 1, damage: 0, effect: 'Reveal your opponents hand and choose to shuffle one of their cards back into their deck.' },
-            { name: 'Screech!', cost: 3, damage: 0, effect: 'Roll a d6. Damage is equal to 30 + (10 * the number on the D6)' }
+            { name: 'Hyper-Ventilation!', cost: 3, damage: 0, effect: 'Roll a d6. Damage is equal to 30 + (10 * the number on the D6)' }
         ],
         retreatCost: 1
     },
@@ -777,11 +777,11 @@ const CHARACTERS = {
         hp: 110,
         ability: {
             name: 'Immense Aura',
-            description: 'Take 10 less damage from each attack.',
+            description: 'Take 10 less damage from each attack, calculated after all modifiers.',
             type: 'passive'
         },
         moves: [
-            { name: 'Screech!', cost: 3, damage: 0, effect: 'Roll a d6. Damage is equal to 30 + (10 * the number on the D6)' }
+            { name: 'Hyper-Ventilation!', cost: 3, damage: 0, effect: 'Roll a d6. Damage is equal to 30 + (10 * the number on the D6)' }
         ],
         retreatCost: 2
     },
@@ -805,7 +805,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Screech!', cost: 3, damage: 0, effect: 'Roll a d6. Damage is equal to 30 + (10 * the number on the D6)' }
+            { name: 'Hyper-Ventilation!', cost: 3, damage: 0, effect: 'Roll a d6. Damage is equal to 30 + (10 * the number on the D6)' }
         ],
         retreatCost: 1
     },
@@ -829,7 +829,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Screech!', cost: 3, damage: 0, effect: 'Roll a d6. Damage is equal to 30 + (10 * the number on the D6)' }
+            { name: 'Hyper-Ventilation!', cost: 3, damage: 0, effect: 'Roll a d6. Damage is equal to 30 + (10 * the number on the D6)' }
         ],
         retreatCost: 2
     },

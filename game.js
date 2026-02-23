@@ -41,6 +41,7 @@ class GameState {
         this.energyAttachedToActiveThisTurn = false;
         this.energyAttachedBenchTargetId = null;
         this.supporterPlayedThisTurn = false;
+        this.retreatUsedThisTurn = false;
         this.attackedThisTurn = false;
         this.cardsPlayedThisTurn = 0; // For Main Hall stadium
         this.mainHallActivatedTurn = null;
@@ -118,6 +119,7 @@ class GameState {
         this.energyAttachedThisTurn = 0;
         this.energyAttachedToActiveThisTurn = false;
         this.energyAttachedBenchTargetId = null;
+        this.retreatUsedThisTurn = false;
         this.supporterPlayedThisTurn = false;
         this.attackedThisTurn = false;
         this.cardsPlayedThisTurn = 0;
@@ -176,14 +178,14 @@ class GameState {
             game.nextTurnEffects[this.currentPlayer].ominousChimesDamage = 0;
         }
 
-        // Katie Xiang's Nausicaa's Undying Heartbeat - At ≤50 HP, heal 20 from all
+    // Katie Xiang's Nausicaa's Undying Heartbeat - At ≤60 HP, heal 20 from all other characters
         if (!abilitiesDisabledFor(this.currentPlayer)) {
             let katieHeartbeatTriggered = false;
             [player.active, ...player.bench].filter(c => c).forEach(char => {
-                if (!katieHeartbeatTriggered && char.name === 'Katie Xiang' && (char.hp - (char.damage || 0)) <= 50) {
+                if (!katieHeartbeatTriggered && char.name === 'Katie Xiang' && (char.hp - (char.damage || 0)) <= 60) {
                     katieHeartbeatTriggered = true;
                     // Heal 20 damage from all your characters
-                    [player.active, ...player.bench].filter(c => c).forEach(healChar => {
+                    [player.active, ...player.bench].filter(c => c && c.id !== char.id).forEach(healChar => {
                         if (healChar.damage && healChar.damage > 0) {
                             const healAmount = Math.min(20, healChar.damage);
                             healChar.damage -= healAmount;
@@ -211,36 +213,6 @@ class GameState {
         });
 
         // Alice Wang discard handled in endTurn to ensure modal triggers on end turn
-    }
-
-    beginAttackPhase() {
-        // Player 1 cannot attack on their first turn (like Pokémon TCG)
-        if (this.isFirstTurn && this.currentPlayer === 1) {
-            alert('Player 1 cannot attack on their first turn!');
-            this.log('Cannot attack: Player 1 cannot attack on their first turn', 'warning');
-            return;
-        }
-
-        // Check for Meya Gao's I See Your Soul - cannot attack
-        if (game.nextTurnEffects[this.currentPlayer].cannotAttack) {
-            alert('Cannot attack this turn due to Meya Gao\'s I See Your Soul!');
-            this.log('Cannot attack: Meya Gao\'s I See Your Soul is active', 'warning');
-            game.nextTurnEffects[this.currentPlayer].cannotAttack = false;
-            return;
-        }
-
-        // Check for Luke Xu's Nullify - opponent abilities disabled
-        const opponentNum = this.currentPlayer === 1 ? 2 : 1;
-        if (abilitiesDisabledFor(this.currentPlayer)) {
-            this.log('Luke Xu\'s Nullify: Opponent abilities are disabled this turn!', 'info');
-        }
-
-        const player = this.players[this.currentPlayer];
-        if (player.active) {
-            showAttackMenu(player.active.id);
-        } else {
-            alert('No active character to attack with.');
-        }
     }
 
     applyPassiveStatuses() {
@@ -405,14 +377,17 @@ class GameState {
         }
 
         // Grace Zhao's Royalties ability
-        if (!abilitiesDisabledFor(opponentNum) && opponent.active && opponent.active.name === 'Grace Zhao') {
-            const affectedChars = [player.active, ...player.bench].filter(c => c && c.attachedTools && c.attachedTools.some(tool =>
-                tool.name === 'AVGE T-Shirt' || tool.name === 'AVGE T-shirt' || tool.name === 'AVGE Showcase Sticker' || tool.name === 'AVGE showcase sticker'
-            ));
-            affectedChars.forEach(char => {
-                this.dealDamage(char, 10);
-                this.log(`Grace Zhao's Royalties: ${char.name} takes 10 damage!`);
-            });
+        if (!abilitiesDisabledFor(this.currentPlayer)) {
+            const graceInPlay = [player.active, ...player.bench].some(c => c && c.name === 'Grace Zhao');
+            if (graceInPlay) {
+                const affectedChars = [opponent.active, ...opponent.bench].filter(c => c && c.attachedTools && c.attachedTools.some(tool =>
+                    tool.name === 'AVGE T-Shirt' || tool.name === 'AVGE T-shirt' || tool.name === 'AVGE Showcase Sticker' || tool.name === 'AVGE showcase sticker'
+                ));
+                affectedChars.forEach(char => {
+                    this.dealDamage(char, 10);
+                    this.log(`Grace Zhao's Royalties: ${char.name} takes 10 damage!`);
+                });
+            }
         }
     }
 
@@ -445,17 +420,14 @@ class GameState {
         // Maid status: immune to attacks of 10 base damage or less (before debuffs)
         const baseDamage = typeof options.baseDamage === 'number' ? options.baseDamage : (typeof game.lastAttackBaseDamage === 'number' ? game.lastAttackBaseDamage : null);
         const isAttack = typeof options.isAttack === 'boolean' ? options.isAttack : isAttackDamage;
-        if (!options.ignoreImmunities && isAttack && characterCard.status && characterCard.status.includes('Maid') && baseDamage !== null && baseDamage <= 10) {
+        const superEffectiveApplied = options.superEffectiveApplied === true;
+        if (!options.ignoreImmunities && isAttack && characterCard.status && characterCard.status.includes('Maid') && baseDamage !== null && baseDamage <= 10 && !superEffectiveApplied) {
             this.log(`${characterCard.name} is protected by Maid status!`, 'info');
             return;
         }
 
         if (isAttackDamage && canApplyAbilities) {
             // Character-specific abilities
-            if (characterCard.name === 'Kana Takizawa' && canApplyAbilities) {
-                finalDamage -= 10; // Immense Aura
-                this.log('Kana\'s Immense Aura reduces damage by 10');
-            }
 
             // Check for synergy abilities (Katie/Mason, Sophia/Pascal)
             const player = this.findPlayerWithCharacter(characterCard);
@@ -704,9 +676,9 @@ class GameState {
     log(message, type = 'info') {
         console.log(message);
         this.gameLog.push({ message, type, timestamp: Date.now() });
-        // Keep only last 20 messages
-        if (this.gameLog.length > 20) {
-            this.gameLog.shift();
+        const maxLogEntries = 500;
+        if (this.gameLog.length > maxLogEntries) {
+            this.gameLog.splice(0, this.gameLog.length - maxLogEntries);
         }
         this.updateLogDisplay();
     }
@@ -714,6 +686,8 @@ class GameState {
     updateLogDisplay() {
         const logContent = document.getElementById('log-content');
         if (!logContent) return;
+
+        const wasAtBottom = logContent.scrollTop + logContent.clientHeight >= logContent.scrollHeight - 10;
 
         logContent.innerHTML = '';
         this.gameLog.forEach(entry => {
@@ -723,8 +697,9 @@ class GameState {
             logContent.appendChild(logEntry);
         });
 
-        // Auto-scroll to bottom
-        logContent.scrollTop = logContent.scrollHeight;
+        if (wasAtBottom) {
+            logContent.scrollTop = logContent.scrollHeight;
+        }
     }
 
     render() {
@@ -746,8 +721,19 @@ const multiplayer = {
     sessionToken: null,
     clientSeq: 0,
     serverSeq: 0,
-    pingInterval: null
+    pingInterval: null,
+    hasLocalSeededState: false
 };
+
+function shouldIgnoreServerSnapshot(snapshot) {
+    if (!snapshot || !multiplayer.enabled) return false;
+    if (multiplayer.playerNumber !== 1 || !multiplayer.hasLocalSeededState) return false;
+    const serverPlayer = snapshot.players && snapshot.players[1];
+    const serverDeckEmpty = !serverPlayer || ((serverPlayer.deck?.length || 0) === 0 && (serverPlayer.hand?.length || 0) === 0);
+    const localPlayer = game && game.players && game.players[1];
+    const localHasCards = !!localPlayer && (((localPlayer.deck?.length || 0) > 0) || ((localPlayer.hand?.length || 0) > 0));
+    return serverDeckEmpty && localHasCards;
+}
 
 function canCurrentClientAct() {
     if (!multiplayer.enabled) return true;
@@ -766,7 +752,7 @@ function connectMultiplayer({ roomId, deck1Name, deck2Name, playtestMode }) {
     multiplayer.socket = socket;
     multiplayer.enabled = true;
     multiplayer.roomId = roomId;
-    multiplayer.sessionToken = localStorage.getItem(`cardgame_session_${roomId}`) || null;
+    multiplayer.sessionToken = sessionStorage.getItem(`cardgame_session_${roomId}`) || null;
     if (multiplayer.pingInterval) {
         clearInterval(multiplayer.pingInterval);
     }
@@ -806,10 +792,11 @@ function connectMultiplayer({ roomId, deck1Name, deck2Name, playtestMode }) {
         if (msg.type === 'ROOM_JOINED') {
             multiplayer.seed = msg.seed;
             multiplayer.config = msg.config;
-            multiplayer.playerNumber = msg.playerNumber;
+            const parsedPlayerNumber = Number(msg.playerNumber);
+            multiplayer.playerNumber = Number.isFinite(parsedPlayerNumber) ? parsedPlayerNumber : null;
             if (msg.sessionToken) {
                 multiplayer.sessionToken = msg.sessionToken;
-                localStorage.setItem(`cardgame_session_${roomId}`, msg.sessionToken);
+                sessionStorage.setItem(`cardgame_session_${roomId}`, msg.sessionToken);
             }
             setupEventListeners();
             if (multiplayer.playerNumber === 1) {
@@ -819,6 +806,7 @@ function connectMultiplayer({ roomId, deck1Name, deck2Name, playtestMode }) {
                     msg.config.playtestMode,
                     msg.seed
                 );
+                multiplayer.hasLocalSeededState = true;
                 sendMultiplayerAction('STATE_SNAPSHOT', []);
             }
             return;
@@ -826,13 +814,17 @@ function connectMultiplayer({ roomId, deck1Name, deck2Name, playtestMode }) {
 
         if (msg.type === 'FULL_STATE') {
             multiplayer.serverSeq = msg.serverSeq || 0;
-            applyStateSnapshot(msg.state);
+            if (!shouldIgnoreServerSnapshot(msg.state)) {
+                applyStateSnapshot(msg.state);
+            }
             return;
         }
 
         if (msg.type === 'STATE_UPDATE') {
             multiplayer.serverSeq = msg.serverSeq || multiplayer.serverSeq;
-            applyStateSnapshot(msg.state);
+            if (!shouldIgnoreServerSnapshot(msg.state)) {
+                applyStateSnapshot(msg.state);
+            }
             return;
         }
 
@@ -903,6 +895,14 @@ function applyStateSnapshot(snapshot) {
     setupEventListeners();
     updateUI();
 
+    if (multiplayer.playerNumber === 1) {
+        const serverPlayer = snapshot.players && snapshot.players[1];
+        const serverDeckHasCards = !!serverPlayer && (((serverPlayer.deck?.length || 0) > 0) || ((serverPlayer.hand?.length || 0) > 0));
+        if (serverDeckHasCards) {
+            multiplayer.hasLocalSeededState = false;
+        }
+    }
+
     multiplayer.isApplyingRemote = wasApplying;
 
     const sv = game.tempSelections && game.tempSelections.songVoting;
@@ -963,260 +963,285 @@ function ensureStartingMusician(playerNum) {
 const DECK_TEMPLATES = {
     'strings-aggro': {
         name: 'String Section',
-        description: 'Emily, Sophia, Ashley, Fiona with Riley Hall. Fast string attacks.',
+        description: 'Strings core with flexible programs, roster setup, and mixed stadiums for steady pressure.',
         build: () => [
             createCharacterCard(CHARACTERS.EMILY_WANG),
             createCharacterCard(CHARACTERS.SOPHIA_Y_WANG),
             createCharacterCard(CHARACTERS.ASHLEY_TOBY),
             createCharacterCard(CHARACTERS.FIONA_LI),
-            createItemCard(ITEMS.OTAMATONE),
+            createCharacterCard(CHARACTERS.ALICE_WANG),
             createItemCard(ITEMS.CONCERT_TICKET),
-            createItemCard(ITEMS.ICE_SKATES),
             createItemCard(ITEMS.CONCERT_PROGRAM),
-            createItemCard(ITEMS.PRINTED_SCORE),
+            createItemCard(ITEMS.CONCERT_ROSTER),
             createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.PRINTED_SCORE),
+            createItemCard(ITEMS.ANNOTATED_SCORE),
+            createItemCard(ITEMS.CAMERA),
             createItemCard(ITEMS.MATCHA_LATTE),
-            createItemCard(ITEMS.STRAWBERRY_MATCHA),
-            createItemCard(ITEMS.AVGE_BIRB),
             createToolCard(TOOLS.MAID_OUTFIT),
             createToolCard(TOOLS.KIKI_HEADBAND),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
-            ...Array(3).fill(null).map(() => createStadiumCard(STADIUMS.RILEY_HALL))
+            createSupporterCard(SUPPORTERS.LIO),
+            createSupporterCard(SUPPORTERS.ANGEL),
+            createStadiumCard(STADIUMS.RILEY_HALL),
+            createStadiumCard(STADIUMS.MAIN_HALL),
+            createStadiumCard(STADIUMS.ALUMNAE_HALL)
         ]
     },
     'piano-control': {
         name: 'Piano Trio',
-        description: 'Katie, David, Jennie, Henry with Steinert Basement. Piano control.',
+        description: 'Piano control with hand tools, program setup, and flexible stadiums.',
         build: () => [
             createCharacterCard(CHARACTERS.KATIE_XIANG),
             createCharacterCard(CHARACTERS.DAVID_MAN),
             createCharacterCard(CHARACTERS.JENNIE_WANG),
             createCharacterCard(CHARACTERS.HENRY_WANG),
-            createItemCard(ITEMS.MATCHA_LATTE),
-            createItemCard(ITEMS.STRAWBERRY_MATCHA),
+            createCharacterCard(CHARACTERS.LUKE_XU),
             createItemCard(ITEMS.CONCERT_TICKET),
-            createItemCard(ITEMS.PRINTED_SCORE),
-            createItemCard(ITEMS.ANNOTATED_SCORE),
-            createItemCard(ITEMS.ICE_SKATES),
-            createItemCard(ITEMS.CAMERA),
-            createItemCard(ITEMS.REHEARSAL_ROSTER),
             createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.CAMERA),
+            createItemCard(ITEMS.ANNOTATED_SCORE),
+            createItemCard(ITEMS.PRINTED_SCORE),
+            createItemCard(ITEMS.BAI_EMAIL),
             createToolCard(TOOLS.MUSESCORE_SUB),
             createToolCard(TOOLS.KIKI_HEADBAND),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
-            ...Array(3).fill(null).map(() => createStadiumCard(STADIUMS.STEINERT_BASEMENT))
+            createSupporterCard(SUPPORTERS.LIO),
+            createSupporterCard(SUPPORTERS.MICHELLE),
+            createStadiumCard(STADIUMS.STEINERT_BASEMENT),
+            createStadiumCard(STADIUMS.STEINERT_PRACTICE),
+            createStadiumCard(STADIUMS.FRIEDMAN)
         ]
     },
     'percussion-midrange': {
         name: 'Rhythm Section',
-        description: 'Bokai, Pascal, Cavin, Loang with Main Hall. Balanced percussion.',
+        description: 'Percussion midrange with versatile items and mixed stadium support.',
         build: () => [
             createCharacterCard(CHARACTERS.BOKAI_BI),
             createCharacterCard(CHARACTERS.PASCAL_KIM),
             createCharacterCard(CHARACTERS.CAVIN_XUE),
             createCharacterCard(CHARACTERS.LOANG_CHIANG),
-            createItemCard(ITEMS.OTAMATONE),
+            createCharacterCard(CHARACTERS.KEVIN_YANG),
             createItemCard(ITEMS.CONCERT_PROGRAM),
-            createItemCard(ITEMS.REHEARSAL_ROSTER),
             createItemCard(ITEMS.CONCERT_TICKET),
-            createItemCard(ITEMS.BAI_EMAIL),
-            createItemCard(ITEMS.MUSESCORE_FILE),
-            createItemCard(ITEMS.RAFFLE_TICKET),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
             createItemCard(ITEMS.CONCERT_ROSTER),
-            createItemCard(ITEMS.ICE_SKATES),
+            createItemCard(ITEMS.MUSESCORE_FILE),
+            createItemCard(ITEMS.BAI_EMAIL),
+            createItemCard(ITEMS.RAFFLE_TICKET),
             createItemCard(ITEMS.PRINTED_SCORE),
             createToolCard(TOOLS.BUCKET),
             createToolCard(TOOLS.MAID_OUTFIT),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.MICHELLE)),
-            ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.MAIN_HALL))
+            createSupporterCard(SUPPORTERS.MICHELLE),
+            createSupporterCard(SUPPORTERS.EMMA),
+            createStadiumCard(STADIUMS.MAIN_HALL),
+            createStadiumCard(STADIUMS.RED_ROOM),
+            createStadiumCard(STADIUMS.STEINERT_PRACTICE)
         ]
     },
     'choir-support': {
         name: 'A Cappella',
-        description: 'Rachel, Ross, Evelyn, Izzy with Friedman Hall. Choir healing.',
+        description: 'Choir healing with general setup items and flexible stadiums.',
         build: () => [
             createCharacterCard(CHARACTERS.RACHEL_CHEN),
             createCharacterCard(CHARACTERS.ROSS_WILLIAMS),
             createCharacterCard(CHARACTERS.EVELYN_WU),
             createCharacterCard(CHARACTERS.IZZY_CHEN),
+            createCharacterCard(CHARACTERS.YUELIN_HU),
+            createItemCard(ITEMS.CONCERT_TICKET),
+            createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.CAMERA),
             createItemCard(ITEMS.MATCHA_LATTE),
             createItemCard(ITEMS.STRAWBERRY_MATCHA),
-            createItemCard(ITEMS.RAFFLE_TICKET),
             createItemCard(ITEMS.AVGE_BIRB),
-            createItemCard(ITEMS.CONCERT_TICKET),
-            createItemCard(ITEMS.CAMERA),
-            createItemCard(ITEMS.CONCERT_ROSTER),
-            createItemCard(ITEMS.ICE_SKATES),
-            createItemCard(ITEMS.CONCERT_PROGRAM),
-            createItemCard(ITEMS.REHEARSAL_ROSTER),
             createToolCard(TOOLS.MAID_OUTFIT),
             createToolCard(TOOLS.KIKI_HEADBAND),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.ANGEL)),
-            ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.FRIEDMAN))
+            createSupporterCard(SUPPORTERS.ANGEL),
+            createSupporterCard(SUPPORTERS.LIO),
+            createStadiumCard(STADIUMS.FRIEDMAN),
+            createStadiumCard(STADIUMS.ALUMNAE_HALL),
+            createStadiumCard(STADIUMS.MAIN_HALL)
         ]
     },
     'brass-tempo': {
         name: 'Brass Band',
-        description: 'Kei, Filip, Juan, Vincent with Lindemann. High-powered brass.',
+        description: 'Brass tempo with flexible programs, scores, and mixed stadiums.',
         build: () => [
             createCharacterCard(CHARACTERS.KEI_WATANABE),
             createCharacterCard(CHARACTERS.FILIP_KAMINSKI),
             createCharacterCard(CHARACTERS.JUAN_BURGOS),
             createCharacterCard(CHARACTERS.VINCENT_CHEN),
-            createItemCard(ITEMS.MIKU_OTAMATONE),
-            createItemCard(ITEMS.OTAMATONE),
+            createCharacterCard(CHARACTERS.BARRON_LEE),
             createItemCard(ITEMS.CONCERT_TICKET),
-            createItemCard(ITEMS.BAI_EMAIL),
-            createItemCard(ITEMS.PRINTED_SCORE),
-            createItemCard(ITEMS.ICE_SKATES),
-            createItemCard(ITEMS.CORRUPTED_FILE),
-            createItemCard(ITEMS.CONCERT_ROSTER),
             createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.CONCERT_ROSTER),
             createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.PRINTED_SCORE),
+            createItemCard(ITEMS.ANNOTATED_SCORE),
+            createItemCard(ITEMS.BAI_EMAIL),
+            createItemCard(ITEMS.ICE_SKATES),
             createToolCard(TOOLS.AVGE_TSHIRT),
             createToolCard(TOOLS.KIKI_HEADBAND),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.WILL)),
-            ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.LINDEMANN))
+            createSupporterCard(SUPPORTERS.WILL),
+            createSupporterCard(SUPPORTERS.MICHELLE),
+            createStadiumCard(STADIUMS.LINDEMANN),
+            createStadiumCard(STADIUMS.MAIN_HALL),
+            createStadiumCard(STADIUMS.STEINERT_BASEMENT)
         ]
     },
     'guitar-rock': {
         name: 'Electric Ensemble',
-        description: 'Grace, Roberto, Hanlei, Meya with Salomon DECI. RNG damage.',
+        description: 'Guitar mix with general items and multiple performance spaces.',
         build: () => [
             createCharacterCard(CHARACTERS.GRACE_ZHAO),
             createCharacterCard(CHARACTERS.ROBERTO_GONZALES),
             createCharacterCard(CHARACTERS.HANLEI_GAO),
             createCharacterCard(CHARACTERS.MEYA_GAO),
-            createItemCard(ITEMS.OTAMATONE),
-            createItemCard(ITEMS.MIKU_OTAMATONE),
+            createCharacterCard(CHARACTERS.OWEN_LANDRY),
             createItemCard(ITEMS.CONCERT_TICKET),
             createItemCard(ITEMS.CONCERT_PROGRAM),
-            createItemCard(ITEMS.ICE_SKATES),
-            createItemCard(ITEMS.AVGE_BIRB),
-            createItemCard(ITEMS.ANNOTATED_SCORE),
+            createItemCard(ITEMS.CONCERT_ROSTER),
             createItemCard(ITEMS.REHEARSAL_ROSTER),
-            createItemCard(ITEMS.PRINTED_SCORE),
             createItemCard(ITEMS.CAMERA),
+            createItemCard(ITEMS.OTAMATONE),
+            createItemCard(ITEMS.MIKU_OTAMATONE),
+            createItemCard(ITEMS.ICE_SKATES),
             createToolCard(TOOLS.MAID_OUTFIT),
-            createToolCard(TOOLS.KIKI_HEADBAND),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
-            ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.SALOMON_DECI))
+            createToolCard(TOOLS.AVGE_STICKER),
+            createSupporterCard(SUPPORTERS.LIO),
+            createSupporterCard(SUPPORTERS.LUCAS),
+            createStadiumCard(STADIUMS.SALOMON_DECI),
+            createStadiumCard(STADIUMS.RED_ROOM),
+            createStadiumCard(STADIUMS.MAIN_HALL)
         ]
     },
     'toolbox': {
         name: 'Mixed Ensemble',
-        description: 'Katie, Grace, Bokai, Ross with Alumnae. Versatile tools.',
+        description: 'Mixed types with general items and flexible support.',
         build: () => [
             createCharacterCard(CHARACTERS.KATIE_XIANG),
             createCharacterCard(CHARACTERS.GRACE_ZHAO),
             createCharacterCard(CHARACTERS.BOKAI_BI),
             createCharacterCard(CHARACTERS.ROSS_WILLIAMS),
+            createCharacterCard(CHARACTERS.EMILY_WANG),
             createItemCard(ITEMS.CONCERT_TICKET),
-            createItemCard(ITEMS.CONCERT_ROSTER),
             createItemCard(ITEMS.CONCERT_PROGRAM),
-            createItemCard(ITEMS.ICE_SKATES),
-            createItemCard(ITEMS.BAI_EMAIL),
+            createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
             createItemCard(ITEMS.CAMERA),
             createItemCard(ITEMS.MATCHA_LATTE),
-            createItemCard(ITEMS.RAFFLE_TICKET),
-            createItemCard(ITEMS.OTAMATONE),
+            createItemCard(ITEMS.BAI_EMAIL),
+            createItemCard(ITEMS.AVGE_BIRB),
             createToolCard(TOOLS.KIKI_HEADBAND),
-            createToolCard(TOOLS.MAID_OUTFIT),
             createToolCard(TOOLS.AVGE_STICKER),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.EMMA)),
-            ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.ALUMNAE_HALL))
+            createSupporterCard(SUPPORTERS.EMMA),
+            createSupporterCard(SUPPORTERS.LIO),
+            createStadiumCard(STADIUMS.ALUMNAE_HALL),
+            createStadiumCard(STADIUMS.MAIN_HALL),
+            createStadiumCard(STADIUMS.FRIEDMAN)
         ]
     },
     'woodwinds-swarm': {
         name: 'Woodwind Orchestra',
-        description: 'Felix, Jayden, Kana, Anna, Desmond with healing and utility.',
+        description: 'Woodwinds with broad utility items and flexible stadiums.',
         build: () => [
             createCharacterCard(CHARACTERS.FELIX_CHEN),
             createCharacterCard(CHARACTERS.JAYDEN_BROWN),
             createCharacterCard(CHARACTERS.KANA_TAKIZAWA),
             createCharacterCard(CHARACTERS.ANNA_BROWN),
             createCharacterCard(CHARACTERS.DESMOND_ROPER),
-            createItemCard(ITEMS.MATCHA_LATTE),
-            createItemCard(ITEMS.STRAWBERRY_MATCHA),
             createItemCard(ITEMS.CONCERT_TICKET),
             createItemCard(ITEMS.CONCERT_PROGRAM),
-            createItemCard(ITEMS.ICE_SKATES),
-            createItemCard(ITEMS.CAMERA),
-            createItemCard(ITEMS.REHEARSAL_ROSTER),
             createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.CAMERA),
+            createItemCard(ITEMS.MATCHA_LATTE),
+            createItemCard(ITEMS.STRAWBERRY_MATCHA),
+            createItemCard(ITEMS.PRINTED_SCORE),
             createToolCard(TOOLS.MAID_OUTFIT),
             createToolCard(TOOLS.AVGE_STICKER),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
-            ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.ALUMNAE_HALL)),
+            createSupporterCard(SUPPORTERS.LIO),
+            createSupporterCard(SUPPORTERS.LUCAS),
+            createStadiumCard(STADIUMS.ALUMNAE_HALL),
+            createStadiumCard(STADIUMS.MAIN_HALL),
             createStadiumCard(STADIUMS.FRIEDMAN)
         ]
     },
     'brass-fortress': {
         name: 'Brass Fortress',
-        description: 'Barron, Juan, Vincent, Carolyn. Defensive brass with energy limits.',
+        description: 'Defensive brass with general setups and mixed stadiums.',
         build: () => [
             createCharacterCard(CHARACTERS.BARRON_LEE),
             createCharacterCard(CHARACTERS.JUAN_BURGOS),
             createCharacterCard(CHARACTERS.VINCENT_CHEN),
             createCharacterCard(CHARACTERS.CAROLYN_ZHENG),
-            createItemCard(ITEMS.MATCHA_LATTE),
-            createItemCard(ITEMS.STRAWBERRY_MATCHA),
+            createCharacterCard(CHARACTERS.DANIEL_YANG),
             createItemCard(ITEMS.CONCERT_TICKET),
-            createItemCard(ITEMS.BAI_EMAIL),
-            createItemCard(ITEMS.CONCERT_ROSTER),
             createItemCard(ITEMS.CONCERT_PROGRAM),
-            createItemCard(ITEMS.ICE_SKATES),
-            createItemCard(ITEMS.PRINTED_SCORE),
+            createItemCard(ITEMS.CONCERT_ROSTER),
             createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.PRINTED_SCORE),
+            createItemCard(ITEMS.BAI_EMAIL),
+            createItemCard(ITEMS.ICE_SKATES),
+            createItemCard(ITEMS.CORRUPTED_FILE),
             createToolCard(TOOLS.AVGE_STICKER),
-            createToolCard(TOOLS.MAID_OUTFIT),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.MICHELLE)),
-            ...Array(3).fill(null).map(() => createStadiumCard(STADIUMS.LINDEMANN))
+            createToolCard(TOOLS.AVGE_TSHIRT),
+            createSupporterCard(SUPPORTERS.MICHELLE),
+            createSupporterCard(SUPPORTERS.WILL),
+            createStadiumCard(STADIUMS.LINDEMANN),
+            createStadiumCard(STADIUMS.MAIN_HALL),
+            createStadiumCard(STADIUMS.STEINERT_BASEMENT)
         ]
     },
     'guitar-perc-rush': {
         name: 'Rock & Roll',
-        description: 'Owen, Cavin, Ryan Lee, Kevin. Fast aggressive Guitar-Percussion.',
+        description: 'Aggressive guitar-percussion with broad setup tools.',
         build: () => [
             createCharacterCard(CHARACTERS.OWEN_LANDRY),
             createCharacterCard(CHARACTERS.CAVIN_XUE),
             createCharacterCard(CHARACTERS.RYAN_LEE),
             createCharacterCard(CHARACTERS.KEVIN_YANG),
+            createCharacterCard(CHARACTERS.HANLEI_GAO),
             createItemCard(ITEMS.OTAMATONE),
             createItemCard(ITEMS.MIKU_OTAMATONE),
-            createItemCard(ITEMS.PRINTED_SCORE),
-            createItemCard(ITEMS.ANNOTATED_SCORE),
             createItemCard(ITEMS.CONCERT_TICKET),
             createItemCard(ITEMS.CONCERT_PROGRAM),
-            createItemCard(ITEMS.ICE_SKATES),
-            createItemCard(ITEMS.AVGE_BIRB),
             createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.ANNOTATED_SCORE),
+            createItemCard(ITEMS.ICE_SKATES),
             createToolCard(TOOLS.MAID_OUTFIT),
             createToolCard(TOOLS.BUCKET),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.ANGEL)),
-            ...Array(3).fill(null).map(() => createStadiumCard(STADIUMS.RED_ROOM))
+            createSupporterCard(SUPPORTERS.ANGEL),
+            createSupporterCard(SUPPORTERS.LIO),
+            createStadiumCard(STADIUMS.RED_ROOM),
+            createStadiumCard(STADIUMS.SALOMON_DECI),
+            createStadiumCard(STADIUMS.MAIN_HALL)
         ]
     },
     'piano-choir-control': {
         name: 'Symphony Control',
-        description: 'Katie, Luke, Rachel, Ross. Piano-Choir control with abilities.',
+        description: 'Piano-Choir control with general draw and flexible stadiums.',
         build: () => [
             createCharacterCard(CHARACTERS.KATIE_XIANG),
             createCharacterCard(CHARACTERS.LUKE_XU),
             createCharacterCard(CHARACTERS.RACHEL_CHEN),
             createCharacterCard(CHARACTERS.ROSS_WILLIAMS),
-            createItemCard(ITEMS.MATCHA_LATTE),
-            createItemCard(ITEMS.STRAWBERRY_MATCHA),
+            createCharacterCard(CHARACTERS.HENRY_WANG),
             createItemCard(ITEMS.CONCERT_TICKET),
             createItemCard(ITEMS.CONCERT_PROGRAM),
-            createItemCard(ITEMS.CAMERA),
-            createItemCard(ITEMS.ICE_SKATES),
             createItemCard(ITEMS.CONCERT_ROSTER),
             createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.CAMERA),
+            createItemCard(ITEMS.ANNOTATED_SCORE),
+            createItemCard(ITEMS.MATCHA_LATTE),
             createItemCard(ITEMS.AVGE_BIRB),
             createToolCard(TOOLS.BUCKET),
             createToolCard(TOOLS.MUSESCORE_SUB),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
+            createSupporterCard(SUPPORTERS.LIO),
+            createSupporterCard(SUPPORTERS.ANGEL),
             createStadiumCard(STADIUMS.FRIEDMAN),
             createStadiumCard(STADIUMS.STEINERT_PRACTICE),
             createStadiumCard(STADIUMS.MAIN_HALL)
@@ -1224,30 +1249,33 @@ const DECK_TEMPLATES = {
     },
     'hybrid-strings': {
         name: 'Chamber Ensemble',
-        description: 'Ina, Emily, Alice, Weston. Strings-Woodwinds utility.',
+        description: 'Strings-woodwinds blend with general setup and mixed stadiums.',
         build: () => [
             createCharacterCard(CHARACTERS.INA_MA),
             createCharacterCard(CHARACTERS.EMILY_WANG),
             createCharacterCard(CHARACTERS.ALICE_WANG),
             createCharacterCard(CHARACTERS.WESTON_POE),
-            createItemCard(ITEMS.OTAMATONE),
-            createItemCard(ITEMS.MIKU_OTAMATONE),
+            createCharacterCard(CHARACTERS.KANA_TAKIZAWA),
             createItemCard(ITEMS.CONCERT_TICKET),
-            createItemCard(ITEMS.ICE_SKATES),
             createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.CAMERA),
             createItemCard(ITEMS.MATCHA_LATTE),
             createItemCard(ITEMS.STRAWBERRY_MATCHA),
             createItemCard(ITEMS.AVGE_BIRB),
-            createItemCard(ITEMS.CONCERT_ROSTER),
             createToolCard(TOOLS.MAID_OUTFIT),
             createToolCard(TOOLS.KIKI_HEADBAND),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LIO)),
-            ...Array(3).fill(null).map(() => createStadiumCard(STADIUMS.RILEY_HALL))
+            createSupporterCard(SUPPORTERS.LIO),
+            createSupporterCard(SUPPORTERS.LUCAS),
+            createStadiumCard(STADIUMS.RILEY_HALL),
+            createStadiumCard(STADIUMS.ALUMNAE_HALL),
+            createStadiumCard(STADIUMS.MAIN_HALL)
         ]
     },
     'rainbow-ensemble': {
         name: 'Grand Orchestra',
-        description: 'All 7 types. Barron, Ross, Owen, Cavin, Luke, Emily, Felix.',
+        description: 'All 7 types with universal items and flexible stadiums.',
         build: () => [
             createCharacterCard(CHARACTERS.BARRON_LEE),
             createCharacterCard(CHARACTERS.ROSS_WILLIAMS),
@@ -1257,40 +1285,44 @@ const DECK_TEMPLATES = {
             createCharacterCard(CHARACTERS.EMILY_WANG),
             createCharacterCard(CHARACTERS.FELIX_CHEN),
             createItemCard(ITEMS.CONCERT_TICKET),
-            createItemCard(ITEMS.ICE_SKATES),
-            createItemCard(ITEMS.BAI_EMAIL),
-            createItemCard(ITEMS.CONCERT_ROSTER),
             createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.CAMERA),
             createItemCard(ITEMS.MATCHA_LATTE),
             createItemCard(ITEMS.OTAMATONE),
-            createToolCard(TOOLS.BUCKET),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.LUCAS)),
-            ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.MAIN_HALL)),
+            createToolCard(TOOLS.KIKI_HEADBAND),
+            createToolCard(TOOLS.AVGE_STICKER),
+            createSupporterCard(SUPPORTERS.LUCAS),
+            createSupporterCard(SUPPORTERS.EMMA),
+            createStadiumCard(STADIUMS.MAIN_HALL),
             createStadiumCard(STADIUMS.ALUMNAE_HALL)
         ]
     },
     'boss-battle': {
         name: 'All-Stars',
-        description: 'Vincent, Ross, Edward, Kei, Ryan Li. High HP tanky characters.',
+        description: 'High-HP lineup with general items and mixed stadiums.',
         build: () => [
             createCharacterCard(CHARACTERS.VINCENT_CHEN),
             createCharacterCard(CHARACTERS.ROSS_WILLIAMS),
             createCharacterCard(CHARACTERS.EDWARD_WIBOWO),
             createCharacterCard(CHARACTERS.KEI_WATANABE),
             createCharacterCard(CHARACTERS.RYAN_LI),
+            createItemCard(ITEMS.CONCERT_TICKET),
+            createItemCard(ITEMS.CONCERT_PROGRAM),
+            createItemCard(ITEMS.CONCERT_ROSTER),
+            createItemCard(ITEMS.REHEARSAL_ROSTER),
+            createItemCard(ITEMS.CAMERA),
             createItemCard(ITEMS.MATCHA_LATTE),
             createItemCard(ITEMS.STRAWBERRY_MATCHA),
-            createItemCard(ITEMS.CONCERT_TICKET),
-            createItemCard(ITEMS.CAMERA),
-            createItemCard(ITEMS.CONCERT_ROSTER),
-            createItemCard(ITEMS.CONCERT_PROGRAM),
-            createItemCard(ITEMS.ICE_SKATES),
             createItemCard(ITEMS.AVGE_BIRB),
-            createItemCard(ITEMS.RAFFLE_TICKET),
             createToolCard(TOOLS.AVGE_TSHIRT),
             createToolCard(TOOLS.MAID_OUTFIT),
-            ...Array(2).fill(null).map(() => createSupporterCard(SUPPORTERS.RICHARD)),
-            ...Array(2).fill(null).map(() => createStadiumCard(STADIUMS.LINDEMANN))
+            createSupporterCard(SUPPORTERS.RICHARD),
+            createSupporterCard(SUPPORTERS.WILL),
+            createStadiumCard(STADIUMS.LINDEMANN),
+            createStadiumCard(STADIUMS.MAIN_HALL),
+            createStadiumCard(STADIUMS.FRIEDMAN)
         ]
     }
 };
@@ -1486,12 +1518,7 @@ function updateUI() {
     }
 
     // Update button visibility based on phase
-    const beginAttackBtn = document.getElementById('begin-attack-btn');
     const endTurnBtn = document.getElementById('end-turn-btn');
-
-    if (beginAttackBtn) {
-        beginAttackBtn.style.display = 'none';
-    }
     if (endTurnBtn) {
         endTurnBtn.style.display = 'inline-block';
     }
@@ -1837,7 +1864,9 @@ function showCardActions(card) {
                 ? ' (Already Used)'
                 : (cannotAttackFirstTurn ? ' (P1 First Turn)' : (cannotAttackEffect ? ' (Cannot Attack)' : ''));
             html += `<button class="action-btn" ${attackDisabled} onclick="showAttackMenu('${card.id}')">Attack${attackLabel}</button>`;
-            html += `<button class="action-btn" onclick="showRetreatMenu('${card.id}')">Retreat</button>`;
+            const retreatDisabled = game.retreatUsedThisTurn ? 'disabled' : '';
+            const retreatLabel = game.retreatUsedThisTurn ? ' (Used)' : '';
+            html += `<button class="action-btn" ${retreatDisabled} onclick="showRetreatMenu('${card.id}')">Retreat${retreatLabel}</button>`;
 
             // Show attach energy button (only during main phase)
             if (game.phase === 'main') {
@@ -2100,6 +2129,15 @@ function playCharacterToActive(cardId) {
         game.log(`${card.name} played to Active`);
         game.applyPassiveStatuses();
 
+        // Luke Xu's Nullify - Opponent abilities disabled for the rest of this turn when played
+        if (card.name === 'Luke Xu') {
+            const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+            if (!abilitiesDisabledFor(opponentNum)) {
+                game.abilitiesDisabledThisTurn = opponentNum;
+                game.log('Nullify: Opponent abilities disabled for the rest of this turn!', 'info');
+            }
+        }
+
         // Bokai Bi's Algorithm - If opponent has this character, deal 60 damage
         const hasBokaiInPlay = [opponent.active, ...opponent.bench].some(c => c && (c.name === 'Bokai Bi' || c.name === 'Bokai'));
         const oppHasThisChar = [opponent.active, ...opponent.bench].some(c => c && c.name === card.name);
@@ -2143,6 +2181,15 @@ function playCharacterToBench(cardId, slotIndex) {
 
         // Mark character as just benched (for Luke Xu's Nullify and other abilities)
         card.wasJustBenched = true;
+
+        // Luke Xu's Nullify - Opponent abilities disabled for the rest of this turn when played
+        if (card.name === 'Luke Xu') {
+            const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+            if (!abilitiesDisabledFor(opponentNum)) {
+                game.abilitiesDisabledThisTurn = opponentNum;
+                game.log('Nullify: Opponent abilities disabled for the rest of this turn!', 'info');
+            }
+        }
 
         // Bokai Bi's Algorithm - If opponent has this character, deal 60 damage
         const hasBokaiInPlay = [opponent.active, ...opponent.bench].some(c => c && (c.name === 'Bokai Bi' || c.name === 'Bokai'));
@@ -5319,6 +5366,21 @@ function executeAttack(attackerId, moveName, targetId) {
         updateUI();
         return;
     }
+
+    // Profit Margins - prompt right before attack happens
+    if (shouldOfferProfitMargins(attacker)) {
+        if (!game.tempSelections) game.tempSelections = {};
+        const pending = game.tempSelections.profitMarginsPending;
+        const bypass = game.tempSelections.profitMarginsBypass === true;
+        if (!bypass && !pending) {
+            game.tempSelections.profitMarginsPending = { attackerId, moveName, targetId };
+            showProfitMarginsPreAttack(attacker);
+            return;
+        }
+        if (bypass) {
+            delete game.tempSelections.profitMarginsBypass;
+        }
+    }
     
     // Build combined move list (including Ross's moves if applicable)
     let move = attacker.moves ? attacker.moves.find(m => m.name === moveName) : null;
@@ -5398,7 +5460,7 @@ function executeDamageAttack(attacker, target, move) {
     }
 
     const finalDamage = calculateDamage(attacker, target, baseDamage, move);
-    game.dealDamage(target, finalDamage, attacker, { isAttack: true, baseDamage });
+    game.dealDamage(target, finalDamage, attacker, { isAttack: true, baseDamage, superEffectiveApplied: game.lastSuperEffectiveApplied });
     game.log(`${attacker.name} used ${move.name} on ${target.name} for ${finalDamage} damage!`, 'damage');
 }
 
@@ -5409,12 +5471,12 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     const defenderPlayerNum = game.findPlayerWithCharacter(defender);
     const attackerAbilitiesAllowed = !abilitiesDisabledFor(attackerPlayerNum);
     const defenderAbilitiesAllowed = !abilitiesDisabledFor(defenderPlayerNum);
+    let isSuperEffective = false;
 
-    // Apply type super effectiveness (2x damage)
+    // Check type super effectiveness (coin flip per attack, apply after modifiers)
     attacker.type.forEach(attackerType => {
         if (SUPER_EFFECTIVE_CHAIN[attackerType] && defender.type.includes(SUPER_EFFECTIVE_CHAIN[attackerType])) {
-            damage = Math.floor(damage * 2);
-            game.log(`It's super effective! ${attackerType} is strong against ${SUPER_EFFECTIVE_CHAIN[attackerType]}!`);
+            isSuperEffective = true;
         }
     });
 
@@ -5630,6 +5692,24 @@ function calculateDamage(attacker, defender, baseDamage, move) {
         }
     }
 
+    let superEffectiveApplied = false;
+    if (isSuperEffective) {
+        const coin = flipCoin();
+        superEffectiveApplied = coin;
+        game.log(`Super effective coin: ${coin ? 'Heads (double damage)' : 'Tails (normal damage)'}`, 'info');
+        if (coin) {
+            damage *= 2;
+        }
+    }
+
+    // Kana Takizawa's Immense Aura - Reduce damage by 10 per attack after all modifiers
+    if (defenderAbilitiesAllowed && defender && defender.name === 'Kana Takizawa') {
+        damage = Math.max(0, damage - 10);
+        game.log('Kana\'s Immense Aura reduces damage by 10');
+    }
+
+    game.lastSuperEffectiveApplied = superEffectiveApplied;
+
     return Math.max(0, damage);
 }
 
@@ -5639,6 +5719,10 @@ function showRetreatMenu(cardId) {
     const active = player.active;
 
     if (!active || active.id !== cardId) return;
+    if (game.retreatUsedThisTurn) {
+        alert('You can only retreat once per turn.');
+        return;
+    }
 
     const retreatCost = getEffectiveRetreatCost(active);
     const energyCount = active.attachedEnergy ? active.attachedEnergy.length : 0;
@@ -5676,6 +5760,10 @@ function retreat(activeCardId, benchSlotIndex, cost) {
     const active = player.active;
 
     if (!active || active.id !== activeCardId) return;
+    if (game.retreatUsedThisTurn) {
+        alert('You can only retreat once per turn.');
+        return;
+    }
 
     // Discard energy for retreat cost
     for (let i = 0; i < cost && active.attachedEnergy.length > 0; i++) {
@@ -5692,6 +5780,7 @@ function retreat(activeCardId, benchSlotIndex, cost) {
     }
 
     game.log(`${active.name} retreated, ${benchChar.name} is now active`);
+    game.retreatUsedThisTurn = true;
 
     game.applyPassiveStatuses();
 
@@ -5715,6 +5804,11 @@ function switchToActive(cardId) {
         game.log(`${player.active.name} moved to active`, 'info');
         game.applyPassiveStatuses();
     } else {
+        if (game.retreatUsedThisTurn) {
+            alert('You can only retreat once per turn.');
+            closeModal('action-modal');
+            return;
+        }
         // Manual switch requires retreat cost from active pokemon
         const active = player.active;
         const retreatCost = getEffectiveRetreatCost(active);
@@ -5758,6 +5852,12 @@ function confirmSwitch(cardId, benchIndex, retreatCost) {
     const player = game.players[game.currentPlayer];
     const active = player.active;
 
+    if (game.retreatUsedThisTurn) {
+        alert('You can only retreat once per turn.');
+        closeModal('action-modal');
+        return;
+    }
+
     // Discard energy for retreat cost
     for (let i = 0; i < retreatCost && active.attachedEnergy.length > 0; i++) {
         const discardedEnergy = active.attachedEnergy.pop();
@@ -5773,6 +5873,7 @@ function confirmSwitch(cardId, benchIndex, retreatCost) {
     }
 
     game.log(`${active.name} switched to bench, ${benchChar.name} is now active (paid ${retreatCost} energy)`, 'info');
+    game.retreatUsedThisTurn = true;
 
     game.applyPassiveStatuses();
 
@@ -5892,16 +5993,7 @@ function useActivatedAbility(cardId, abilitySlot) {
                 alert('Emily must be active to use Profit Margins!');
                 break;
             }
-            if (game.phase !== 'attack' || game.attackedThisTurn) {
-                alert('Profit Margins can only be used right before your attack!');
-                break;
-            }
-            if (card.attachedTools && card.attachedTools.length > 0) {
-                // Show tool selection modal
-                showToolSelectionForDiscard(card);
-            } else {
-                alert('No tools attached to Emily!');
-            }
+            alert('Profit Margins triggers automatically right before your attack.');
             break;
 
         case 'Program Production':
@@ -6287,6 +6379,33 @@ function showToolSelectionForDiscard(card) {
     modal.classList.remove('hidden');
 }
 
+function showProfitMarginsPreAttack(attacker) {
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Profit Margins</h2>`;
+    html += `<p>Discard a tool from ${attacker.name} to draw 2 cards?</p>`;
+    html += `<div class="action-buttons">`;
+
+    attacker.attachedTools.forEach((tool, idx) => {
+        html += `<button class="action-btn" onclick="discardToolForProfitMarginsAndContinue('${attacker.id}', ${idx})">Discard ${tool.name}</button>`;
+    });
+
+    html += `<button class="action-btn" onclick="skipProfitMarginsAndContinue()">Skip</button>`;
+    html += `<button class="action-btn" onclick="cancelProfitMarginsAttack()">Cancel Attack</button>`;
+    html += `</div>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function shouldOfferProfitMargins(attacker) {
+    if (!attacker || attacker.name !== 'Emily Wang') return false;
+    if (abilitiesDisabledFor(game.currentPlayer)) return false;
+    if (game.attackedThisTurn) return false;
+    return Array.isArray(attacker.attachedTools) && attacker.attachedTools.length > 0;
+}
+
 function discardToolForProfitMargins(cardId, toolIndex) {
     const player = game.players[game.currentPlayer];
     const card = player.active && player.active.id === cardId ? player.active :
@@ -6306,6 +6425,33 @@ function discardToolForProfitMargins(cardId, toolIndex) {
     updateUI();
 }
 
+function discardToolForProfitMarginsAndContinue(cardId, toolIndex) {
+    discardToolForProfitMargins(cardId, toolIndex);
+    continuePendingAttackAfterProfitMargins();
+}
+
+function skipProfitMarginsAndContinue() {
+    continuePendingAttackAfterProfitMargins();
+}
+
+function cancelProfitMarginsAttack() {
+    if (game.tempSelections) {
+        delete game.tempSelections.profitMarginsPending;
+        delete game.tempSelections.profitMarginsBypass;
+    }
+    closeModal('action-modal');
+    updateUI();
+}
+
+function continuePendingAttackAfterProfitMargins() {
+    if (!game.tempSelections || !game.tempSelections.profitMarginsPending) return;
+    const { attackerId, moveName, targetId } = game.tempSelections.profitMarginsPending;
+    delete game.tempSelections.profitMarginsPending;
+    game.tempSelections.profitMarginsBypass = true;
+    closeModal('action-modal');
+    executeAttack(attackerId, moveName, targetId);
+}
+
 function setupEventListeners() {
     if (eventListenersInitialized) return;
     eventListenersInitialized = true;
@@ -6315,14 +6461,6 @@ function setupEventListeners() {
     document.getElementById('end-turn-btn').addEventListener('click', () => {
         endTurn();
     });
-
-    // Begin attack phase button (legacy UI)
-    const beginAttackBtn = document.getElementById('begin-attack-btn');
-    if (beginAttackBtn) {
-        beginAttackBtn.addEventListener('click', () => {
-            game.beginAttackPhase();
-        });
-    }
 
     const playtestAddButton = document.getElementById('playtest-add-card-btn');
     if (playtestAddButton) {
@@ -6394,15 +6532,38 @@ function endTurn() {
 }
 
 let hotkeysInitialized = false;
+let tabShortcutOverlayVisible = false;
+
+function showKeyboardShortcutsOverlay() {
+    const overlay = document.getElementById('keyboard-shortcuts-overlay');
+    if (!overlay) return;
+    overlay.classList.remove('hidden');
+    tabShortcutOverlayVisible = true;
+}
+
+function hideKeyboardShortcutsOverlay() {
+    const overlay = document.getElementById('keyboard-shortcuts-overlay');
+    if (!overlay) return;
+    overlay.classList.add('hidden');
+    tabShortcutOverlayVisible = false;
+}
 
 function setupKeyboardShortcuts() {
     if (hotkeysInitialized) return;
     hotkeysInitialized = true;
 
     document.addEventListener('keydown', (event) => {
-        if (event.repeat) return;
-
         const key = event.key.toLowerCase();
+
+        if (key === 'tab') {
+            event.preventDefault();
+            if (!tabShortcutOverlayVisible) {
+                showKeyboardShortcutsOverlay();
+            }
+            return;
+        }
+
+        if (event.repeat) return;
 
         if (key === 'escape') {
             closeTopModal();
@@ -6448,9 +6609,6 @@ function setupKeyboardShortcuts() {
             case 'r':
                 retreatHotkey();
                 break;
-            case 'b':
-                beginAttackPhaseHotkey();
-                break;
             case 't':
                 endTurnHotkey();
                 break;
@@ -6461,6 +6619,20 @@ function setupKeyboardShortcuts() {
                 break;
             default:
                 break;
+        }
+    });
+
+    document.addEventListener('keyup', (event) => {
+        const key = event.key.toLowerCase();
+        if (key === 'tab' && tabShortcutOverlayVisible) {
+            event.preventDefault();
+            hideKeyboardShortcutsOverlay();
+        }
+    });
+
+    window.addEventListener('blur', () => {
+        if (tabShortcutOverlayVisible) {
+            hideKeyboardShortcutsOverlay();
         }
     });
 }
@@ -6581,10 +6753,6 @@ function retreatHotkey() {
     const player = game.players[game.currentPlayer];
     if (!player.active) return;
     showRetreatMenu(player.active.id);
-}
-
-function beginAttackPhaseHotkey() {
-    attackHotkey();
 }
 
 function endTurnHotkey() {
@@ -7277,9 +7445,10 @@ function applyCherryHeal(charId, healAmount) {
     const player = game.players[game.currentPlayer];
     const char = [player.active, ...player.bench].find(c => c && c.id === charId);
 
-    if (char) {
-        game.dealDamage(char, -healAmount);
-        game.log(`Cherry Flavored Valve Oil: ${char.name} healed ${healAmount} HP!`, 'heal');
+    if (char && char.damage > 0) {
+        const actualHeal = Math.min(healAmount, char.damage);
+        char.damage -= actualHeal;
+        game.log(`Cherry Flavored Valve Oil: ${char.name} healed ${actualHeal} HP!`, 'heal');
     }
 
     closeModal('action-modal');
@@ -7320,6 +7489,10 @@ function selectEmbouchureSource(sourceId) {
 
     if (!source) return;
 
+    game.tempSelections = game.tempSelections || {};
+    game.tempSelections.embouchureSourceId = sourceId;
+    game.tempSelections.embouchureSelectedEnergyIdxes = [];
+
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -7328,26 +7501,45 @@ function selectEmbouchureSource(sourceId) {
     html += `<div class="target-selection">`;
 
     source.attachedEnergy.forEach((energy, idx) => {
-        html += `<div class="target-option" onclick="selectEmbouchureEnergy('${sourceId}', ${idx})">
-            ${energy.name}
+        html += `<div class="target-option" id="embouchure-energy-${idx}" onclick="toggleEmbouchureEnergySelection(${idx})">
+            Energy ${idx + 1}
         </div>`;
     });
 
     html += `</div>`;
+    html += `<p>Selected: <span id="embouchure-selected-count">0</span></p>`;
+    html += `<button class="action-btn" id="embouchure-confirm-btn" disabled onclick="confirmEmbouchureEnergySelection()">Select Target</button>`;
     html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
     content.innerHTML = html;
     modal.classList.remove('hidden');
 }
 
-function selectEmbouchureEnergy(sourceId, energyIdx) {
+function toggleEmbouchureEnergySelection(energyIdx) {
+    if (!game.tempSelections) return;
+    const selected = game.tempSelections.embouchureSelectedEnergyIdxes || [];
+    const index = selected.indexOf(energyIdx);
+    const element = document.getElementById(`embouchure-energy-${energyIdx}`);
+
+    if (index > -1) {
+        selected.splice(index, 1);
+        if (element) element.classList.remove('selected');
+    } else {
+        selected.push(energyIdx);
+        if (element) element.classList.add('selected');
+    }
+
+    game.tempSelections.embouchureSelectedEnergyIdxes = selected;
+    const counter = document.getElementById('embouchure-selected-count');
+    if (counter) counter.textContent = selected.length;
+    const confirmBtn = document.getElementById('embouchure-confirm-btn');
+    if (confirmBtn) confirmBtn.disabled = selected.length === 0;
+}
+
+function confirmEmbouchureEnergySelection() {
     const player = game.players[game.currentPlayer];
+    const sourceId = game.tempSelections.embouchureSourceId;
     const source = [player.active, ...player.bench].find(c => c && c.id === sourceId);
-
     if (!source) return;
-
-    game.tempSelections = game.tempSelections || {};
-    game.tempSelections.embouchureSource = source;
-    game.tempSelections.embouchureEnergyIdx = energyIdx;
 
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
@@ -7372,14 +7564,25 @@ function selectEmbouchureEnergy(sourceId, energyIdx) {
 
 function completeEmbouchure(targetId) {
     const player = game.players[game.currentPlayer];
-    const source = game.tempSelections.embouchureSource;
-    const energyIdx = game.tempSelections.embouchureEnergyIdx;
+    const sourceId = game.tempSelections.embouchureSourceId;
+    const source = [player.active, ...player.bench].find(c => c && c.id === sourceId);
+    const energyIdxes = (game.tempSelections.embouchureSelectedEnergyIdxes || []).slice().sort((a, b) => b - a);
     const target = [player.active, ...player.bench].find(c => c && c.id === targetId);
 
-    if (source && target && source.attachedEnergy[energyIdx]) {
-        const energy = source.attachedEnergy.splice(energyIdx, 1)[0];
-        target.attachedEnergy.push(energy);
-        game.log(`Embouchure: Moved energy from ${source.name} to ${target.name}`);
+    if (source && target && energyIdxes.length > 0) {
+        energyIdxes.forEach(idx => {
+            if (source.attachedEnergy[idx]) {
+                const energy = source.attachedEnergy.splice(idx, 1)[0];
+                target.attachedEnergy.push(energy);
+            }
+        });
+        game.log(`Embouchure: Moved ${energyIdxes.length} energy from ${source.name} to ${target.name}`);
+    }
+
+    if (source && source.attachedEnergy && source.attachedEnergy.length > 0) {
+        showEmbouchureSelection(player);
+        updateUI();
+        return;
     }
 
     closeModal('action-modal');
@@ -8967,13 +9170,13 @@ function performMoveEffect(attacker, target, move) {
             }
             break;
 
-        case 'Screech!':
+        case 'Hyper-Ventilation!':
             // Roll d6, damage = 30 + (10 * number)
             const screechRoll = randInt(6) + 1;
             const screechDamage = 30 + (10 * screechRoll);
             const screechFinal = calculateDamage(attacker, target, screechDamage, move);
             game.dealDamage(target, screechFinal);
-            game.log(`Screech!: Rolled ${screechRoll} for ${screechFinal} damage!`, 'damage');
+            game.log(`Hyper-Ventilation!: Rolled ${screechRoll} for ${screechFinal} damage!`, 'damage');
             break;
 
         case 'Double Tongue':
@@ -9235,7 +9438,25 @@ function performMoveEffect(attacker, target, move) {
 
         case 'Heart of the Cards':
             // Name card, draw, if match deal 60 damage
-            const cardName = prompt('Heart of the Cards: Name a card:');
+            const playerCards = [
+                ...player.deck,
+                ...player.hand,
+                ...player.discard,
+                player.active,
+                ...player.bench
+            ].filter(c => c);
+            const uniqueNames = Array.from(new Set(playerCards.map(c => c.name))).sort((a, b) => a.localeCompare(b));
+            const nameList = uniqueNames.map((name, idx) => `${idx + 1}. ${name}`).join('\n');
+            const choice = prompt(`Heart of the Cards: Choose a card (number or name):\n${nameList}`);
+            let cardName = '';
+            if (choice) {
+                const choiceNum = Number(choice);
+                if (Number.isInteger(choiceNum) && choiceNum >= 1 && choiceNum <= uniqueNames.length) {
+                    cardName = uniqueNames[choiceNum - 1];
+                } else {
+                    cardName = choice.trim();
+                }
+            }
             if (cardName && player.deck.length > 0) {
                 const drawnCard = player.deck.shift();
                 player.hand.push(drawnCard);
@@ -9283,10 +9504,10 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Tabemono King':
-            // Heal all yours 30, opponent's 10, discard 1 energy
+            // Heal all yours 40, opponent's 10, discard 1 energy
             [player.active, ...player.bench].filter(c => c).forEach(char => {
                 if (char.damage > 0) {
-                    const healAmount = Math.min(30, char.damage);
+                    const healAmount = Math.min(40, char.damage);
                     char.damage -= healAmount;
                     game.log(`${char.name} healed ${healAmount} damage!`, 'heal');
                 }
@@ -9495,19 +9716,18 @@ function performMoveEffect(attacker, target, move) {
 
         case 'Hands separately':
         case 'Separate Hands':
-            // 0 damage, next turn 40 damage
-            if (attacker.separateHandsPrimedTurn === game.turn) {
+            // If used previous turn, 40 damage; else 0 damage
+            if (attacker.lastSeparateHandsTurn === game.turn - 2) {
                 const separateHandsMove = { ...move, damage: 40 };
                 executeDamageAttack(attacker, target, separateHandsMove);
-                attacker.separateHandsPrimedTurn = null;
             } else {
-                attacker.separateHandsPrimedTurn = game.turn + 2;
-                game.log('Separate Hands: Next turn will deal 40 damage');
+                game.log('Separate Hands: No damage this turn', 'info');
             }
+            attacker.lastSeparateHandsTurn = game.turn;
             break;
 
         case 'Inventory Management':
-            // Flip coin per hand card, 20 damage each heads to opponent active
+            // Flip coin per hand card, 30 damage each heads to opponent active
             const handSize = player.hand.length;
             let inventoryHeads = 0;
             for (let i = 0; i < handSize; i++) {
@@ -9517,7 +9737,7 @@ function performMoveEffect(attacker, target, move) {
             }
             const inventoryTarget = opponent.active || target;
             if (inventoryTarget) {
-                const inventoryDamage = inventoryHeads * 20;
+                const inventoryDamage = inventoryHeads * 30;
                 const inventoryFinal = calculateDamage(attacker, inventoryTarget, inventoryDamage, move);
                 game.dealDamage(inventoryTarget, inventoryFinal);
                 game.log(`Inventory Management: ${inventoryHeads} heads from ${handSize} cards for ${inventoryFinal} damage!`, 'damage');
@@ -9965,13 +10185,21 @@ function performMoveEffect(attacker, target, move) {
         case 'Cherry Flavored Valve Oil':
             // 40 damage, heal one benched character for same amount dealt
             const cherryDamage = calculateDamage(attacker, target, 40, move);
-            game.dealDamage(target, cherryDamage);
-            game.log(`Cherry Flavored Valve Oil: ${cherryDamage} damage dealt!`, 'damage');
+            const targetDamageBefore = target ? (target.damage || 0) : 0;
+            const targetHpBefore = target ? (target.hp - targetDamageBefore) : 0;
+            game.dealDamage(target, cherryDamage, attacker);
+            const currentTarget = target ? [opponent.active, ...opponent.bench].find(c => c && c.id === target.id) : null;
+            const targetDamageAfter = currentTarget ? (currentTarget.damage || 0) : targetDamageBefore;
+            const actualDealt = currentTarget
+                ? Math.max(0, targetDamageAfter - targetDamageBefore)
+                : Math.max(0, targetHpBefore);
+            game.log(`Cherry Flavored Valve Oil: ${actualDealt} damage dealt!`, 'damage');
 
             const benchedForCherry = player.bench.filter(c => c);
-            if (benchedForCherry.length > 0) {
-                showCherryHealSelection(player, benchedForCherry, cherryDamage);
-            } else {
+            if (benchedForCherry.length > 0 && actualDealt > 0) {
+                showCherryHealSelection(player, benchedForCherry, actualDealt);
+                return true;
+            } else if (benchedForCherry.length === 0) {
                 game.log('Cherry Flavored Valve Oil: No benched characters to heal', 'info');
             }
             break;
@@ -10100,12 +10328,16 @@ const EXPORTED_ACTIONS = {
     executeStickTrickSwap,
     executeClericSpell,
     discardToolForProfitMargins,
+    discardToolForProfitMarginsAndContinue,
+    skipProfitMarginsAndContinue,
+    cancelProfitMarginsAttack,
     copyDeckCode,
     processDeckImport,
     applyDrainHeal,
     applyCherryHeal,
     selectEmbouchureSource,
-    selectEmbouchureEnergy,
+    toggleEmbouchureEnergySelection,
+    confirmEmbouchureEnergySelection,
     completeEmbouchure,
     showPhotographSelectionModal,
     selectPhotographItem,
@@ -10119,6 +10351,7 @@ const EXPORTED_ACTIONS = {
     executeDrumKidWorkshop,
     executeTrickyRhythms,
     executeRacketSmash,
+    executeProgramProduction,
     executeBorrow,
     executeSnapPizzDiscard,
     showPercussionEnsembleEnergyCount,
