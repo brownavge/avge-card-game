@@ -145,8 +145,11 @@ wss.on('connection', (ws) => {
           'showSongVotingSelectionModal',
           'toggleSongVotingCard',
           'confirmSongVotingSelection',
+          'showOpponentDiscardChoice',
           'toggleOpponentDiscardCard',
           'confirmOpponentDiscard',
+          'showCastReserveOpponentChoice',
+          'confirmCastReserveOpponentChoice',
           'chooseFriedmanCard',
           'shuffleBenchIntoDeck',
           'executeSteinertPracticeDiscard'

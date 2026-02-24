@@ -1042,13 +1042,13 @@ const ITEMS = {
         name: 'Printed Score',
         type: 'item',
         subtype: 'sheet_music',
-        effect: 'Opponent reveals their entire hand.'
+        effect: 'Opponent reveals their entire hand. Choose one to discard.'
     },
     ANNOTATED_SCORE: {
         name: 'Annotated Score',
         type: 'item',
         subtype: 'sheet_music',
-        effect: 'Opponent reveals 2 cards from hand; choose one to discard.'
+        effect: 'Opponent reveals their entire hand. Choose up to two cards to shuffle back into their deck.'
     },
     MUSESCORE_FILE: {
         name: 'Standard Musescore File',
@@ -1065,17 +1065,17 @@ const ITEMS = {
     CAST_RESERVE: {
         name: 'Cast Reserve',
         type: 'item',
-        effect: 'Flip a coin. Heads: you choose one of your opponent\'s benched characters to shuffle into their deck. Tails: opponent chooses one of their benched characters to shuffle into their deck.'
+        effect: 'Search for three unique items from your deck and reveal them. Your opponent chooses one to discard. Put the others in your hand.'
     },
     FOLDING_STAND: {
         name: 'Folding Stand',
         type: 'item',
-        effect: 'Active character does +10 damage this turn.'
+        effect: 'On their first attack, your active character does +10 damage this turn.'
     },
     BUO_STAND: {
         name: 'BUO Stand',
         type: 'item',
-        effect: 'Active character does +20 damage this turn. Discard 1 energy from the active character.'
+        effect: 'On their first attack, your active character does +20 damage this turn. Discard 1 energy from the active character.'
     },
     ICE_SKATES: {
         name: 'Ice Skates',
@@ -1085,13 +1085,13 @@ const ITEMS = {
     CONCERT_PROGRAM: {
         name: 'Concert Program',
         type: 'item',
-        effect: 'Look at the top 5 cards of your deck.'
+        effect: 'Look at the top 5 cards of your deck. You may choose one character you find there and place it onto your bench. Shuffle your deck afterwards.'
     },
     CONCERT_ROSTER: {
         name: 'Concert Roster',
         type: 'item',
         subtype: 'roster',
-        effect: 'Search your deck for a specific character and place it onto your bench.'
+        effect: 'Flip a coin. If heads, search your deck for a specific character and place it onto your bench. Shuffle your deck afterwards.'
     },
     REHEARSAL_ROSTER: {
         name: 'Dress Rehearsal Roster',
@@ -1107,17 +1107,17 @@ const ITEMS = {
     BAI_EMAIL: {
         name: 'BAI Email',
         type: 'item',
-        effect: 'Discard any stadium in play. Your opponent cannot play a new stadium on their next turn.'
+        effect: 'Discard any stadium in play. Then, search for a Stadium and put it in your hand. Neither player can play a stadium until the beginning of your next turn.'
     },
     AVGE_BIRB: {
         name: 'AVGE Birb',
         type: 'item',
-        effect: 'Remove all tool cards from your opponent\'s active and benched characters. During your next turn, your active character takes +20 damage from attacks.'
+        effect: 'Remove all tool cards and status effects from your opponent\'s active and benched characters. During your next turn, your active character takes +40 damage from attacks.'
     },
     CAMERA: {
         name: 'Camera',
         type: 'item',
-        effect: 'Shuffle up to two Supporter cards from your discard pile into your deck.'
+        effect: 'Shuffle one Supporter card from your discard pile into your deck.'
     },
     VIDEO_CAMERA: {
         name: 'Video Camera',
@@ -1141,17 +1141,17 @@ const SUPPORTERS = {
     RICHARD: {
         name: 'Richard',
         type: 'supporter',
-        effect: 'One-Man Ensemble: Put up to three character cards from your discard pile into your hand. Your turn ends.'
+        effect: 'Break it Down: If both players have at least as many cards in their discard pile as their deck, both players shuffle both their discard pile and their deck, and switch them.'
     },
     MICHELLE: {
         name: 'Michelle',
         type: 'supporter',
-        effect: 'Discord Announcement: Opponent discards down to 2 cards in hand.'
+        effect: 'Discord Announcement: Opponent discards down to 1 card in hand.'
     },
     WILL: {
         name: 'Will',
         type: 'supporter',
-        effect: 'Arrangement: Shuffle all items, tools, and supporters from your discard pile into your deck.'
+        effect: 'Arrangement: Shuffle all items from your discard pile into your deck.'
     },
     LUCAS: {
         name: 'Lucas',
@@ -1171,11 +1171,11 @@ const SUPPORTERS = {
     EMMA: {
         name: 'Emma',
         type: 'supporter',
-        effect: 'Toxic Sabotage: Switch your opponent\'s active character with a benched character of your choice.'
+        effect: 'Toxic Sabotage: Switch your opponent\'s active character with a benched character of your choice. That active character may not retreat during the next turn.'
     },
     VICTORIA: {
         name: 'Victoria Chen',
         type: 'supporter',
-        effect: 'Section Leader: Choose a type, search for up to 2 characters of that type in your deck, and put them all on your bench.'
+        effect: 'Section Leader: Choose a type, search for as many characters of that type in your deck as you\'d like, and put them all on your bench.'
     }
 };
