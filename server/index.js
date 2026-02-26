@@ -1,8 +1,20 @@
 import express from 'express';
 import { WebSocketServer } from 'ws';
-import { createRoom, getRoom, addClientToRoom, removeClientFromRoom, assignPlayer, touchSession, persistRoom } from './roomManager.js';
+import {
+  createRoom,
+  getRoom,
+  addClientToRoom,
+  removeClientFromRoom,
+  assignPlayer,
+  touchSession,
+  persistRoom,
+  generateRoomId,
+  registerDeckForSession,
+  roomReady
+} from './roomManager.js';
 import { ACTION_TYPES, SERVER_EVENTS, VALID_GAME_ACTION_TYPES } from '../shared/actions.js';
 import { applyAction } from '../shared/state.js';
+import { createGameState } from '../shared/state.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -14,6 +26,13 @@ const server = app.listen(port, () => {
 });
 
 const wss = new WebSocketServer({ server });
+
+function normalizeRequestedRoomId(roomId) {
+  if (!roomId) return null;
+  const cleaned = String(roomId).trim().replace(/\D/g, '');
+  if (cleaned.length !== 4) return null;
+  return cleaned;
+}
 
 wss.on('connection', (ws) => {
   ws.rateLimit = {
@@ -32,25 +51,67 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.type === ACTION_TYPES.JOIN) {
-      const { roomId, deck1Name = 'strings-aggro', deck2Name = 'piano-control', playtestMode = false } = msg;
-      let room = getRoom(roomId);
+      const {
+        roomId: requestedRoomId,
+        deckName = 'strings-aggro',
+        playtestMode = false
+      } = msg;
+
+      const normalizedRequestedRoomId = normalizeRequestedRoomId(requestedRoomId);
+      let roomId = normalizedRequestedRoomId;
+      let room = roomId ? getRoom(roomId) : null;
+
       if (!room) {
-        room = createRoom(roomId, { deck1Name, deck2Name, playtestMode });
+        roomId = roomId || generateRoomId();
+        room = createRoom(roomId, { playtestMode });
       }
+
       addClientToRoom(roomId, ws);
       ws.roomId = roomId;
       const session = assignPlayer(room);
+      if (!session || !session.playerNumber) {
+        removeClientFromRoom(roomId, ws);
+        ws.send(JSON.stringify({ type: SERVER_EVENTS.ERROR, message: 'Room is full.' }));
+        return;
+      }
       ws.playerNumber = session.playerNumber;
       ws.sessionToken = session.sessionToken;
+
+      registerDeckForSession(room, session.sessionToken, deckName);
+
+      if (roomReady(room) && !room.state) {
+        room.state = createGameState({
+          deck1Name: room.config.deck1Name,
+          deck2Name: room.config.deck2Name,
+          playtestMode: !!room.config.playtestMode,
+          seed: room.config.seed
+        });
+      }
+
       ws.send(JSON.stringify({
         type: SERVER_EVENTS.ROOM_JOINED,
         roomId,
         seed: room.config.seed,
         config: room.config,
         playerNumber: session.playerNumber,
-        sessionToken: session.sessionToken
+        sessionToken: session.sessionToken,
+        waitingForOpponent: !roomReady(room)
       }));
-      ws.send(JSON.stringify({ type: SERVER_EVENTS.FULL_STATE, state: room.state, serverSeq: room.serverSeq }));
+
+      if (roomReady(room) && !room.readyAnnounced) {
+        room.readyAnnounced = true;
+        broadcast(room, {
+          type: SERVER_EVENTS.ROOM_READY,
+          roomId,
+          seed: room.config.seed,
+          config: room.config,
+          serverSeq: room.serverSeq
+        }, null);
+      }
+
+      if (room.state) {
+        ws.send(JSON.stringify({ type: SERVER_EVENTS.FULL_STATE, state: room.state, serverSeq: room.serverSeq }));
+      }
       return;
     }
 
@@ -69,15 +130,27 @@ wss.on('connection', (ws) => {
       ws.playerNumber = session.playerNumber;
       touchSession(room, sessionToken);
 
+      if (roomReady(room) && !room.state) {
+        room.state = createGameState({
+          deck1Name: room.config.deck1Name,
+          deck2Name: room.config.deck2Name,
+          playtestMode: !!room.config.playtestMode,
+          seed: room.config.seed
+        });
+      }
+
       ws.send(JSON.stringify({
         type: SERVER_EVENTS.ROOM_JOINED,
         roomId,
         seed: room.config.seed,
         config: room.config,
         playerNumber: session.playerNumber,
-        sessionToken
+        sessionToken,
+        waitingForOpponent: !roomReady(room)
       }));
-      ws.send(JSON.stringify({ type: SERVER_EVENTS.FULL_STATE, state: room.state, serverSeq: room.serverSeq }));
+      if (room.state) {
+        ws.send(JSON.stringify({ type: SERVER_EVENTS.FULL_STATE, state: room.state, serverSeq: room.serverSeq }));
+      }
       return;
     }
 
@@ -133,14 +206,20 @@ wss.on('connection', (ws) => {
         return;
       }
 
-      if (action.type === 'STATE_SNAPSHOT' && room.state && room.state.currentPlayer && action.playerNumber) {
-        if (action.playerNumber !== room.state.currentPlayer) {
+      const isEndTurnAction = action.type === 'CALL' && action.payload && action.payload.name === 'endTurnAction';
+
+      const incomingState = action.payload && action.payload.state ? action.payload.state : null;
+      const effectiveCurrentPlayer = (incomingState && incomingState.currentPlayer) || (room.state && room.state.currentPlayer);
+
+      if (!isEndTurnAction && action.type === 'STATE_SNAPSHOT' && effectiveCurrentPlayer && action.playerNumber) {
+        if (action.playerNumber !== effectiveCurrentPlayer) {
           ws.send(JSON.stringify({ type: SERVER_EVENTS.ACTION_REJECTED, reason: 'Not your turn.' }));
           return;
         }
       }
 
       if (action.type === 'CALL' && action.payload && action.payload.name) {
+        const actionName = action.payload.name;
         const offTurnAllowed = new Set([
           'showSongVotingSelectionModal',
           'toggleSongVotingCard',
@@ -152,18 +231,27 @@ wss.on('connection', (ws) => {
           'confirmCastReserveOpponentChoice',
           'chooseFriedmanCard',
           'shuffleBenchIntoDeck',
-          'executeSteinertPracticeDiscard'
+          'executeSteinertPracticeDiscard',
+          'executeGachaGaming',
+          'executeGachaGamingStep',
+          'finalizeGachaGaming'
         ]);
-        if (room.state && room.state.currentPlayer && action.playerNumber) {
-          const isOffTurnAllowed = offTurnAllowed.has(action.payload.name);
-          if (!isOffTurnAllowed && action.playerNumber !== room.state.currentPlayer) {
+        const modalInteractionPrefixes = ['show', 'toggle', 'confirm', 'cancel', 'select'];
+        const prefixAllowed = modalInteractionPrefixes.some((prefix) => actionName.startsWith(prefix));
+        const canPlaceInitialActive = false;
+        if (effectiveCurrentPlayer && action.playerNumber) {
+          const isOffTurnAllowed = offTurnAllowed.has(actionName) || prefixAllowed || canPlaceInitialActive;
+          if (!isEndTurnAction && !isOffTurnAllowed && action.playerNumber !== effectiveCurrentPlayer) {
             ws.send(JSON.stringify({ type: SERVER_EVENTS.ACTION_REJECTED, reason: 'Not your turn.' }));
             return;
           }
         }
       }
 
-      if (action.payload && action.payload.state) {
+      const actionName = action && action.type === 'CALL' && action.payload ? action.payload.name : null;
+      const isUiOnlyShowAction = typeof actionName === 'string' && actionName.startsWith('show');
+
+      if (!isUiOnlyShowAction && action.payload && action.payload.state) {
         try {
           room.state = applyAction(room.state, {
             type: 'STATE_SNAPSHOT',
@@ -194,6 +282,14 @@ wss.on('connection', (ws) => {
         serverSeq: room.serverSeq,
         playerNumber: ws.playerNumber
       }, null);
+
+      if (!isUiOnlyShowAction) {
+        broadcast(room, {
+          type: SERVER_EVENTS.STATE_UPDATE,
+          state: room.state,
+          serverSeq: room.serverSeq
+        }, null);
+      }
       return;
     }
   });

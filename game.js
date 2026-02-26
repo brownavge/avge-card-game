@@ -27,8 +27,103 @@ function randInt(max) {
     return Math.floor(getRandom() * max);
 }
 
+function getRoundedNonlethalDamage(currentHP, requestedDamage) {
+    const safeMax = Math.max(0, Number(currentHP || 0) - 10);
+    const roundedSafeMax = Math.floor(safeMax / 10) * 10;
+    const desired = Math.max(0, Number(requestedDamage || 0));
+    return Math.min(desired, roundedSafeMax);
+}
+
 function abilitiesDisabledFor(playerNum) {
     return (game.abilitiesDisabledThisTurn === playerNum) || (game.nextTurnEffects[playerNum] && game.nextTurnEffects[playerNum].abilitiesDisabled);
+}
+
+function syncStatusDerivedStatsForCharacter(character) {
+    if (!character) return;
+    if (!Number.isFinite(character.baseHp)) {
+        const existingBonus = Number.isFinite(character.goonBonusHp) ? character.goonBonusHp : 0;
+        character.baseHp = Math.max(1, Number(character.hp || 0) - existingBonus);
+    }
+
+    const hasGoon = !!(character.status && character.status.includes('Goon'));
+    const desiredGoonBonus = hasGoon ? 20 : 0;
+    const desiredHp = Math.max(1, Number(character.baseHp || 0) + desiredGoonBonus);
+
+    character.goonBonusHp = desiredGoonBonus;
+    character.hp = desiredHp;
+
+    if (!hasGoon) {
+        delete character.goonMusicStandBonus;
+    }
+}
+
+function syncAllStatusDerivedStats() {
+    if (!game || !game.players) return;
+    [1, 2].forEach((playerNum) => {
+        const player = game.players[playerNum];
+        if (!player) return;
+        syncStatusDerivedStatsForCharacter(player.active);
+        (player.bench || []).forEach(syncStatusDerivedStatsForCharacter);
+    });
+}
+
+function isBoardInspectableCard(card) {
+    if (!card) return false;
+    if (game && game.stadium && game.stadium.id === card.id) return true;
+    return !!(game && typeof game.findPlayerWithCharacter === 'function' && game.findPlayerWithCharacter(card));
+}
+
+function getTemporaryEnergyBonusForCharacter(card) {
+    if (!card || !game || !game.players) return 0;
+    const ownerNum = typeof game.findPlayerWithCharacter === 'function' ? game.findPlayerWithCharacter(card) : null;
+    if (!ownerNum || ownerNum !== game.currentPlayer) return 0;
+    const owner = game.players[ownerNum];
+    if (!owner || owner.active !== card) return 0;
+    return Number(game.attackModifiers?.[ownerNum]?.otamatoneBonus || 0);
+}
+
+function getCharacterHpSummary(card) {
+    const baseHp = Number.isFinite(card?.baseHp) ? Number(card.baseHp) : Number(card?.hp || 0);
+    const currentHp = Number(card?.hp || 0);
+    return {
+        currentHp,
+        baseHp,
+        delta: currentHp - baseHp
+    };
+}
+
+function promptForcedActiveReplacementIfNeeded(playerNum) {
+    if (!game || !game.players || !Number.isFinite(Number(playerNum))) return;
+    const resolvedPlayerNum = Number(playerNum);
+    const player = game.players[resolvedPlayerNum];
+    if (!player || player.active || !(player.bench || []).some(c => c)) return;
+    if (game.phase === 'gameover') return;
+    if (typeof showForcedActiveSwitchModal === 'function') {
+        showForcedActiveSwitchModal(resolvedPlayerNum);
+    }
+}
+
+let statusDerivedKoCheckInProgress = false;
+
+function enforceStatusDerivedKnockouts() {
+    if (!game || !game.players || statusDerivedKoCheckInProgress) return false;
+    statusDerivedKoCheckInProgress = true;
+    try {
+        for (const playerNum of [1, 2]) {
+            const player = game.players[playerNum];
+            if (!player) continue;
+            const inPlayChars = [player.active, ...(player.bench || [])].filter(Boolean);
+            for (const char of inPlayChars) {
+                if (Number(char.damage || 0) >= Number(char.hp || 0)) {
+                    game.knockOut(char);
+                    return true;
+                }
+            }
+        }
+        return false;
+    } finally {
+        statusDerivedKoCheckInProgress = false;
+    }
 }
 
 class GameState {
@@ -344,12 +439,10 @@ class GameState {
                     allChars.forEach(char => {
                         const totalDamage = 10 * emptyBenchSlots;
                         const currentHP = char.hp - (char.damage || 0);
-                        if (currentHP > totalDamage) {
-                            this.dealDamage(char, totalDamage);
-                            this.log(`Riley Hall: ${char.name} takes ${totalDamage} nonlethal damage (${emptyBenchSlots} empty bench slots)`, 'damage');
-                        } else if (currentHP > 1) {
-                            this.dealDamage(char, currentHP - 1);
-                            this.log(`Riley Hall: ${char.name} takes ${currentHP - 1} nonlethal damage (${emptyBenchSlots} empty bench slots)`, 'damage');
+                        const nonlethalDamage = getRoundedNonlethalDamage(currentHP, totalDamage);
+                        if (nonlethalDamage > 0) {
+                            this.dealDamage(char, nonlethalDamage);
+                            this.log(`Riley Hall: ${char.name} takes ${nonlethalDamage} nonlethal damage (${emptyBenchSlots} empty bench slots)`, 'damage');
                         }
                     });
                 }
@@ -551,6 +644,9 @@ class GameState {
                 characterCard.attachedTools = [];
             }
 
+            // KO cleanup: characters in discard should not retain damage counters.
+            characterCard.damage = 0;
+
             player.discard.push(characterCard);
 
         // Remove from active or bench
@@ -569,7 +665,7 @@ class GameState {
 
         // Check win condition
         if (this.players[opponent].koCount >= 3) {
-            this.endGame(opponent);
+            this.endGame(opponent, `reached 3 KOs`);
             return;
         }
 
@@ -577,9 +673,18 @@ class GameState {
         this.checkNoCharactersLoss(playerNum);
 
         this.render();
+        promptForcedActiveReplacementIfNeeded(playerNum);
     }
 
-    endGame(winner) {
+    endGame(winner, reason = '') {
+        if (this.phase === 'gameover') {
+            return;
+        }
+        if (reason) {
+            this.log(`Player ${winner} wins: ${reason}.`, 'game-over');
+        } else {
+            this.log(`Player ${winner} wins!`, 'game-over');
+        }
         alert(`Player ${winner} wins!`);
         this.phase = 'gameover';
         this.render();
@@ -597,7 +702,7 @@ class GameState {
         if (!hasCharacters) {
             this.log(`Player ${playerNum} loses: no characters in play!`, 'error');
             const winner = playerNum === 1 ? 2 : 1;
-            this.endGame(winner);
+            this.endGame(winner, `opponent has no characters in play`);
         }
     }
 
@@ -625,7 +730,7 @@ class GameState {
                 // Deck-out loss condition
                 const winner = playerNum === 1 ? 2 : 1;
                 this.log(`Player ${playerNum} loses: deck is empty!`, 'error');
-                this.endGame(winner);
+                this.endGame(winner, `opponent decked out`);
                 return;
             }
             const card = player.deck.shift();
@@ -636,12 +741,10 @@ class GameState {
                 const allChars = [player.active, ...player.bench].filter(c => c);
                 allChars.forEach(char => {
                     const currentHP = char.hp - (char.damage || 0);
-                    if (currentHP > 10) {
-                        this.dealDamage(char, 10);
-                        this.log(`Alumnae Hall: ${char.name} takes 10 nonlethal damage`, 'damage');
-                    } else if (currentHP > 1) {
-                        this.dealDamage(char, currentHP - 1);
-                        this.log(`Alumnae Hall: ${char.name} takes ${currentHP - 1} nonlethal damage`, 'damage');
+                    const nonlethalDamage = getRoundedNonlethalDamage(currentHP, 10);
+                    if (nonlethalDamage > 0) {
+                        this.dealDamage(char, nonlethalDamage);
+                        this.log(`Alumnae Hall: ${char.name} takes ${nonlethalDamage} nonlethal damage`, 'damage');
                     }
                 });
             }
@@ -664,6 +767,11 @@ class GameState {
 
         }
         this.render();
+        // If gacha draw is part of a turn-ending sequence, auto-broadcast endTurn
+        if (multiplayer.enabled && !multiplayer.isApplyingRemote && game.pendingAttackEndTurn) {
+            game.pendingAttackEndTurn = false;
+            endTurn();
+        }
     }
 
     shuffleDeck(playerNum) {
@@ -723,7 +831,10 @@ const multiplayer = {
     clientSeq: 0,
     serverSeq: 0,
     pingInterval: null,
-    hasLocalSeededState: false
+    hasLocalSeededState: false,
+    pendingRemotePromptFor: null,
+    pendingRemotePromptType: null,
+    hasShownInitialStartLogs: false
 };
 
 function shouldIgnoreServerSnapshot(snapshot) {
@@ -738,39 +849,179 @@ function shouldIgnoreServerSnapshot(snapshot) {
 
 function canCurrentClientAct() {
     if (!multiplayer.enabled) return true;
-    if (!multiplayer.playerNumber) return false;
-    if (multiplayer.playerNumber === game.currentPlayer) return true;
+    const localPlayerNumber = Number(multiplayer.playerNumber);
+    const waitingForPlayer = Number(multiplayer.pendingRemotePromptFor);
+    const hasValidRemotePromptLock = waitingForPlayer === 1 || waitingForPlayer === 2;
+    if (
+        hasValidRemotePromptLock &&
+        Number.isFinite(localPlayerNumber) &&
+        Number(game && game.currentPlayer) === localPlayerNumber &&
+        waitingForPlayer !== localPlayerNumber
+    ) {
+        return false;
+    }
+    const currentTurnPlayer = Number(game && game.currentPlayer);
+    if (!Number.isFinite(localPlayerNumber)) return false;
+    if (Number.isFinite(currentTurnPlayer) && localPlayerNumber === currentTurnPlayer) return true;
     const songVoting = game.tempSelections && game.tempSelections.songVoting;
-    if (songVoting && songVoting.pendingForPlayer === multiplayer.playerNumber) {
+    if (songVoting && Number(songVoting.pendingForPlayer) === localPlayerNumber) {
         return true;
     }
     return false;
 }
 
-function connectMultiplayer({ roomId, deck1Name, deck2Name, playtestMode }) {
+function clearPendingRemotePromptLock() {
+    multiplayer.pendingRemotePromptFor = null;
+    multiplayer.pendingRemotePromptType = null;
+}
+
+function ensureRemotePromptOverlay() {
+    let overlay = document.getElementById('remote-prompt-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'remote-prompt-overlay';
+        overlay.className = 'remote-prompt-overlay hidden';
+        overlay.innerHTML = '<div class="remote-prompt-overlay__card" id="remote-prompt-overlay-text"></div>';
+        document.body.appendChild(overlay);
+    }
+    return overlay;
+}
+
+function updateRemotePromptOverlay() {
+    const overlay = ensureRemotePromptOverlay();
+    const textEl = document.getElementById('remote-prompt-overlay-text');
+    const localPlayerNumber = Number(multiplayer.playerNumber);
+    const waitingFor = Number(multiplayer.pendingRemotePromptFor);
+    const currentTurnPlayer = Number(game && game.currentPlayer);
+    const hasValidRemotePromptLock = waitingFor === 1 || waitingFor === 2;
+    const shouldShow = (
+        multiplayer.enabled &&
+        hasValidRemotePromptLock &&
+        Number.isFinite(localPlayerNumber) &&
+        Number.isFinite(currentTurnPlayer) &&
+        currentTurnPlayer === localPlayerNumber &&
+        waitingFor !== localPlayerNumber
+    );
+    if (!shouldShow) {
+        overlay.classList.add('hidden');
+        return;
+    }
+
+    let message = `Waiting for Player ${waitingFor} to respond...`;
+    if (multiplayer.pendingRemotePromptType === 'forced_active_switch') {
+        message = `Waiting for Player ${waitingFor} to choose a new active character...`;
+    }
+
+    if (textEl) textEl.textContent = message;
+    overlay.classList.remove('hidden');
+}
+
+function ensureStartingHandLogsVisible() {
+    if (!game || !Array.isArray(game.gameLog)) return;
+    if (multiplayer.hasShownInitialStartLogs) return;
+
+    const hasP1Start = game.gameLog.some((entry) => entry && typeof entry.message === 'string' && entry.message.startsWith('Player 1 starts with '));
+    const hasP2Start = game.gameLog.some((entry) => entry && typeof entry.message === 'string' && entry.message.startsWith('Player 2 starts with '));
+    if (hasP1Start && hasP2Start) {
+        multiplayer.hasShownInitialStartLogs = true;
+        return;
+    }
+
+    if (Number(game.turn) !== 1) return;
+    const p1Char = game.players?.[1]?.hand?.find?.((c) => c && c.cardType === 'character');
+    const p2Char = game.players?.[2]?.hand?.find?.((c) => c && c.cardType === 'character');
+    if (!p1Char || !p2Char) return;
+
+    if (!hasP1Start) game.log(`Player 1 starts with ${p1Char.name}`);
+    if (!hasP2Start) game.log(`Player 2 starts with ${p2Char.name}`);
+    multiplayer.hasShownInitialStartLogs = true;
+}
+
+function refreshMultiplayerPlayerIdentityDisplay() {
+    const lobbyEl = document.getElementById('multiplayer-player-identity');
+    const inGameEl = document.getElementById('in-game-player-identity');
+
+    let text = 'You: Local Game';
+    if (multiplayer.enabled) {
+        text = multiplayer.playerNumber
+            ? `You are Player ${multiplayer.playerNumber}`
+            : 'You: Joining multiplayer...';
+    }
+
+    if (lobbyEl) lobbyEl.textContent = text;
+    if (inGameEl) inGameEl.textContent = text;
+}
+
+function refreshInGameRoomCodeDisplay() {
+    const roomEl = document.getElementById('in-game-room-code');
+    if (!roomEl) return;
+    const roomInput = document.getElementById('multiplayer-room');
+    const fallbackRoom = roomInput ? normalizeRoomCodeInput(roomInput.value || '') : '';
+    const effectiveRoom = multiplayer.roomId || fallbackRoom;
+    if (effectiveRoom) {
+        roomEl.textContent = `Room: ${effectiveRoom}`;
+    } else {
+        roomEl.textContent = 'Room: Local Game';
+    }
+    refreshMultiplayerPlayerIdentityDisplay();
+}
+
+function setMultiplayerLobbyStatus(message, level = 'info') {
+    const statusEl = document.getElementById('multiplayer-lobby-status');
+    if (!statusEl) return;
+    statusEl.textContent = message;
+    statusEl.classList.remove('success', 'warning', 'error');
+    if (level === 'success' || level === 'warning' || level === 'error') {
+        statusEl.classList.add(level);
+    }
+}
+
+function normalizeRoomCodeInput(value) {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (!digits) return '';
+    return digits.slice(0, 4);
+}
+
+function connectMultiplayer({ roomId, deckName, playtestMode }) {
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const socket = new WebSocket(`${protocol}://${window.location.host}`);
+
+    // Reset multiplayer runtime state for a fresh connection/session.
+    multiplayer.playerNumber = null;
+    multiplayer.seed = null;
+    multiplayer.config = null;
+    multiplayer.clientSeq = 0;
+    multiplayer.serverSeq = 0;
+    multiplayer.hasLocalSeededState = false;
+    multiplayer.hasShownInitialStartLogs = false;
+    clearPendingRemotePromptLock();
+
     multiplayer.socket = socket;
     multiplayer.enabled = true;
-    multiplayer.roomId = roomId;
-    multiplayer.sessionToken = sessionStorage.getItem(`cardgame_session_${roomId}`) || null;
+    multiplayer.roomId = (roomId || '').trim() || null;
+    refreshInGameRoomCodeDisplay();
+    refreshMultiplayerPlayerIdentityDisplay();
+    multiplayer.sessionToken = multiplayer.roomId
+        ? (sessionStorage.getItem(`cardgame_session_${multiplayer.roomId}`) || null)
+        : null;
     if (multiplayer.pingInterval) {
         clearInterval(multiplayer.pingInterval);
     }
+    setMultiplayerLobbyStatus('Connecting to multiplayer server...', 'warning');
 
     socket.addEventListener('open', () => {
+        setMultiplayerLobbyStatus('Connected. Joining room...', 'warning');
         if (multiplayer.sessionToken) {
             socket.send(JSON.stringify({
                 type: 'RESUME',
-                roomId,
+                roomId: multiplayer.roomId,
                 sessionToken: multiplayer.sessionToken
             }));
         } else {
             socket.send(JSON.stringify({
                 type: 'JOIN',
-                roomId,
-                deck1Name,
-                deck2Name,
+                roomId: multiplayer.roomId,
+                deckName,
                 playtestMode
             }));
         }
@@ -791,16 +1042,58 @@ function connectMultiplayer({ roomId, deck1Name, deck2Name, playtestMode }) {
         }
 
         if (msg.type === 'ROOM_JOINED') {
+            if (msg.roomId) {
+                multiplayer.roomId = msg.roomId;
+                const roomInput = document.getElementById('multiplayer-room');
+                if (roomInput) roomInput.value = msg.roomId;
+                refreshInGameRoomCodeDisplay();
+            }
             multiplayer.seed = msg.seed;
             multiplayer.config = msg.config;
             const parsedPlayerNumber = Number(msg.playerNumber);
             multiplayer.playerNumber = Number.isFinite(parsedPlayerNumber) ? parsedPlayerNumber : null;
+            refreshMultiplayerPlayerIdentityDisplay();
             if (msg.sessionToken) {
                 multiplayer.sessionToken = msg.sessionToken;
-                sessionStorage.setItem(`cardgame_session_${roomId}`, msg.sessionToken);
+                sessionStorage.setItem(`cardgame_session_${multiplayer.roomId}`, msg.sessionToken);
             }
             setupEventListeners();
-            if (multiplayer.playerNumber === 1) {
+
+            if (msg.waitingForOpponent) {
+                game.log(`Joined room ${multiplayer.roomId}. Waiting for opponent...`, 'info');
+                setMultiplayerLobbyStatus(`Room ${multiplayer.roomId} created. Share this code and wait for opponent.`, 'warning');
+                return;
+            }
+
+            setMultiplayerLobbyStatus(`Room ${multiplayer.roomId} ready. Starting game...`, 'success');
+
+            if (multiplayer.playerNumber === 1 && msg.config && msg.config.deck1Name && msg.config.deck2Name) {
+                initGame(
+                    msg.config.deck1Name,
+                    msg.config.deck2Name,
+                    msg.config.playtestMode,
+                    msg.seed
+                );
+                multiplayer.hasLocalSeededState = true;
+                sendMultiplayerAction('STATE_SNAPSHOT', []);
+            }
+            return;
+        }
+
+        if (msg.type === 'ROOM_READY') {
+            multiplayer.seed = msg.seed;
+            multiplayer.config = msg.config;
+            refreshInGameRoomCodeDisplay();
+            refreshMultiplayerPlayerIdentityDisplay();
+            game.log(`Room ${multiplayer.roomId} ready. Starting match...`, 'info');
+            setMultiplayerLobbyStatus(`Room ${multiplayer.roomId} ready. Match started.`, 'success');
+
+            if (
+                multiplayer.playerNumber === 1 &&
+                msg.config &&
+                msg.config.deck1Name &&
+                msg.config.deck2Name
+            ) {
                 initGame(
                     msg.config.deck1Name,
                     msg.config.deck2Name,
@@ -818,6 +1111,13 @@ function connectMultiplayer({ roomId, deck1Name, deck2Name, playtestMode }) {
             if (!shouldIgnoreServerSnapshot(msg.state)) {
                 applyStateSnapshot(msg.state);
             }
+            if (multiplayer.pendingRemotePromptType === 'forced_active_switch') {
+                const waitingFor = Number(multiplayer.pendingRemotePromptFor);
+                if ((waitingFor === 1 || waitingFor === 2) && game.players?.[waitingFor]?.active) {
+                    clearPendingRemotePromptLock();
+                    updateRemotePromptOverlay();
+                }
+            }
             return;
         }
 
@@ -825,6 +1125,13 @@ function connectMultiplayer({ roomId, deck1Name, deck2Name, playtestMode }) {
             multiplayer.serverSeq = msg.serverSeq || multiplayer.serverSeq;
             if (!shouldIgnoreServerSnapshot(msg.state)) {
                 applyStateSnapshot(msg.state);
+            }
+            if (multiplayer.pendingRemotePromptType === 'forced_active_switch') {
+                const waitingFor = Number(multiplayer.pendingRemotePromptFor);
+                if ((waitingFor === 1 || waitingFor === 2) && game.players?.[waitingFor]?.active) {
+                    clearPendingRemotePromptLock();
+                    updateRemotePromptOverlay();
+                }
             }
             return;
         }
@@ -834,6 +1141,36 @@ function connectMultiplayer({ roomId, deck1Name, deck2Name, playtestMode }) {
             const incoming = msg.action;
             if (incoming && incoming.type === 'CALL' && incoming.payload) {
                 const { name, args } = incoming.payload;
+                if (name === 'endTurnAction' && incoming.playerNumber && incoming.playerNumber === multiplayer.playerNumber) {
+                    return;
+                }
+                if (name === 'executeAttack' && incoming.playerNumber && incoming.playerNumber === multiplayer.playerNumber) {
+                    return;
+                }
+                if (name === 'handleTargetSelection' && incoming.playerNumber && incoming.playerNumber === multiplayer.playerNumber) {
+                    return;
+                }
+                if ((name === 'attachEnergy' || name === 'attachEnergyFromHand') && incoming.playerNumber && incoming.playerNumber === multiplayer.playerNumber) {
+                    return;
+                }
+                if (name === 'STATE_SNAPSHOT' && incoming.payload && incoming.payload.state) {
+                    applyStateSnapshot(incoming.payload.state);
+                    return;
+                }
+                const waitingFor = Number(multiplayer.pendingRemotePromptFor);
+                if (
+                    (waitingFor === 1 || waitingFor === 2) &&
+                    Number(incoming.playerNumber) === waitingFor &&
+                    name &&
+                    !name.startsWith('show')
+                ) {
+                    clearPendingRemotePromptLock();
+                    updateRemotePromptOverlay();
+                }
+                const samePlayerReplay = Number(incoming.playerNumber) === Number(multiplayer.playerNumber);
+                if (samePlayerReplay && name && !name.startsWith('show')) {
+                    return;
+                }
                 if (name && typeof window[name] === 'function') {
                     const wasApplying = multiplayer.isApplyingRemote;
                     multiplayer.isApplyingRemote = true;
@@ -851,6 +1188,11 @@ function connectMultiplayer({ roomId, deck1Name, deck2Name, playtestMode }) {
             game.log(`Action rejected: ${msg.reason || 'Unknown reason'}`, 'warning');
             return;
         }
+
+        if (msg.type === 'ERROR') {
+            setMultiplayerLobbyStatus(msg.message || 'Multiplayer error.', 'error');
+            return;
+        }
     });
 
     socket.addEventListener('close', () => {
@@ -858,6 +1200,10 @@ function connectMultiplayer({ roomId, deck1Name, deck2Name, playtestMode }) {
             clearInterval(multiplayer.pingInterval);
             multiplayer.pingInterval = null;
         }
+        setMultiplayerLobbyStatus('Disconnected from multiplayer server.', 'error');
+        clearPendingRemotePromptLock();
+        refreshMultiplayerPlayerIdentityDisplay();
+        updateRemotePromptOverlay();
     });
 }
 
@@ -888,13 +1234,36 @@ function getStateSnapshot() {
 
 function applyStateSnapshot(snapshot) {
     if (!snapshot) return;
+    const previousTempSelections = game && game.tempSelections ? game.tempSelections : null;
+    const actionModal = document.getElementById('action-modal');
+    const shouldPreserveLocalModalSelections = !!(
+        previousTempSelections &&
+        actionModal &&
+        !actionModal.classList.contains('hidden')
+    );
     const wasApplying = multiplayer.isApplyingRemote;
     multiplayer.isApplyingRemote = true;
     const restored = new GameState();
     Object.assign(restored, snapshot);
+    if (restored.currentPlayer != null) {
+        const parsedCurrent = Number(restored.currentPlayer);
+        if (Number.isFinite(parsedCurrent)) {
+            restored.currentPlayer = parsedCurrent;
+        }
+    }
+    if (shouldPreserveLocalModalSelections) {
+        restored.tempSelections = {
+            ...(restored.tempSelections || {}),
+            ...previousTempSelections
+        };
+    }
     game = restored;
+    syncAllStatusDerivedStats();
     setupEventListeners();
     updateUI();
+    if (multiplayer.enabled) {
+        ensureStartingHandLogsVisible();
+    }
 
     if (multiplayer.playerNumber === 1) {
         const serverPlayer = snapshot.players && snapshot.players[1];
@@ -1475,7 +1844,11 @@ function generateCardId() {
 
 // UI Rendering
 function updateUI() {
+    syncAllStatusDerivedStats();
+    if (enforceStatusDerivedKnockouts()) return;
+    updateRemotePromptOverlay();
     game.applyPassiveStatuses();
+    refreshInGameRoomCodeDisplay();
 
     // Update deck and discard counts
     document.getElementById('p1-deck-count').textContent = game.players[1].deck.length;
@@ -1541,8 +1914,12 @@ function updateUI() {
         // Add click handler to stadium
         const cardDiv = stadiumSlot.querySelector('.card');
         if (cardDiv) {
-            cardDiv.onclick = () => selectCard(game.stadium);
+            cardDiv.onclick = (event) => {
+                event.stopPropagation();
+                selectCardById(game.stadium.id);
+            };
         }
+        stadiumSlot.onclick = () => selectCardById(game.stadium.id);
     } else {
         stadiumSlot.innerHTML = '<div class="empty-slot-text">No Stadium</div>';
         stadiumSlot.classList.remove('occupied');
@@ -1558,14 +1935,24 @@ function renderCharacterSlot(characterCard, slotElement) {
     if (characterCard) {
         slotElement.innerHTML = renderCard(characterCard);
         slotElement.classList.add('occupied');
-        
-        const cardDiv = slotElement.querySelector('.card');
-        if (cardDiv) {
-            cardDiv.onclick = () => selectCard(characterCard);
-        }
+        slotElement.dataset.cardId = characterCard.id;
 
         const slotPlayer = slotElement.getAttribute('data-player');
-        if (game.playtestMode && slotPlayer && parseInt(slotPlayer) === game.currentPlayer) {
+        const ownerNum = parseInt(slotPlayer);
+        const cardDiv = slotElement.querySelector('.card');
+        if (cardDiv) {
+            cardDiv.onclick = (event) => {
+                event.stopPropagation();
+                selectCardByIdForPlayer(characterCard.id, ownerNum);
+            };
+        }
+        slotElement.onclick = () => selectCardByIdForPlayer(characterCard.id, ownerNum);
+
+        if (game.playtestMode && slotPlayer && (
+            (multiplayer.enabled
+                ? parseInt(slotPlayer) === multiplayer.playerNumber
+                : parseInt(slotPlayer) === game.currentPlayer)
+        )) {
             const removeButton = document.createElement('button');
             removeButton.className = 'playtest-remove-card';
             removeButton.type = 'button';
@@ -1579,22 +1966,44 @@ function renderCharacterSlot(characterCard, slotElement) {
     } else {
         slotElement.innerHTML = '<div class="empty-slot-text">Empty</div>';
         slotElement.classList.remove('occupied');
+        delete slotElement.dataset.cardId;
     }
 }
 
 function renderHand() {
     const handElement = document.getElementById('hand-cards');
-    const handOwner = (multiplayer.enabled && multiplayer.playerNumber)
+    const handOwnerRaw = (multiplayer.enabled && multiplayer.playerNumber)
         ? multiplayer.playerNumber
         : game.currentPlayer;
+    const handOwner = Number.isFinite(Number(handOwnerRaw)) ? Number(handOwnerRaw) : handOwnerRaw;
     const currentPlayer = game.players[handOwner];
+    if (!handElement || !currentPlayer || !Array.isArray(currentPlayer.hand)) return;
 
     handElement.innerHTML = '';
     currentPlayer.hand.forEach(card => {
         const cardElement = document.createElement('div');
         cardElement.innerHTML = renderCard(card);
         cardElement.classList.add('hand-card-wrapper');
-        cardElement.onclick = () => selectCard(card);
+        const localPlayerNumber = Number(multiplayer.playerNumber);
+        const currentTurnPlayer = Number(game.currentPlayer);
+        const canInteractWithHand = multiplayer.enabled
+            ? (Number.isFinite(localPlayerNumber) && Number(handOwner) === localPlayerNumber)
+            : Number(handOwner) === currentTurnPlayer;
+        // Only allow click if this is the local player's hand
+        if (canInteractWithHand) {
+            cardElement.onclick = () => selectCard(card);
+            const innerCard = cardElement.querySelector('.card');
+            if (innerCard) {
+                innerCard.onclick = (event) => {
+                    event.stopPropagation();
+                    selectCard(card);
+                };
+            }
+        } else {
+            cardElement.onclick = null;
+            const innerCard = cardElement.querySelector('.card');
+            if (innerCard) innerCard.onclick = null;
+        }
 
         if (game.playtestMode) {
             const removeButton = document.createElement('button');
@@ -1662,15 +2071,37 @@ function renderCard(card) {
     let html = `<div class="card ${card.cardType}" data-card-id="${card.id}">`;
 
     if (card.cardType === 'character') {
+        const hpSummary = getCharacterHpSummary(card);
+        const hpDeltaInline = hpSummary.delta
+            ? `<span class="card-hp-delta ${hpSummary.delta > 0 ? 'positive' : 'negative'}"> (${hpSummary.delta > 0 ? `+${hpSummary.delta}` : hpSummary.delta})</span>`
+            : '';
+        const ownerNum = (typeof game.findPlayerWithCharacter === 'function') ? game.findPlayerWithCharacter(card) : null;
+        const isInPlayCharacter = !!ownerNum;
+        const effectiveRetreat = isInPlayCharacter ? getEffectiveRetreatCost(card) : Number(card.retreatCost || 0);
+        const baseRetreat = Number(card.retreatCost || 0);
+        const retreatDelta = effectiveRetreat - baseRetreat;
+        const tempEnergyBonus = isInPlayCharacter ? getTemporaryEnergyBonusForCharacter(card) : 0;
         html += `
             <div class="card-header">
                 <span class="card-name">${card.name}</span>
-                <span class="card-hp">HP: ${card.hp}</span>
+                <span class="card-hp">HP: ${hpSummary.currentHp}${hpDeltaInline}</span>
             </div>
             <div class="card-type">
                 ${card.type.map(t => `<span class="type-icon type-${t.toLowerCase().replace(' ', '-')}">${getCostSymbol(t)}</span>`).join('')}
             </div>
         `;
+
+        if (retreatDelta !== 0 || tempEnergyBonus > 0) {
+            html += `<div class="card-stat-modifiers">`;
+            if (retreatDelta !== 0) {
+                const retreatDeltaText = retreatDelta > 0 ? `+${retreatDelta}` : `${retreatDelta}`;
+                html += `<span class="card-mod-badge retreat-mod">↩ ${effectiveRetreat} (${retreatDeltaText})</span>`;
+            }
+            if (tempEnergyBonus > 0) {
+                html += `<span class="card-mod-badge temp-energy-mod">⚡ +${tempEnergyBonus} temp</span>`;
+            }
+            html += `</div>`;
+        }
 
         if (card.damage > 0) {
             html += `<div class="card-damage-counter">${card.damage}</div>`;
@@ -1749,9 +2180,79 @@ function renderCard(card) {
     return html;
 }
 
+function findCardById(cardId) {
+    if (!cardId) return null;
+    if (game.stadium && game.stadium.id === cardId) return game.stadium;
+    for (let p = 1; p <= 2; p++) {
+        const player = game.players[p];
+        if (!player) continue;
+        const inPlay = [player.active, ...player.bench].find(c => c && c.id === cardId);
+        if (inPlay) return inPlay;
+        const inHand = player.hand.find(c => c && c.id === cardId);
+        if (inHand) return inHand;
+    }
+    return null;
+}
+
+function selectCardById(cardId) {
+    const card = findCardById(cardId);
+    if (card) {
+        selectCard(card);
+    }
+}
+
+function selectCardByIdForPlayer(cardId, playerNum) {
+    const player = game.players[playerNum];
+    if (!player) return;
+
+    const inPlay = [player.active, ...player.bench].find(c => c && c.id === cardId);
+    if (inPlay) {
+        selectCard(inPlay);
+        return;
+    }
+
+    const inHand = player.hand.find(c => c && c.id === cardId);
+    if (inHand) {
+        selectCard(inHand);
+        return;
+    }
+
+    const fallback = findCardById(cardId);
+    if (fallback) {
+        selectCard(fallback);
+    }
+}
+
+// Helper to open interactive modals only on the intended player's client in multiplayer.
+// Returns true when the local client should proceed to render the modal, false to abort.
+function openModalForPlayer(targetPlayerNumber, fnName, args = []) {
+    if (!multiplayer.enabled) return true;
+    const localPlayerNumber = Number(multiplayer.playerNumber);
+    const resolvedTarget = Number(targetPlayerNumber);
+    // If we're the one initiating the action, broadcast it so server/other client can persist state.
+    if (!multiplayer.isApplyingRemote) {
+        if (fnName && fnName.startsWith('show') && Number.isFinite(localPlayerNumber) && Number.isFinite(resolvedTarget) && resolvedTarget !== localPlayerNumber) {
+            multiplayer.pendingRemotePromptFor = resolvedTarget;
+            multiplayer.pendingRemotePromptType = (fnName === 'showForcedActiveSwitchModal') ? 'forced_active_switch' : 'generic';
+            updateRemotePromptOverlay();
+        }
+        sendMultiplayerAction(fnName, args);
+    }
+    return localPlayerNumber === resolvedTarget;
+}
+
 // Event Handlers
 function selectCard(card) {
-    if (!canCurrentClientAct()) {
+    const localPlayerNum = multiplayer.enabled ? (multiplayer.playerNumber || game.currentPlayer) : game.currentPlayer;
+    const localPlayer = localPlayerNum ? game.players[localPlayerNum] : null;
+    const isLocalInPlayCard = !!(localPlayer && card && [localPlayer.active, ...localPlayer.bench].some(c => c && c.id === card.id));
+    const isInspectableCard = isBoardInspectableCard(card);
+    const cardOwnerNum = (card && card.cardType === 'character' && typeof game.findPlayerWithCharacter === 'function')
+        ? game.findPlayerWithCharacter(card)
+        : null;
+    const isOpponentCharacterInspection = !!(cardOwnerNum && Number(cardOwnerNum) !== Number(localPlayerNum));
+
+    if (!canCurrentClientAct() && !isLocalInPlayCard && !isInspectableCard) {
         game.log('Not your turn.', 'warning');
         return;
     }
@@ -1762,23 +2263,55 @@ function selectCard(card) {
     }
 
     // Show available actions based on card type
-    showCardActions(card);
+    showCardActions(card, localPlayerNum, { skipSync: isOpponentCharacterInspection });
 }
 
-function showCardActions(card) {
+function showCardActions(card, targetPlayerNum, options = {}) {
+    const skipSync = !!options.skipSync;
+    // Only show modal for the intended chooser (serialized for multiplayer)
+    const resolvedTargetNum = Number(targetPlayerNum || (multiplayer.enabled ? (multiplayer.playerNumber || game.currentPlayer) : game.currentPlayer));
+    if (!skipSync && !openModalForPlayer(resolvedTargetNum, 'showCardActions', [card && card.id ? card.id : card, resolvedTargetNum])) return;
+
+    if (typeof card === 'string') {
+        const resolvedCard = findCardById(card);
+        if (resolvedCard) {
+            card = resolvedCard;
+        } else {
+            game.log('Card not found for action modal.', 'warning');
+            return;
+        }
+    }
+
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
-    const player = game.players[game.currentPlayer];
+    // Use the local player context for modal content
+    const localPlayerNum = multiplayer.enabled ? (multiplayer.playerNumber || game.currentPlayer) : game.currentPlayer;
+    const cardOwnerNum = (card && card.cardType === 'character' && typeof game.findPlayerWithCharacter === 'function')
+        ? game.findPlayerWithCharacter(card)
+        : null;
+    const isOpponentCharacterInspection = !!(cardOwnerNum && Number(cardOwnerNum) !== Number(localPlayerNum));
+    const resolvedPlayerNum = localPlayerNum;
+    const player = game.players[localPlayerNum];
     const canPlayAnytime = game.playtestMode || game.phase === 'main';
+    const inspectionOnly = !canCurrentClientAct() || isOpponentCharacterInspection;
 
     let html = `<h2>${card.name}</h2>`;
 
     // Show character details
     if (card.cardType === 'character') {
         html += `<div style="margin-bottom: 10px;">`;
-        html += `<p><strong>HP:</strong> ${card.hp}</p>`;
+        const hpSummary = getCharacterHpSummary(card);
+        const hpDeltaText = hpSummary.delta > 0 ? ` (+${hpSummary.delta})` : (hpSummary.delta < 0 ? ` (${hpSummary.delta})` : '');
+        html += `<p><strong>HP:</strong> ${hpSummary.currentHp}${hpDeltaText}</p>`;
         html += `<p><strong>Type:</strong> ${card.type.join(', ')}</p>`;
-        html += `<p><strong>Retreat Cost:</strong> ${card.retreatCost || 0}</p>`;
+        const baseRetreat = Number(card.retreatCost || 0);
+        const effectiveRetreat = getEffectiveRetreatCost(card);
+        const retreatText = effectiveRetreat === baseRetreat ? `${effectiveRetreat}` : `${effectiveRetreat} (base ${baseRetreat})`;
+        html += `<p><strong>Retreat Cost:</strong> ${retreatText}</p>`;
+        const tempEnergyBonus = getTemporaryEnergyBonusForCharacter(card);
+        if (tempEnergyBonus > 0) {
+            html += `<p><strong>Temp Energy:</strong> <span class="temp-energy-text">+${tempEnergyBonus} this turn</span></p>`;
+        }
 
         // Show abilities
         if (card.ability) {
@@ -1832,6 +2365,16 @@ function showCardActions(card) {
         html += `<p>${card.effect || card.description || ''}</p>`;
     }
 
+    if (inspectionOnly) {
+        html += `<p style="color:#666; margin-top:10px;">View only (not your turn)</p>`;
+        html += `<div class="action-buttons">`;
+        html += `<button class="action-btn" onclick="closeModal('action-modal')">Close</button>`;
+        html += `</div>`;
+        content.innerHTML = html;
+        modal.classList.remove('hidden');
+        return;
+    }
+
     html += `<div class="action-buttons">`;
 
     if (card.cardType === 'character') {
@@ -1874,7 +2417,7 @@ function showCardActions(card) {
                 const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 2 : 1;
                 const energyDisabled = (game.energyAttachedThisTurn >= maxEnergy) ? 'disabled' : '';
                 const energyLabel = (game.energyAttachedThisTurn >= maxEnergy) ? ' (Max Reached)' : ` (${game.energyAttachedThisTurn}/${maxEnergy})`;
-                html += `<button class="action-btn" ${energyDisabled} onclick="attachEnergy('active')">⚡ Attach Energy${energyLabel}</button>`;
+                html += `<button class="action-btn" ${energyDisabled} onclick="attachEnergy('active', ${resolvedPlayerNum})">⚡ Attach Energy${energyLabel}</button>`;
             }
 
             // Show activated abilities for active character
@@ -1902,7 +2445,7 @@ function showCardActions(card) {
                 const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 2 : 1;
                 const energyDisabled = (game.energyAttachedThisTurn >= maxEnergy) ? 'disabled' : '';
                 const energyLabel = (game.energyAttachedThisTurn >= maxEnergy) ? ' (Max Reached)' : ` (${game.energyAttachedThisTurn}/${maxEnergy})`;
-                html += `<button class="action-btn" ${energyDisabled} onclick="attachEnergy(${benchIndex})">⚡ Attach Energy${energyLabel}</button>`;
+                html += `<button class="action-btn" ${energyDisabled} onclick="attachEnergy(${benchIndex}, ${resolvedPlayerNum})">⚡ Attach Energy${energyLabel}</button>`;
             }
 
             // Show bench-activated abilities
@@ -2114,8 +2657,9 @@ function addPlaytestCard(type, key) {
 }
 
 function playCharacterToActive(cardId) {
-    const player = game.players[game.currentPlayer];
-    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const playerNum = game.currentPlayer;
+    const player = game.players[playerNum];
+    const opponentNum = playerNum === 1 ? 2 : 1;
     const opponent = game.players[opponentNum];
     const card = player.hand.find(c => c.id === cardId);
 
@@ -2134,7 +2678,6 @@ function playCharacterToActive(cardId) {
 
         // Luke Xu's Nullify - Opponent abilities disabled for the rest of this turn when played
         if (card.name === 'Luke Xu') {
-            const opponentNum = game.currentPlayer === 1 ? 2 : 1;
             if (!abilitiesDisabledFor(opponentNum)) {
                 game.abilitiesDisabledThisTurn = opponentNum;
                 game.log('Nullify: Opponent abilities disabled for the rest of this turn!', 'info');
@@ -2150,7 +2693,7 @@ function playCharacterToActive(cardId) {
         }
 
         // Barron Lee's Get Served - enforce energy cap on opponent
-        if (!abilitiesDisabledFor(game.currentPlayer) && card.name === 'Barron Lee') {
+        if (!abilitiesDisabledFor(playerNum) && card.name === 'Barron Lee') {
             enforceBarronGetServed(opponentNum);
         }
 
@@ -2252,9 +2795,10 @@ function logMainHallRemaining() {
 }
 
 // New energy system: attach generic energy counters for free
-function attachEnergy(target) {
-    const player = game.players[game.currentPlayer];
-    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+function attachEnergy(target, playerNumberOverride = null) {
+    const playerNum = playerNumberOverride || game.currentPlayer;
+    const player = game.players[playerNum];
+    const opponentNum = playerNum === 1 ? 2 : 1;
     const opponent = game.players[opponentNum];
 
     let targetChar;
@@ -2270,7 +2814,7 @@ function attachEnergy(target) {
     }
 
     // Check if we've already attached max energy this turn
-    const fermentationActive = player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer);
+    const fermentationActive = player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(playerNum);
     if (fermentationActive) {
         if (targetChar === player.active) {
             if (game.energyAttachedThisTurn >= 1) {
@@ -2292,7 +2836,7 @@ function attachEnergy(target) {
             }
         }
     } else {
-        if (!game.playtestMode && game.energyAttachedThisTurn >= 1) {
+        if (!game.playtestMode && playerNum === game.currentPlayer && game.energyAttachedThisTurn >= 1) {
             alert(`You've already attached ${game.energyAttachedThisTurn} energy this turn!`);
             return;
         }
@@ -2308,7 +2852,9 @@ function attachEnergy(target) {
 
     // Add generic energy counter (just a simple object)
     targetChar.attachedEnergy.push({ generic: true });
-    game.energyAttachedThisTurn++;
+    if (playerNum === game.currentPlayer) {
+        game.energyAttachedThisTurn++;
+    }
     if (fermentationActive) {
         if (targetChar === player.active) {
             game.energyAttachedToActiveThisTurn = true;
@@ -2323,7 +2869,7 @@ function attachEnergy(target) {
     }
 
     // Sophia S. Wang's Original is Better - first energy attach each turn → opponent discards
-    if (!abilitiesDisabledFor(game.currentPlayer) && game.energyAttachedThisTurn === 1 && targetChar.name === 'Sophia S. Wang' && opponent.deck.length > 0) {
+    if (!abilitiesDisabledFor(playerNum) && playerNum === game.currentPlayer && game.energyAttachedThisTurn === 1 && targetChar.name === 'Sophia S. Wang' && opponent.deck.length > 0) {
         const discarded = opponent.deck.shift();
         opponent.discard.push(discarded);
         game.log(`Sophia S. Wang's Original is Better: Opponent discarded top card of deck!`);
@@ -2345,8 +2891,6 @@ function playItem(cardId) {
     }
 
     game.cardsPlayedThisTurn++;
-    logMainHallRemaining();
-    logMainHallRemaining();
     logMainHallRemaining();
 
     // Check if this is a tool card (needs attachment)
@@ -2451,7 +2995,7 @@ function executeItemEffect(card) {
 
         case 'Printed Score':
             if (opponent.hand.length > 0) {
-                showOpponentHandDiscardModal(opponentNum, 'Printed Score');
+                showOpponentHandDiscardModal(opponentNum, 'Printed Score', game.currentPlayer);
                 return true;
             }
             game.log('Printed Score: Opponent has no cards in hand', 'info');
@@ -2459,7 +3003,7 @@ function executeItemEffect(card) {
 
         case 'Annotated Score':
             if (opponent.hand.length > 0) {
-                showOpponentHandShuffleModal(opponentNum, 2, 'Annotated Score');
+                showOpponentHandShuffleModal(opponentNum, 2, 'Annotated Score', game.currentPlayer);
                 return true;
             }
             game.log('Annotated Score: Opponent has no cards to shuffle', 'info');
@@ -2595,6 +3139,7 @@ function executeItemEffect(card) {
         // Tool removal
         case 'AVGE Birb':
             let toolsRemoved = 0;
+            let statusesRemoved = 0;
             [opponent.active, ...opponent.bench].filter(c => c).forEach(char => {
                 if (char.attachedTools && char.attachedTools.length > 0) {
                     toolsRemoved += char.attachedTools.length;
@@ -2605,13 +3150,20 @@ function executeItemEffect(card) {
                     });
                     char.attachedTools = [];
                 }
-                if (char.status && char.status.length > 0) {
+                if (Array.isArray(char.status) && char.status.length > 0) {
+                    statusesRemoved += char.status.length;
+                    char.status = [];
+                } else if (!Array.isArray(char.status)) {
+                    // Normalize malformed status storage and clear any non-array status value.
                     char.status = [];
                 }
             });
 
             if (toolsRemoved > 0) {
                 game.log(`Removed ${toolsRemoved} tool(s)`, 'info');
+            }
+            if (statusesRemoved > 0) {
+                game.log(`Removed ${statusesRemoved} status effect(s)`, 'info');
             }
 
             // Next turn penalty - active takes +40 damage from attacks
@@ -2659,13 +3211,20 @@ function executeItemEffect(card) {
 }
 
 function showTopCards(player, count) {
-    const topCards = player.deck.slice(0, Math.min(count, player.deck.length));
+    // Accept either player object or player number
+    let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showTopCards', [playerNum, count])) return;
+    const playerObj = game.players[playerNum];
+    const topCards = playerObj.deck.slice(0, Math.min(count, playerObj.deck.length));
     alert(`Top ${count} cards: ${topCards.map(c => c.name).join(', ')}`);
     game.log(`Looked at top ${count} cards`, 'info');
 }
 
 function showDeckSelection(player, viewCount, selectCount) {
-    const topCards = player.deck.slice(0, Math.min(viewCount, player.deck.length));
+    let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showDeckSelection', [playerNum, viewCount, selectCount])) return;
+    const playerObj = game.players[playerNum];
+    const topCards = playerObj.deck.slice(0, Math.min(viewCount, playerObj.deck.length));
 
     if (topCards.length === 0) {
         alert('No cards to view!');
@@ -2746,6 +3305,7 @@ function selectMultipleFromDiscard(player, cardType, count, callback) {
 
 // Show discard pile contents (read-only view)
 function showDiscardPileModal(playerNum) {
+    if (!openModalForPlayer(playerNum, 'showDiscardPileModal', [playerNum])) return;
     const player = game.players[playerNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
@@ -2803,13 +3363,16 @@ function showDiscardPileModal(playerNum) {
 
 // Modal for selecting cards from discard pile
 function showDiscardSelectionModal(player, cards, cardType, maxSelect, callback) {
+    // Accept player as object or player number
+    let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showDiscardSelectionModal', [playerNum, cards.map(c => (c && c.id) ? c.id : c), cardType, maxSelect])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
     if (!game.tempSelections) game.tempSelections = {};
     game.tempSelections.discardSelected = [];
     game.tempSelections.discardCallback = callback;
-    game.tempSelections.discardPlayer = player;
+    game.tempSelections.discardPlayer = game.players[playerNum];
 
     let html = `<h2>Select from Discard Pile</h2>`;
     html += `<p>Select up to ${maxSelect} ${cardType} card(s)</p>`;
@@ -2832,16 +3395,32 @@ function showDiscardSelectionModal(player, cards, cardType, maxSelect, callback)
 }
 
 function showMusescoreRetrievalModal(player, musescoreFiles) {
-    showDiscardSelectionModal(player, musescoreFiles, 'musescore', 1);
+    let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showMusescoreRetrievalModal', [playerNum, musescoreFiles.map(c => c.id)])) return;
+    // Reconstruct musescoreFiles if called remotely with ids
+    let files = musescoreFiles;
+    if (Array.isArray(musescoreFiles) && typeof musescoreFiles[0] === 'string') {
+        files = musescoreFiles.map(id => ({ id, name: id }));
+    }
+    showDiscardSelectionModal(playerNum, files, 'musescore', 1);
 }
 
 // Photograph: select an item from opponent hand to copy
 function showPhotographSelectionModal(itemCards, opponentNum) {
+    // itemCards may be array of card objects or array of ids when applied remotely
+    const playerNum = game.currentPlayer;
+    if (!openModalForPlayer(playerNum, 'showPhotographSelectionModal', [Array.isArray(itemCards) ? itemCards.map(c => (c && c.id) ? c.id : c) : [], opponentNum])) return;
+
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
     if (!game.tempSelections) game.tempSelections = {};
-    game.tempSelections.photographItems = itemCards.map(c => c.id);
+    const opponent = game.players[opponentNum];
+    let items = itemCards;
+    if (Array.isArray(itemCards) && typeof itemCards[0] === 'string') {
+        items = itemCards.map(id => opponent.hand.find(c => c.id === id)).filter(Boolean);
+    }
+    game.tempSelections.photographItems = items.map(c => c.id);
     game.tempSelections.photographSelected = null;
     game.tempSelections.photographOpponentNum = opponentNum;
 
@@ -2849,7 +3428,7 @@ function showPhotographSelectionModal(itemCards, opponentNum) {
     html += `<p>Select an item from your opponent's hand to copy</p>`;
     html += `<div id="photograph-selection">`;
 
-    itemCards.forEach(card => {
+    items.forEach(card => {
         html += `<div class="target-option" id="photograph-card-${card.id}" onclick="selectPhotographItem('${card.id}')">
             ${card.name}
         </div>`;
@@ -2914,7 +3493,26 @@ function cancelPhotographSelection() {
 }
 
 function showSurpriseDeliveryModal(player, target, topThree, attacker, move) {
+    // Only the player who is resolving Surprise Delivery should see the interactive modal.
+    if (!openModalForPlayer(game.currentPlayer, 'showSurpriseDeliveryModal', [game.currentPlayer, target ? target.id : null, Array.isArray(topThree) ? topThree.map(c => c.id) : [], attacker ? attacker.id : null, move ? move.name : null])) return;
     if (!game.tempSelections) game.tempSelections = {};
+
+    // Reconstruct objects if called remotely (ids passed)
+    if (Array.isArray(topThree) && typeof topThree[0] === 'string') {
+        const reconstructedTop = topThree.map(id => {
+            // try current player's deck/hand first, then opponent
+            const p = game.players[game.currentPlayer];
+            return p.deck.find(c => c.id === id) || p.hand.find(c => c.id === id) || { id };
+        }).filter(Boolean);
+        topThree = reconstructedTop;
+    }
+    if (target && typeof target === 'string') {
+        const oppNum = game.currentPlayer === 1 ? 2 : 1;
+        target = ([game.players[oppNum].active, ...game.players[oppNum].bench].find(c => c && c.id === target) || null);
+    }
+    if (attacker && typeof attacker === 'string') {
+        attacker = ([...game.players[1].bench, game.players[1].active, ...game.players[2].bench, game.players[2].active].find(c => c && c.id === attacker) || null);
+    }
 
     const characterCards = topThree.filter(c => c.cardType === 'character');
     const remainingCards = topThree.filter(c => c.cardType !== 'character');
@@ -3100,25 +3698,41 @@ function cancelDiscardSelection() {
 
 // Tool attachment modal
 function showToolAttachmentModal(toolCard) {
+    // Allow toolCard to be passed as id when applied remotely
+    const toolId = (typeof toolCard === 'string') ? toolCard : (toolCard && toolCard.id ? toolCard.id : null);
+    if (!openModalForPlayer(game.currentPlayer, 'showToolAttachmentModal', [toolId])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
     const player = game.players[game.currentPlayer];
+    const realToolCard = (typeof toolCard === 'string') ? (player.hand.find(c => c.id === toolCard) || { id: toolCard, name: toolCard }) : toolCard;
 
-    let html = `<h2>Attach ${toolCard.name}</h2>`;
-    html += `<p>${toolCard.effect}</p>`;
+    let html = `<h2>Attach ${realToolCard.name}</h2>`;
+    html += `<p>${realToolCard.effect || ''}</p>`;
     html += `<div class="target-selection">`;
 
     if (player.active) {
-        html += `<div class="target-option" onclick="attachTool('${toolCard.id}', 'active')">
-            ${player.active.name} (Active)
-        </div>`;
+        if (!player.active.attachedTools || player.active.attachedTools.length === 0) {
+                html += `<div class="target-option" onclick="attachTool('${realToolCard.id}', 'active')">
+                ${player.active.name} (Active)
+            </div>`;
+        } else {
+            html += `<div class="target-option" style="opacity: 0.5; pointer-events: none;">
+                ${player.active.name} (Active) - Tool already attached
+            </div>`;
+        }
     }
 
     player.bench.forEach((char, idx) => {
         if (char) {
-            html += `<div class="target-option" onclick="attachTool('${toolCard.id}', ${idx})">
-                ${char.name} (Bench ${idx + 1})
-            </div>`;
+            if (!char.attachedTools || char.attachedTools.length === 0) {
+                html += `<div class="target-option" onclick="attachTool('${realToolCard.id}', ${idx})">
+                    ${char.name} (Bench ${idx + 1})
+                </div>`;
+            } else {
+                html += `<div class="target-option" style="opacity: 0.5; pointer-events: none;">
+                    ${char.name} (Bench ${idx + 1}) - Tool already attached
+                </div>`;
+            }
         }
     });
 
@@ -3138,20 +3752,22 @@ function attachTool(toolId, target) {
     const character = target === 'active' ? player.active : player.bench[target];
     if (!character) return;
 
+    if (character.attachedTools && character.attachedTools.length > 0) {
+        alert(`${character.name} already has a tool attached.`);
+        return;
+    }
+
     if (!character.attachedTools) character.attachedTools = [];
     character.attachedTools.push(toolCard);
 
     // Apply tool effects
-    if (toolCard.grantStatus) {
-        if (!character.status) character.status = [];
-        if (!character.status.includes(toolCard.grantStatus)) {
-            character.status.push(toolCard.grantStatus);
+        if (toolCard.grantStatus) {
+            if (!character.status) character.status = [];
+            if (!character.status.includes(toolCard.grantStatus)) {
+                character.status.push(toolCard.grantStatus);
+            }
         }
-        if (toolCard.grantStatus === 'Goon') {
-            character.goonBonusHp = (character.goonBonusHp || 0) + 20;
-            character.hp += 20;
-        }
-    }
+        syncStatusDerivedStatsForCharacter(character);
 
     if (toolCard.addType) {
         if (!character.type.includes(toolCard.addType)) {
@@ -3175,11 +3791,7 @@ function removeToolEffects(character, tool) {
     }
 
     if (tool.grantStatus === 'Goon') {
-        character.goonBonusHp = Math.max(0, (character.goonBonusHp || 0) - 20);
-        character.hp = Math.max(1, character.hp - 20);
-        if (character.goonBonusHp === 0) {
-            delete character.goonMusicStandBonus;
-        }
+        syncStatusDerivedStatsForCharacter(character);
         if (character.damage != null && character.damage >= character.hp) {
             game.knockOut(character);
         }
@@ -3193,10 +3805,13 @@ function removeToolEffects(character, tool) {
 
 // Hand reveal modal for disruption cards
 function showHandRevealModal(opponent, count, playerChooses) {
+    // Accept opponent as object or number
+    const opponentNum = (typeof opponent === 'number') ? opponent : (game.players[1] === opponent ? 1 : 2);
+    if (!openModalForPlayer(multiplayer.playerNumber || game.currentPlayer, 'showHandRevealModal', [opponentNum, count, !!playerChooses])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
-    const revealedCards = opponent.hand.slice(0, count);
+    const revealedCards = game.players[opponentNum].hand.slice(0, count);
 
     let html = `<h2>Opponent's Hand (${count} cards)</h2>`;
     html += `<p>Choose one to discard</p>`;
@@ -3215,7 +3830,8 @@ function showHandRevealModal(opponent, count, playerChooses) {
     modal.classList.remove('hidden');
 }
 
-function showOpponentHandDiscardModal(opponentNum, sourceItemName) {
+function showOpponentHandDiscardModal(opponentNum, sourceItemName, chooserNum = game.currentPlayer) {
+    if (!openModalForPlayer(chooserNum, 'showOpponentHandDiscardModal', [opponentNum, sourceItemName, chooserNum])) return;
     const opponent = game.players[opponentNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
@@ -3243,7 +3859,8 @@ function showOpponentHandDiscardModal(opponentNum, sourceItemName) {
     modal.classList.remove('hidden');
 }
 
-function showOpponentHandShuffleModal(opponentNum, maxSelect, sourceItemName) {
+function showOpponentHandShuffleModal(opponentNum, maxSelect, sourceItemName, chooserNum = game.currentPlayer) {
+    if (!openModalForPlayer(chooserNum, 'showOpponentHandShuffleModal', [opponentNum, maxSelect, sourceItemName, chooserNum])) return;
     const opponent = game.players[opponentNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
@@ -3356,14 +3973,17 @@ function confirmOpponentHandSelection() {
 }
 
 function showConcertProgramModal(player) {
-    const topCards = player.deck.slice(0, Math.min(5, player.deck.length));
+    let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showConcertProgramModal', [playerNum])) return;
+    const topCards = game.players[playerNum].deck.slice(0, Math.min(5, game.players[playerNum].deck.length));
     if (topCards.length === 0) {
         game.log('Concert Program: No cards in deck', 'info');
-        const programCard = player.hand.find(c => c.name === 'Concert Program');
+        const programCard = game.players[playerNum].hand.find(c => c.name === 'Concert Program');
         if (programCard) {
-            player.hand = player.hand.filter(c => c.id !== programCard.id);
-            player.discard.push(programCard);
+            game.players[playerNum].hand = game.players[playerNum].hand.filter(c => c.id !== programCard.id);
+            game.players[playerNum].discard.push(programCard);
         }
+        closeModal('action-modal');
         updateUI();
         return;
     }
@@ -3403,7 +4023,9 @@ function finalizeConcertProgram() {
         player.hand = player.hand.filter(c => c.id !== programCard.id);
         player.discard.push(programCard);
     }
-    delete game.tempSelections.concertProgramTop;
+    if (game.tempSelections) {
+        delete game.tempSelections.concertProgramTop;
+    }
     closeModal('action-modal');
     updateUI();
 }
@@ -3433,10 +4055,12 @@ function confirmConcertProgramSkip() {
 }
 
 function showCastReserveSelectionModal(player) {
+    let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showCastReserveSelectionModal', [playerNum])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
-    const items = player.deck.filter(c => c.cardType === 'item');
+    const items = game.players[playerNum].deck.filter(c => c.cardType === 'item');
     if (items.length === 0) {
         game.log('Cast Reserve: No items in deck', 'info');
         const castCard = player.hand.find(c => c.name === 'Cast Reserve');
@@ -3523,16 +4147,7 @@ function confirmCastReserveSelection() {
 }
 
 function showCastReserveOpponentChoice(itemData, opponentNum) {
-    if (multiplayer.enabled) {
-        if (!multiplayer.isApplyingRemote) {
-            sendMultiplayerAction('showCastReserveOpponentChoice', [itemData, opponentNum]);
-            if (multiplayer.playerNumber !== opponentNum) {
-                return;
-            }
-        } else if (multiplayer.playerNumber !== opponentNum) {
-            return;
-        }
-    }
+    if (!openModalForPlayer(opponentNum, 'showCastReserveOpponentChoice', [itemData, opponentNum])) return;
 
     if (!game.tempSelections) game.tempSelections = {};
     game.tempSelections.castReserveItemData = itemData;
@@ -3586,17 +4201,27 @@ function confirmCastReserveOpponentChoice(itemId) {
 }
 
 function showStadiumSearchModal(player) {
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showStadiumSearchModal', [playerNum])) return;
+    const playerObj = game.players[playerNum];
+    if (!playerObj) return;
+
+    if (!game.tempSelections) game.tempSelections = {};
+    game.tempSelections.stadiumSearchPlayer = playerNum;
+
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
-    const stadiums = player.deck.filter(c => c.cardType === 'stadium');
+    const stadiums = playerObj.deck.filter(c => c.cardType === 'stadium');
     if (stadiums.length === 0) {
         game.log('No stadiums in deck', 'info');
-        const baiCard = player.hand.find(c => c.name === 'BAI Email');
+        const baiCard = playerObj.hand.find(c => c.name === 'BAI Email');
         if (baiCard) {
-            player.hand = player.hand.filter(c => c.id !== baiCard.id);
-            player.discard.push(baiCard);
+            playerObj.hand = playerObj.hand.filter(c => c.id !== baiCard.id);
+            playerObj.discard.push(baiCard);
         }
+        delete game.tempSelections.stadiumSearchPlayer;
+        closeModal('action-modal');
         updateUI();
         return;
     }
@@ -3606,7 +4231,7 @@ function showStadiumSearchModal(player) {
     html += `<div class="target-selection">`;
 
     stadiums.forEach(card => {
-        html += `<div class="target-option" onclick="selectStadiumSearch('${card.id}')">${card.name}</div>`;
+        html += `<div class="target-option" onclick="selectStadiumSearch('${card.id}', ${playerNum})">${card.name}</div>`;
     });
 
     html += `</div>`;
@@ -3616,13 +4241,15 @@ function showStadiumSearchModal(player) {
     modal.classList.remove('hidden');
 }
 
-function selectStadiumSearch(cardId) {
-    const player = game.players[game.currentPlayer];
+function selectStadiumSearch(cardId, playerNum = null) {
+    const resolvedPlayerNum = playerNum || (game.tempSelections && game.tempSelections.stadiumSearchPlayer) || game.currentPlayer;
+    const player = game.players[resolvedPlayerNum];
+    if (!player) return;
     const card = player.deck.find(c => c.id === cardId);
     if (card) {
         player.hand.push(card);
         player.deck = player.deck.filter(c => c.id !== cardId);
-        game.shuffleDeck(game.currentPlayer);
+        game.shuffleDeck(resolvedPlayerNum);
         game.log(`BAI Email: Added ${card.name} to hand`, 'info');
     }
 
@@ -3630,6 +4257,10 @@ function selectStadiumSearch(cardId) {
     if (baiCard) {
         player.hand = player.hand.filter(c => c.id !== baiCard.id);
         player.discard.push(baiCard);
+    }
+
+    if (game.tempSelections) {
+        delete game.tempSelections.stadiumSearchPlayer;
     }
 
     closeModal('action-modal');
@@ -3661,15 +4292,11 @@ function discardOpponentCard(cardId) {
 
 // Show modal for opponent to choose which cards to discard from their own hand
 function showOpponentDiscardChoice(opponentNum, discardCount, callback, options = {}) {
-    if (multiplayer.enabled && !multiplayer.isApplyingRemote) {
-        sendMultiplayerAction('showOpponentDiscardChoice', [opponentNum, discardCount, null, {
-            pendingEndTurn: !!options.pendingEndTurn,
-            logMessage: options.logMessage || null
-        }]);
-        if (multiplayer.playerNumber !== opponentNum) {
-            return;
-        }
-    }
+    // Gate interactive discard choice to the opponent player in multiplayer
+    if (!openModalForPlayer(opponentNum, 'showOpponentDiscardChoice', [opponentNum, discardCount, null, {
+        pendingEndTurn: !!options.pendingEndTurn,
+        logMessage: options.logMessage || null
+    }])) return;
 
     const opponent = game.players[opponentNum];
     const modal = document.getElementById('action-modal');
@@ -3702,11 +4329,21 @@ function showOpponentDiscardChoice(opponentNum, discardCount, callback, options 
 }
 
 function toggleOpponentDiscardCard(cardId) {
-    if (!game.tempSelections) return;
+    if (!game.tempSelections) {
+        game.tempSelections = {};
+    }
+    if (!Array.isArray(game.tempSelections.opponentDiscardCards)) {
+        game.tempSelections.opponentDiscardCards = [];
+    }
 
     const selectedCards = game.tempSelections.opponentDiscardCards;
-    const maxCount = game.tempSelections.opponentDiscardCount;
+    const maxCount = Number(game.tempSelections.opponentDiscardCount || 0);
+    if (!maxCount) {
+        game.log('Discard selection expired. Re-open the modal and try again.', 'warning');
+        return;
+    }
     const cardElement = document.getElementById(`opp-discard-${cardId}`);
+    if (!cardElement) return;
 
     if (selectedCards.includes(cardId)) {
         // Deselect
@@ -3783,8 +4420,9 @@ function confirmOpponentDiscard() {
 
 // Annotated score modal
 function showAnnotatedScoreModal(opponent) {
-    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
-    const topTwo = opponent.deck.slice(0, 2);
+    const opponentNum = (typeof opponent === 'number') ? opponent : (game.players[1] === opponent ? 1 : 2);
+    if (!openModalForPlayer(game.currentPlayer, 'showAnnotatedScoreModal', [opponentNum])) return;
+    const topTwo = game.players[opponentNum].deck.slice(0, 2);
 
     // Initialize tracking for annotated score
     if (!game.tempSelections) game.tempSelections = {};
@@ -3796,6 +4434,7 @@ function showAnnotatedScoreModal(opponent) {
 }
 
 function showAnnotatedCardChoice() {
+    if (!openModalForPlayer(game.currentPlayer, 'showAnnotatedCardChoice', [])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -3873,6 +4512,11 @@ function applyAnnotatedScoreChoices() {
 
 // Bench shuffle modal
 function showBenchShuffleModal(opponent, playerChooses) {
+    // opponent may be object or number
+    const opponentNum = (typeof opponent === 'number') ? opponent : (game.players[1] === opponent ? 1 : 2);
+    // If chooser is the player, gate to current player; else gate to opponent
+    const target = playerChooses ? game.currentPlayer : opponentNum;
+    if (!openModalForPlayer(target, 'showBenchShuffleModal', [opponentNum, !!playerChooses])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -3880,9 +4524,10 @@ function showBenchShuffleModal(opponent, playerChooses) {
     html += `<p>Select benched character to shuffle into deck</p>`;
     html += `<div class="target-selection">`;
 
-    opponent.bench.forEach((char, idx) => {
+    const opponentObj = game.players[opponentNum];
+    opponentObj.bench.forEach((char, idx) => {
         if (char) {
-            html += `<div class="target-option" onclick="shuffleBenchIntoDeck(${game.currentPlayer === 1 ? 2 : 1}, ${idx})">
+            html += `<div class="target-option" onclick="shuffleBenchIntoDeck(${opponentNum}, ${idx})">
                 ${char.name}
             </div>`;
         }
@@ -3912,6 +4557,8 @@ function shuffleBenchIntoDeck(playerNum, benchIndex) {
 
 // Opponent switch modal
 function showOpponentSwitchModal(opponent) {
+    const opponentNum = (typeof opponent === 'number') ? opponent : (game.players[1] === opponent ? 1 : 2);
+    if (!openModalForPlayer(opponentNum, 'showOpponentSwitchModal', [opponentNum])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -3919,8 +4566,8 @@ function showOpponentSwitchModal(opponent) {
     html += `<p>Select benched character to switch with active</p>`;
     html += `<div class="target-selection">`;
 
-    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
-    opponent.bench.forEach((char, idx) => {
+    const opponentObj = game.players[opponentNum];
+    opponentObj.bench.forEach((char, idx) => {
         if (char) {
             html += `<div class="target-option" onclick="forceOpponentSwitch(${opponentNum}, ${idx})">
                 ${char.name}
@@ -3960,6 +4607,26 @@ function forceOpponentSwitch(opponentNum, benchIndex) {
 
 // Friedman Hall: Opponent chooses which card to keep
 function showFriedmanHallChoice(cards) {
+    // Opponent chooses which card to keep. Gate to opponent in multiplayer and send ids.
+    const opponentNum = (game.currentPlayer === 1 ? 2 : 1);
+    const cardDisplayPayload = Array.isArray(cards)
+        ? cards.map(c => (typeof c === 'string'
+            ? { id: c, name: c, cardType: '' }
+            : { id: c.id, name: c.name, cardType: c.cardType || '' }))
+        : [];
+    if (!openModalForPlayer(opponentNum, 'showFriedmanHallChoice', [cardDisplayPayload, opponentNum])) return;
+
+    // Reconstruct cards if applied remotely
+    if (Array.isArray(cardDisplayPayload) && cardDisplayPayload.length > 0) {
+        const staged = (game.tempSelections && Array.isArray(game.tempSelections.friedmanCards))
+            ? game.tempSelections.friedmanCards
+            : [];
+        cards = cardDisplayPayload.map(displayCard => {
+            const fromStage = staged.find(c => c && c.id === displayCard.id);
+            return fromStage || displayCard;
+        });
+    }
+
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -3969,7 +4636,7 @@ function showFriedmanHallChoice(cards) {
 
     cards.forEach((card, idx) => {
         html += `<div class="target-option" onclick="chooseFriedmanCard(${idx})">
-            ${card.name} (${card.cardType})
+            ${card.name} (${card.cardType || ''})
         </div>`;
     });
 
@@ -3991,6 +4658,7 @@ function queueSteinertPracticeDiscards(playerOrder) {
 }
 
 function showSteinertPracticeDiscardModal(playerNum) {
+    if (!openModalForPlayer(playerNum, 'showSteinertPracticeDiscardModal', [playerNum])) return;
     const player = game.players[playerNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
@@ -4059,6 +4727,10 @@ function chooseFriedmanCard(cardIndex) {
 
 // Full heal modal for Raffle Ticket
 function showFullHealModal(player) {
+    // Accept player object or player number and gate to that player
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showFullHealModal', [playerNum])) return;
+    const playerObj = game.players[playerNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -4066,13 +4738,13 @@ function showFullHealModal(player) {
     html += `<p>Choose a character to heal all damage</p>`;
     html += `<div class="target-selection">`;
 
-    if (player.active) {
+    if (playerObj.active) {
         html += `<div class="target-option" onclick="fullHealCharacter('active')">
-            ${player.active.name} (${player.active.damage || 0} damage)
+            ${playerObj.active.name} (${playerObj.active.damage || 0} damage)
         </div>`;
     }
 
-    player.bench.forEach((char, idx) => {
+    playerObj.bench.forEach((char, idx) => {
         if (char) {
             html += `<div class="target-option" onclick="fullHealCharacter(${idx})">
                 ${char.name} (${char.damage || 0} damage)
@@ -4109,17 +4781,28 @@ function fullHealCharacter(target) {
 
 // Camera: Choose up to 2 supporters from discard to shuffle into deck
 function showCameraModal(player, supporters) {
-    const modal = document.getElementById('action-modal');
-    const content = document.getElementById('action-content');
+    // Gate to player and serialize supporters by id for multiplayer
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    const supporterIds = Array.isArray(supporters) ? supporters.map(s => s && s.id ? s.id : s) : [];
+    if (!openModalForPlayer(playerNum, 'showCameraModal', [playerNum, supporterIds])) return;
 
     if (!game.tempSelections) game.tempSelections = {};
     if (!game.tempSelections.cameraSelections) game.tempSelections.cameraSelections = [];
+
+    // Reconstruct supporters list if called remotely
+    const playerObj = game.players[playerNum];
+    const supportersList = Array.isArray(supporterIds) && typeof supporterIds[0] === 'string'
+        ? supporterIds.map(id => playerObj.discard.find(c => c.id === id)).filter(Boolean)
+        : (supporters || []);
+
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
 
     let html = `<h2>Camera</h2>`;
     html += `<p>Choose 1 supporter to shuffle into deck (${game.tempSelections.cameraSelections.length}/1 selected)</p>`;
     html += `<div class="target-selection">`;
 
-    supporters.forEach((supporter, idx) => {
+    supportersList.forEach((supporter, idx) => {
         const isSelected = game.tempSelections.cameraSelections.includes(supporter.id);
         const selectedClass = isSelected ? 'selected' : '';
         html += `<div class="target-option ${selectedClass}" onclick="toggleCameraSelection('${supporter.id}')">
@@ -4184,10 +4867,14 @@ function confirmCameraSelection() {
 
 // Character search modal
 function showCharacterSearchModal(player, searchType) {
+    // Gate to player and serialize args for multiplayer
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showCharacterSearchModal', [playerNum, searchType])) return;
+    const playerObj = game.players[playerNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
-    let eligibleCharacters = player.deck.filter(c => c.cardType === 'character');
+    let eligibleCharacters = playerObj.deck.filter(c => c.cardType === 'character');
 
     if (searchType === 'low-hp') {
         eligibleCharacters = eligibleCharacters.filter(c => c.hp <= 100);
@@ -4242,6 +4929,9 @@ function selectSearchedCharacter(charId) {
 
 // Strawberry Matcha Latte: Heal selection modal
 function showHealSelectionModal(player, healAmount) {
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showHealSelectionModal', [playerNum, healAmount])) return;
+    const playerObj = game.players[playerNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -4249,13 +4939,13 @@ function showHealSelectionModal(player, healAmount) {
     html += `<p>Choose a character to heal ${healAmount} HP</p>`;
     html += `<div class="target-selection">`;
 
-    if (player.active) {
+    if (playerObj.active) {
         html += `<div class="target-option" onclick="healSelectedCharacter('active', ${healAmount})">
-            ${player.active.name} (${player.active.damage || 0} damage)
+            ${playerObj.active.name} (${playerObj.active.damage || 0} damage)
         </div>`;
     }
 
-    player.bench.forEach((char, idx) => {
+    playerObj.bench.forEach((char, idx) => {
         if (char) {
             html += `<div class="target-option" onclick="healSelectedCharacter(${idx}, ${healAmount})">
                 ${char.name} (${char.damage || 0} damage)
@@ -4292,10 +4982,10 @@ function healSelectedCharacter(target, healAmount) {
 
 // Folding Stand: Energy shuffle modal
 function showFoldingStandModal(player) {
-    const modal = document.getElementById('action-modal');
-    const content = document.getElementById('action-content');
-
-    const energyCards = player.discard.filter(c => c.cardType === 'energy');
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showFoldingStandModal', [playerNum])) return;
+    const playerObj = game.players[playerNum];
+    const energyCards = playerObj.discard.filter(c => c.cardType === 'energy');
     if (energyCards.length === 0) {
         alert('No energy cards in discard pile!');
         closeModal('action-modal');
@@ -4304,6 +4994,9 @@ function showFoldingStandModal(player) {
 
     if (!game.tempSelections) game.tempSelections = {};
     game.tempSelections.foldingStandSelected = [];
+
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
 
     let html = `<h2>Folding Stand</h2>`;
     html += `<p>Select up to 3 energy cards to shuffle into your deck</p>`;
@@ -4325,8 +5018,9 @@ function showFoldingStandModal(player) {
 
 // BUO Stand: Energy placement modal
 function showBUOStandModal(player) {
-    const modal = document.getElementById('action-modal');
-    const content = document.getElementById('action-content');
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showBUOStandModal', [playerNum])) return;
+    const playerObj = game.players[playerNum];
 
     if (!game.tempSelections) game.tempSelections = {};
     game.tempSelections.buoStandTop = null;
@@ -4337,7 +5031,7 @@ function showBUOStandModal(player) {
     html += `<p id="buo-instruction">Select one energy from hand to put on TOP of deck</p>`;
     html += `<div id="buo-stand-selection">`;
 
-    player.hand.filter(c => c.cardType === 'energy').forEach(card => {
+    playerObj.hand.filter(c => c.cardType === 'energy').forEach(card => {
         html += `<div class="target-option" onclick="selectBUOStandCard('${card.id}')">
             ${card.name}
         </div>`;
@@ -4346,6 +5040,8 @@ function showBUOStandModal(player) {
     html += `</div>`;
     html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
 
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
     content.innerHTML = html;
     modal.classList.remove('hidden');
 }
@@ -4449,8 +5145,62 @@ function applyMusicStandUse(playerNum) {
     });
 }
 
+function showForcedActiveSwitchModal(player) {
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showForcedActiveSwitchModal', [playerNum])) return;
+
+    const playerObj = game.players[playerNum];
+    if (!playerObj) return;
+    const availableBench = playerObj.bench
+        .map((char, idx) => ({ char, idx }))
+        .filter(entry => !!entry.char);
+    if (availableBench.length === 0) return;
+
+    if (!game.tempSelections) game.tempSelections = {};
+    game.tempSelections.forcedActiveSwitchPlayer = playerNum;
+
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = `<h2>Choose New Active Character</h2>`;
+    html += `<p>Your active slot is empty. Select a benched character to become active.</p>`;
+    html += `<div class="target-selection">`;
+    availableBench.forEach(({ char, idx }) => {
+        html += `<div class="target-option" onclick="confirmForcedActiveSwitch(${playerNum}, ${idx})">${char.name}</div>`;
+    });
+    html += `</div>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function confirmForcedActiveSwitch(playerNum, benchIndex) {
+    const playerObj = game.players[playerNum];
+    if (!playerObj || playerObj.active || !playerObj.bench[benchIndex]) return;
+
+    const chosen = playerObj.bench[benchIndex];
+    playerObj.bench[benchIndex] = null;
+    playerObj.active = chosen;
+    game.log(`Player ${playerNum} promoted ${chosen.name} from bench to active.`, 'info');
+
+    if (game.tempSelections) {
+        delete game.tempSelections.forcedActiveSwitchPlayer;
+    }
+
+    closeModal('action-modal');
+    updateUI();
+
+    if (multiplayer.enabled && !multiplayer.isApplyingRemote) {
+        // Belt-and-suspenders sync for forced replacement so the waiting player is always released.
+        sendMultiplayerAction('STATE_SNAPSHOT', []);
+    }
+}
+
 // Ice Skates: Player switch modal
 function showPlayerSwitchModal(player) {
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showPlayerSwitchModal', [playerNum])) return;
+    const playerObj = game.players[playerNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -4458,7 +5208,7 @@ function showPlayerSwitchModal(player) {
     html += `<p>Select a benched character to switch with your active</p>`;
     html += `<div class="target-selection">`;
 
-    player.bench.forEach((char, idx) => {
+    playerObj.bench.forEach((char, idx) => {
         if (char) {
             html += `<div class="target-option" onclick="switchWithBench(${idx})">
                 ${char.name}
@@ -4496,6 +5246,9 @@ function switchWithBench(benchIndex) {
 
 // Concert Roster: Character search and bench modal
 function showConcertRosterModal(player) {
+    let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showConcertRosterModal', [playerNum])) return;
+    player = game.players[playerNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -4562,6 +5315,9 @@ function selectConcertRosterCharacter(charId) {
 
 // Victoria Chen: Type selection modal
 function showVictoriaTypeSelectionModal(player) {
+    let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showVictoriaTypeSelectionModal', [playerNum])) return;
+    player = game.players[playerNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -4607,6 +5363,11 @@ function selectVictoriaType(chosenType) {
 }
 
 function showVictoriaCharacterSelectionModal(player, characters, type) {
+    let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    const charIds = Array.isArray(characters) ? characters.map(c => (typeof c === 'string' ? c : (c && c.id ? c.id : c))) : [];
+    if (!openModalForPlayer(playerNum, 'showVictoriaCharacterSelectionModal', [playerNum, charIds, type])) return;
+    player = game.players[playerNum];
+    characters = charIds.map(id => player.deck.find(c => c.id === id)).filter(Boolean);
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -4700,33 +5461,35 @@ function confirmVictoriaSelection() {
 
 // Lucas: Small Ensemble - Select up to 2 characters of different types
 function showLucasSelectionModal(player) {
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showLucasSelectionModal', [playerNum])) return;
+    const playerObj = game.players[playerNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
     // Get types currently on board (active + bench)
     const boardTypes = new Set();
-    if (player.active) {
-        player.active.type.forEach(t => boardTypes.add(t));
+    if (playerObj.active) {
+        playerObj.active.type.forEach(t => boardTypes.add(t));
     }
-    player.bench.forEach(char => {
+    playerObj.bench.forEach(char => {
         if (char) {
             char.type.forEach(t => boardTypes.add(t));
         }
     });
 
     // Find eligible characters (no shared types with board)
-    const eligibleChars = player.deck.filter(c => {
+    const eligibleChars = playerObj.deck.filter(c => {
         if (c.cardType !== 'character') return false;
-        // Check if this character shares any type with board
         return !c.type.some(t => boardTypes.has(t));
     });
 
     if (eligibleChars.length === 0) {
         game.log('No eligible characters in deck (all share types with board)', 'info');
-        const lucasCard = player.hand.find(c => c.name === 'Lucas');
+        const lucasCard = playerObj.hand.find(c => c.name === 'Lucas');
         if (lucasCard) {
-            player.hand = player.hand.filter(c => c.id !== lucasCard.id);
-            player.discard.push(lucasCard);
+            playerObj.hand = playerObj.hand.filter(c => c.id !== lucasCard.id);
+            playerObj.discard.push(lucasCard);
         }
         game.supporterPlayedThisTurn = true;
         updateUI();
@@ -4841,18 +5604,20 @@ function confirmLucasSelection() {
 
 // Energy selection from hand modal (for Vocal warmups, 440 Hz, etc.)
 function showHandEnergySelectionModal(player, targetChar, energyCards) {
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showHandEnergySelectionModal', [playerNum, targetChar && targetChar.id ? targetChar.id : targetChar, Array.isArray(energyCards)?energyCards.map(c=>c.id?c.id:c):[]])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
     if (!game.tempSelections) game.tempSelections = {};
-    game.tempSelections.energyPlayer = player;
+    game.tempSelections.energyPlayer = game.players[playerNum];
 
     let html = `<h2>Select Energy to Attach</h2>`;
     html += `<p>Choose an energy card from your hand to attach to ${targetChar.name}</p>`;
     html += `<div class="target-selection">`;
 
     energyCards.forEach(energy => {
-        html += `<div class="target-option" onclick="attachEnergyFromHand('${energy.id}', '${targetChar.id}')">
+        html += `<div class="target-option" onclick="attachEnergyFromHand('${energy.id}', '${targetChar.id}', ${game.currentPlayer})">
             ${energy.name}
         </div>`;
     });
@@ -4879,8 +5644,9 @@ function enforceBarronGetServed(affectedPlayerNum) {
     });
 }
 
-function attachEnergyFromHand(energyId, targetId) {
-    const player = game.players[game.currentPlayer];
+function attachEnergyFromHand(energyId, targetId, playerNumberOverride = null) {
+    const playerNum = playerNumberOverride || game.currentPlayer;
+    const player = game.players[playerNum];
     const energy = player.hand.find(c => c.id === energyId);
     const target = [player.active, ...player.bench].find(c => c && c.id === targetId);
 
@@ -4897,13 +5663,15 @@ function attachEnergyFromHand(energyId, targetId) {
 
 // 440 Hz: Select energy from hand and benched character to attach to
 function show440HzSelectionModal(player, energyCards, benchedChars) {
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'show440HzSelectionModal', [playerNum, Array.isArray(energyCards)?energyCards.map(c=>c.id?c.id:c):[], Array.isArray(benchedChars)?benchedChars.map(c=>c.id?c.id:c):[]])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
     if (!game.tempSelections) game.tempSelections = {};
     game.tempSelections.hz440Energy = null;
     game.tempSelections.hz440Target = null;
-    game.tempSelections.hz440Player = player;
+    game.tempSelections.hz440Player = game.players[playerNum];
 
     let html = `<h2>440 Hz - Select Target</h2>`;
     html += `<p>Select a benched character to attach 1 energy.</p>`;
@@ -4964,11 +5732,13 @@ function confirm440HzSelection() {
 
 // Arrangement procrastination: Switch active with benched character
 function showArrangementProcrastinationModal(player, benchChars) {
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showArrangementProcrastinationModal', [playerNum, Array.isArray(benchChars)?benchChars.map(c=>c.id?c.id:c):[]])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
     if (!game.tempSelections) game.tempSelections = {};
-    game.tempSelections.apPlayer = player;
+    game.tempSelections.apPlayer = game.players[playerNum];
 
     let html = `<h2>Arrangement Procrastination</h2>`;
     html += `<p>Switch your active character with a benched character</p>`;
@@ -5004,11 +5774,14 @@ function switchArrangementProcrastination(benchCharId) {
 
 // Percussion Ensemble: Attach up to 3 percussion energy to percussionists
 function showPercussionEnsembleModal(player, energyCards, percussionists) {
+    let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showPercussionEnsembleModal', [playerNum, Array.isArray(energyCards)?energyCards.map(e=> typeof e === 'string'? e : (e && e.id? e.id : e)) : [], Array.isArray(percussionists)?percussionists.map(c=> typeof c === 'string'? c : (c && c.id? c.id : c)) : []])) return;
     if (!game.tempSelections) game.tempSelections = {};
-    game.tempSelections.peEnergies = energyCards.map(e => e.id);
+    game.tempSelections.peEnergies = Array.isArray(energyCards)? energyCards.map(e=> typeof e === 'string'? e : (e && e.id? e.id : e)) : [];
     game.tempSelections.peIndex = 0;
-    game.tempSelections.pePlayer = player;
+    game.tempSelections.pePlayer = playerNum;
 
+    // Ensure percussionists passed into the follow-up function are ids (reconstruction happens in the attachment step)
     showPercussionEnsembleEnergyAttachment(percussionists);
 }
 
@@ -5080,6 +5853,9 @@ function skipPercussionEnsemble() {
 
 // SATB: Target selection for each choir character
 function showSATBTargetSelection(opponent) {
+    const opponentNum = (typeof opponent === 'number') ? opponent : (game.players[1] === opponent ? 1 : 2);
+    if (!openModalForPlayer(game.currentPlayer, 'showSATBTargetSelection', [opponentNum])) return;
+    if (typeof opponent === 'number') opponent = game.players[opponent];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -5138,10 +5914,14 @@ function selectSATBTarget(targetId) {
 
 // You know what it is: Select any opponent character for 70 damage
 function showYouKnowWhatItIsTargetSelection(opponent, attacker) {
+    let opponentNum = (typeof opponent === 'number') ? opponent : (game.players[1] === opponent ? 1 : 2);
+    if (!openModalForPlayer(game.currentPlayer, 'showYouKnowWhatItIsTargetSelection', [opponentNum, attacker && attacker.id ? attacker.id : attacker])) return;
+    if (typeof opponent === 'number') opponent = game.players[opponent];
+    if (typeof attacker === 'string') attacker = findCardById(attacker);
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
-    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    // Use the resolved opponentNum for the rest of the function
     const allOpponentChars = [opponent.active, ...opponent.bench].filter(c => c);
 
     let html = `<h2>You know what it is</h2>`;
@@ -5298,6 +6078,7 @@ function executeSupporterEffect(card) {
                 if (!char.status) char.status = [];
                 if (!char.status.includes('Goon')) {
                     char.status.push('Goon');
+                    syncStatusDerivedStatsForCharacter(char);
                     game.log(`${char.name} gained Goon status`, 'info');
                 }
             });
@@ -5406,6 +6187,19 @@ function playStadium(cardId) {
 function closeModal(modalId) {
     document.getElementById(modalId).classList.add('hidden');
 
+    if (
+        modalId === 'action-modal' &&
+        game.tempSelections &&
+        Number.isFinite(Number(game.tempSelections.forcedActiveSwitchPlayer))
+    ) {
+        const forcedPlayer = Number(game.tempSelections.forcedActiveSwitchPlayer);
+        const playerObj = game.players[forcedPlayer];
+        if (playerObj && !playerObj.active && playerObj.bench.some(c => c)) {
+            showForcedActiveSwitchModal(forcedPlayer);
+            return;
+        }
+    }
+
     if (modalId === 'action-modal' && game.tempSelections && game.tempSelections.photographTempItemId) {
         const player = game.players[game.currentPlayer];
         player.hand = player.hand.filter(c => c.id !== game.tempSelections.photographTempItemId);
@@ -5477,6 +6271,7 @@ function closeModal(modalId) {
 
 // Attack System
 function showAttackMenu(cardId) {
+    if (!openModalForPlayer(game.currentPlayer, 'showAttackMenu', [cardId])) return;
     const player = game.players[game.currentPlayer];
     const attacker = player.active;
 
@@ -5672,7 +6467,11 @@ function selectMove(cardId, moveIndex) {
 
     if (noTargetMoves.includes(move.name)) {
         // Execute attack without target (pass null for target)
-        executeAttack(attacker.id, move.name, null);
+        if (typeof window.executeAttack === 'function') {
+            window.executeAttack(attacker.id, move.name, null);
+        } else {
+            executeAttack(attacker.id, move.name, null);
+        }
     } else {
         // Show target selection for moves that need it
         showTargetSelection(attacker, move);
@@ -5680,9 +6479,13 @@ function selectMove(cardId, moveIndex) {
 }
 
 function showTargetSelection(attacker, move) {
+    // Owner of attacker should be the chooser
+    const attackerId = (attacker && attacker.id) ? attacker.id : attacker;
+    const ownerNum = (game.players[1].active && game.players[1].active.id === attackerId) || (game.players[1].bench.some(c=>c&&c.id===attackerId)) ? 1 : 2;
+    if (!openModalForPlayer(ownerNum, 'showTargetSelection', [attackerId, move.name])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
-    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const opponentNum = ownerNum === 1 ? 2 : 1;
     const opponent = game.players[opponentNum];
 
     // Check if this move can target bench (like Pokemon TCG, only certain movecans can)
@@ -5716,7 +6519,7 @@ function showTargetSelection(attacker, move) {
 
     const encodedMoveName = encodeURIComponent(move.name);
     targets.forEach((target) => {
-        html += `<button class="target-option action-btn" data-target-id="${target.id}" data-attacker-id="${attacker.id}" data-move-name="${encodedMoveName}" onclick="handleTargetSelection(this)" style="color: #000;">${target.label}</button>`;
+        html += `<button class="target-option action-btn" data-target-id="${target.id}" data-attacker-id="${attacker.id}" data-move-name="${encodedMoveName}" onclick="handleTargetSelection('${target.id}', '${attacker.id}', '${encodedMoveName}')" style="color: #000;">${target.label}</button>`;
     });
 
     html += `</div>`;
@@ -5726,19 +6529,45 @@ function showTargetSelection(attacker, move) {
     modal.classList.remove('hidden');
 }
 
-function handleTargetSelection(button) {
-    if (!button) return;
-    const targetId = button.getAttribute('data-target-id');
-    const attackerId = button.getAttribute('data-attacker-id');
-    const moveName = decodeURIComponent(button.getAttribute('data-move-name') || '');
-    executeAttack(attackerId, moveName, targetId);
+function handleTargetSelection(targetOrButton, attackerId, moveName) {
+    if (!targetOrButton) return;
+    let targetId = null;
+    let resolvedAttackerId = attackerId || null;
+    let resolvedMoveName = moveName || null;
+
+    if (typeof targetOrButton === 'string') {
+        targetId = targetOrButton;
+    } else if (targetOrButton instanceof HTMLElement) {
+        targetId = targetOrButton.getAttribute('data-target-id');
+        resolvedAttackerId = resolvedAttackerId || targetOrButton.getAttribute('data-attacker-id');
+        resolvedMoveName = resolvedMoveName || targetOrButton.getAttribute('data-move-name');
+    } else if (typeof targetOrButton === 'object') {
+        targetId = targetOrButton.targetId || targetOrButton['data-target-id'] || targetOrButton.id || null;
+        resolvedAttackerId = resolvedAttackerId || targetOrButton.attackerId || targetOrButton['data-attacker-id'] || null;
+        resolvedMoveName = resolvedMoveName || targetOrButton.moveName || targetOrButton['data-move-name'] || null;
+    }
+
+    if (!targetId || !resolvedAttackerId) return;
+    const decodedMoveName = decodeURIComponent(resolvedMoveName || '');
+    executeAttack(resolvedAttackerId, decodedMoveName, targetId);
 }
 
 function executeAttack(attackerId, moveName, targetId) {
-    const player = game.players[game.currentPlayer];
-    const attacker = player.active;
+    const attacker = [
+        game.players[1].active,
+        ...game.players[1].bench,
+        game.players[2].active,
+        ...game.players[2].bench
+    ].find(c => c && c.id === attackerId);
 
-    if (!game.playtestMode && game.attackedThisTurn) {
+    if (!attacker) {
+        return;
+    }
+
+    const attackerPlayerNum = game.findPlayerWithCharacter(attacker);
+    const player = attackerPlayerNum ? game.players[attackerPlayerNum] : game.players[game.currentPlayer];
+
+    if (!game.playtestMode && attackerPlayerNum === game.currentPlayer && game.attackedThisTurn) {
         game.log('You have already attacked this turn!', 'warning');
         closeModal('action-modal');
         updateUI();
@@ -5766,7 +6595,7 @@ function executeAttack(attackerId, moveName, targetId) {
     // Check Ross's moves if not found in attacker's moves
     if (!move) {
         const rossOnBench = player.bench.find(c => c && c.name === 'Ross Williams');
-        if (!abilitiesDisabledFor(game.currentPlayer) && rossOnBench && rossOnBench.moves) {
+        if (attackerPlayerNum && !abilitiesDisabledFor(attackerPlayerNum) && rossOnBench && rossOnBench.moves) {
             move = rossOnBench.moves.find(m => m.name === moveName);
         }
     }
@@ -5778,7 +6607,7 @@ function executeAttack(attackerId, moveName, targetId) {
     }
 
     // Find target (if targetId provided)
-    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const opponentNum = attackerPlayerNum ? (attackerPlayerNum === 1 ? 2 : 1) : (game.currentPlayer === 1 ? 2 : 1);
     const opponent = game.players[opponentNum];
     let target = null;
 
@@ -5798,7 +6627,7 @@ function executeAttack(attackerId, moveName, targetId) {
     }
 
     // Mark that an attack has been used this turn
-    if (!game.playtestMode) {
+    if (!game.playtestMode && attackerPlayerNum === game.currentPlayer) {
         game.attackedThisTurn = true;
     }
     game.lastAttackSource = attacker;
@@ -5806,6 +6635,9 @@ function executeAttack(attackerId, moveName, targetId) {
     // Execute specific attack effects by move name
     const waitForModal = performMoveEffect(attacker, target, move);
     if (waitForModal) {
+        if (multiplayer.enabled && multiplayer.isApplyingRemote) {
+            return;
+        }
         game.pendingAttackEndTurn = true;
         game.pendingAttackAttackerId = attacker.id;
         return;
@@ -5817,6 +6649,9 @@ function executeAttack(attackerId, moveName, targetId) {
     attacker.lastAttackTurn = game.turn;
     closeModal('action-modal');
     updateUI();
+    if (multiplayer.enabled && multiplayer.isApplyingRemote) {
+        return;
+    }
     endTurn();
 }
 
@@ -6101,6 +6936,7 @@ function calculateDamage(attacker, defender, baseDamage, move) {
 
 // Retreat and Switch
 function showRetreatMenu(cardId) {
+    if (!openModalForPlayer(game.currentPlayer, 'showRetreatMenu', [cardId])) return;
     const player = game.players[game.currentPlayer];
     const active = player.active;
 
@@ -6229,6 +7065,7 @@ function switchToActive(cardId) {
 }
 
 function showSwitchConfirmation(cardId, benchIndex, retreatCost) {
+    if (!openModalForPlayer(game.currentPlayer, 'showSwitchConfirmation', [cardId, benchIndex, retreatCost])) return;
     const player = game.players[game.currentPlayer];
     const active = player.active;
     const benchChar = player.bench[benchIndex];
@@ -6286,6 +7123,8 @@ function confirmSwitch(cardId, benchIndex, retreatCost) {
 }
 
 function showStickTrickSwapModal(player, benchChars) {
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showStickTrickSwapModal', [playerNum, Array.isArray(benchChars)?benchChars.map(c=>c.id?c.id:c):[]])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -6622,6 +7461,9 @@ function useCategoryTheoryFromHand(cardId) {
 }
 
 function showClericSpellModal(player) {
+    let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showClericSpellModal', [playerNum])) return;
+    player = game.players[playerNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -6679,6 +7521,12 @@ function executeClericSpell(cardIdx) {
 }
 
 function showProgramProductionModal(player, cards) {
+    let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    const cardIds = Array.isArray(cards) ? cards.map(c => (typeof c === 'string' ? c : (c && c.id ? c.id : c))) : [];
+    if (!openModalForPlayer(playerNum, 'showProgramProductionModal', [playerNum, cardIds])) return;
+    player = game.players[playerNum];
+    // Reconstruct cards array if called remotely
+    cards = cardIds.map(id => player.discard.find(c => c.id === id)).filter(Boolean);
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -6718,6 +7566,9 @@ function executeProgramProduction(cardIdx) {
 }
 
 function showBAIWranglerBottomModal(player) {
+    let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showBAIWranglerBottomModal', [playerNum])) return;
+    player = game.players[playerNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -6765,6 +7616,7 @@ function executeBAIWranglerBottom(cardIdx) {
 
 
 function showToolSelectionForDiscard(card) {
+    if (!openModalForPlayer(game.currentPlayer, 'showToolSelectionForDiscard', [card && card.id ? card.id : card])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -6784,6 +7636,7 @@ function showToolSelectionForDiscard(card) {
 }
 
 function showProfitMarginsPreAttack(attacker) {
+    if (!openModalForPlayer(game.currentPlayer, 'showProfitMarginsPreAttack', [attacker && attacker.id ? attacker.id : attacker])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -6861,6 +7714,20 @@ function setupEventListeners() {
     eventListenersInitialized = true;
     setupKeyboardShortcuts();
 
+    const mainGameArea = document.getElementById('main-game-area');
+    if (mainGameArea) {
+        mainGameArea.addEventListener('click', (event) => {
+            const cardEl = event.target.closest('.card-slot.occupied .card');
+            if (!cardEl) return;
+            if (cardEl.closest('#hand-cards')) return;
+            const cardId = cardEl.getAttribute('data-card-id');
+            const card = findCardById(cardId);
+            if (card) {
+                selectCard(card);
+            }
+        });
+    }
+
     // End turn button
     document.getElementById('end-turn-btn').addEventListener('click', () => {
         endTurnAction();
@@ -6930,6 +7797,7 @@ function endTurnInternal() {
             if (discardCount > 0) {
                 game.tempSelections = game.tempSelections || {};
                 game.tempSelections.pendingEndTurn = true;
+                // Current player must discard to match Alice Wang owner's hand size
                 showOpponentDiscardChoice(currentPlayerNum, discardCount, null, {
                     pendingEndTurn: true,
                     logMessage: `Alice Wang's Euclidean Algorithm: Player ${currentPlayerNum} discarded ${discardCount} cards to equalize hand sizes`
@@ -6953,6 +7821,7 @@ let hotkeysInitialized = false;
 let tabShortcutOverlayVisible = false;
 
 function showKeyboardShortcutsOverlay() {
+    if (!openModalForPlayer(game.currentPlayer, 'showKeyboardShortcutsOverlay', [])) return;
     const overlay = document.getElementById('keyboard-shortcuts-overlay');
     if (!overlay) return;
     overlay.classList.remove('hidden');
@@ -7134,22 +8003,38 @@ function attachEnergyHotkey() {
     const selected = game.selectedCard;
     if (selected && selected.cardType === 'character') {
         if (player.active && player.active.id === selected.id) {
-            attachEnergy('active');
+            if (typeof window.attachEnergy === 'function') {
+                window.attachEnergy('active', game.currentPlayer);
+            } else {
+                attachEnergy('active', game.currentPlayer);
+            }
             return;
         }
         const selectedBenchIndex = player.bench.findIndex(c => c && c.id === selected.id);
         if (selectedBenchIndex !== -1) {
-            attachEnergy(selectedBenchIndex);
+            if (typeof window.attachEnergy === 'function') {
+                window.attachEnergy(selectedBenchIndex, game.currentPlayer);
+            } else {
+                attachEnergy(selectedBenchIndex, game.currentPlayer);
+            }
             return;
         }
     }
     if (player.active) {
-        attachEnergy('active');
+        if (typeof window.attachEnergy === 'function') {
+            window.attachEnergy('active', game.currentPlayer);
+        } else {
+            attachEnergy('active', game.currentPlayer);
+        }
         return;
     }
     const benchIndex = player.bench.findIndex(c => c);
     if (benchIndex !== -1) {
-        attachEnergy(benchIndex);
+        if (typeof window.attachEnergy === 'function') {
+            window.attachEnergy(benchIndex, game.currentPlayer);
+        } else {
+            attachEnergy(benchIndex, game.currentPlayer);
+        }
     }
 }
 
@@ -7183,7 +8068,13 @@ function endTurnAction() {
         if (!canCurrentClientAct()) {
             return;
         }
-        sendMultiplayerAction('endTurnAction', []);
+        const beforePlayer = game.currentPlayer;
+        const beforeTurn = game.turn;
+        endTurnInternal();
+        const turnProgressed = game.currentPlayer !== beforePlayer || game.turn !== beforeTurn;
+        if (turnProgressed) {
+            sendMultiplayerAction('endTurnAction', []);
+        }
         return;
     }
 
@@ -7206,6 +8097,24 @@ function setupStartScreen() {
     const playtestToggle = document.getElementById('playtest-mode-toggle');
     const multiplayerToggle = document.getElementById('multiplayer-toggle');
     const multiplayerRoomInput = document.getElementById('multiplayer-room');
+    const copyRoomCodeBtn = document.getElementById('copy-room-code-btn');
+
+    function updateMultiplayerDeckUI() {
+        const multiplayerOn = !!(multiplayerToggle && multiplayerToggle.checked);
+        if (player2Select) {
+            player2Select.disabled = multiplayerOn;
+            player2Select.style.opacity = multiplayerOn ? '0.6' : '1';
+        }
+        if (multiplayerRoomInput) {
+            multiplayerRoomInput.placeholder = multiplayerOn
+                ? 'Enter 4-digit code to join (leave empty to create)'
+                : 'Room code';
+        }
+        if (copyRoomCodeBtn) {
+            copyRoomCodeBtn.disabled = !multiplayerOn;
+        }
+        setMultiplayerLobbyStatus(multiplayerOn ? 'Multiplayer on. Enter a 4-digit code to join, or leave blank to create one.' : 'Multiplayer off');
+    }
 
     // Update deck descriptions when selection changes
     player1Select.addEventListener('change', () => {
@@ -7224,20 +8133,55 @@ function setupStartScreen() {
         }
     });
 
+    if (multiplayerToggle) {
+        multiplayerToggle.addEventListener('change', updateMultiplayerDeckUI);
+    }
+    if (multiplayerRoomInput) {
+        multiplayerRoomInput.addEventListener('input', () => {
+            multiplayerRoomInput.value = normalizeRoomCodeInput(multiplayerRoomInput.value);
+        });
+    }
+    if (copyRoomCodeBtn) {
+        copyRoomCodeBtn.addEventListener('click', async () => {
+            const roomCode = (multiplayerRoomInput?.value || '').trim();
+            if (!roomCode) {
+                setMultiplayerLobbyStatus('No room code to copy yet.', 'warning');
+                return;
+            }
+            try {
+                await navigator.clipboard.writeText(roomCode);
+                setMultiplayerLobbyStatus(`Copied room code ${roomCode}.`, 'success');
+            } catch (error) {
+                setMultiplayerLobbyStatus('Unable to copy room code. Copy manually.', 'error');
+            }
+        });
+    }
+    updateMultiplayerDeckUI();
+    refreshMultiplayerPlayerIdentityDisplay();
+
     // Start game button
     startButton.addEventListener('click', () => {
         const deck1Name = player1Select.value;
         const deck2Name = player2Select.value;
         const playtestMode = playtestToggle ? playtestToggle.checked : false;
-        const roomId = (multiplayerRoomInput?.value || '').trim() || 'default';
+        const roomId = normalizeRoomCodeInput((multiplayerRoomInput?.value || '').trim());
 
         // Hide start screen and show game
         startScreen.classList.add('hidden');
         gameContainer.classList.remove('hidden');
 
         if (multiplayerToggle?.checked) {
-            connectMultiplayer({ roomId, deck1Name, deck2Name, playtestMode });
+            setMultiplayerLobbyStatus('Connecting...', 'warning');
+            connectMultiplayer({ roomId, deckName: deck1Name, playtestMode });
         } else {
+        multiplayer.enabled = false;
+        multiplayer.roomId = null;
+        multiplayer.playerNumber = null;
+        multiplayer.hasShownInitialStartLogs = false;
+        clearPendingRemotePromptLock();
+            refreshInGameRoomCodeDisplay();
+            refreshMultiplayerPlayerIdentityDisplay();
+            updateRemotePromptOverlay();
             initGame(deck1Name, deck2Name, playtestMode);
         }
     });
@@ -7631,6 +8575,7 @@ function exportDeck() {
 }
 
 function showExportModal(code, deckName) {
+    if (!openModalForPlayer(game.currentPlayer, 'showExportModal', [code, deckName])) return;
     const modal = document.getElementById('deck-code-modal');
     const content = document.getElementById('deck-code-content');
 
@@ -7819,6 +8764,8 @@ function rollD6() {
 // ===== MODAL FUNCTIONS FOR NEW MOVES =====
 
 function showDrainHealSelection(player, benchedChars, healAmount) {
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showDrainHealSelection', [playerNum, Array.isArray(benchedChars)?benchedChars.map(c=> typeof c === 'string'? c : (c && c.id? c.id : c)) : [], healAmount])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -7852,6 +8799,8 @@ function applyDrainHeal(charId, healAmount) {
 }
 
 function showCherryHealSelection(player, benchedChars, healAmount) {
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showCherryHealSelection', [playerNum, Array.isArray(benchedChars)?benchedChars.map(c=> typeof c === 'string'? c : (c && c.id? c.id : c)) : [], healAmount])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -7886,6 +8835,9 @@ function applyCherryHeal(charId, healAmount) {
 }
 
 function showEmbouchureSelection(player) {
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showEmbouchureSelection', [playerNum])) return;
+    if (typeof player === 'number') player = game.players[player];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -8020,6 +8972,9 @@ function completeEmbouchure(targetId) {
 }
 
 function showDrumKidWorkshopSelection(percussionChars, attacker, target) {
+    const attackerId = attacker && attacker.id ? attacker.id : attacker;
+    const ownerNum = (game.players[1].active && game.players[1].active.id === attackerId) || (game.players[1].bench.some(c=>c&&c.id===attackerId)) ? 1 : 2;
+    if (!openModalForPlayer(ownerNum, 'showDrumKidWorkshopSelection', [Array.isArray(percussionChars)?percussionChars.map(c=>c.id?c.id:c):[], attackerId, target && target.id?target.id:target])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -8042,6 +8997,7 @@ function showDrumKidWorkshopSelection(percussionChars, attacker, target) {
 }
 
 function showDrumKidWorkshopMoves(sourceId, attackerId) {
+    if (!openModalForPlayer(game.currentPlayer, 'showDrumKidWorkshopMoves', [sourceId, attackerId])) return;
     const allChars = [
         ...game.players[1].active ? [game.players[1].active] : [],
         ...game.players[1].bench.filter(c => c),
@@ -8074,6 +9030,7 @@ function showDrumKidWorkshopMoves(sourceId, attackerId) {
 }
 
 function showDrumKidWorkshopTargetSelection(sourceId, attackerId, moveIndex) {
+    if (!openModalForPlayer(game.currentPlayer, 'showDrumKidWorkshopTargetSelection', [sourceId, attackerId, moveIndex])) return;
     const opponentNum = game.currentPlayer === 1 ? 2 : 1;
     const opponent = game.players[opponentNum];
 
@@ -8190,8 +9147,11 @@ function executeDrumKidWorkshop(sourceId, attackerId, targetId, moveIndex = 0) {
 }
 
 function showTrickyRhythmsModal(attacker, target, move) {
-    const player = game.players[game.currentPlayer];
-    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const attackerId = attacker && attacker.id ? attacker.id : attacker;
+    const ownerNum = (game.players[1].active && game.players[1].active.id === attackerId) || (game.players[1].bench.some(c=>c&&c.id===attackerId)) ? 1 : 2;
+    if (!openModalForPlayer(ownerNum, 'showTrickyRhythmsModal', [attackerId, target && target.id ? target.id : target, move ? move.name : null])) return;
+    const player = game.players[ownerNum];
+    const opponentNum = ownerNum === 1 ? 2 : 1;
     const opponent = game.players[opponentNum];
 
     const modal = document.getElementById('action-modal');
@@ -8241,6 +9201,8 @@ function executeTrickyRhythms(discardCount, targetId) {
 }
 
 function showRacketSmashSelection(player, benchChars) {
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    if (!openModalForPlayer(playerNum, 'showRacketSmashSelection', [playerNum, Array.isArray(benchChars)?benchChars.map(c=>c.id?c.id:c):[]])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -8261,6 +9223,9 @@ function showRacketSmashSelection(player, benchChars) {
 }
 
 function showSnapPizzDiscardSelection(opponentChars) {
+    const charIds = Array.isArray(opponentChars) ? opponentChars.map(c => (typeof c === 'string' ? c : (c && c.id ? c.id : c))) : [];
+    if (!openModalForPlayer(game.currentPlayer, 'showSnapPizzDiscardSelection', [charIds])) return;
+    opponentChars = charIds.map(id => findCardById(id)).filter(Boolean);
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -8317,6 +9282,9 @@ function executeRacketSmash(charId) {
 }
 
 function showBorrowSelection(player, stringChars, attacker, isAbility = false) {
+    const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    const target = isAbility ? game.currentPlayer : playerNum;
+    if (!openModalForPlayer(target, 'showBorrowSelection', [playerNum, Array.isArray(stringChars)?stringChars.map(c=>c.id?c.id:c):[], attacker && attacker.id?attacker.id:attacker, !!isAbility])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -8414,11 +9382,17 @@ function executeBorrow(sourceId, attackerId) {
 }
 
 function showForesightModal(opponent, topThree) {
+    const opponentNum = (typeof opponent === 'number') ? opponent : (game.players[1] === opponent ? 1 : 2);
+    if (!openModalForPlayer(game.currentPlayer, 'showForesightModal', [opponentNum, Array.isArray(topThree)?topThree.map(c=>c.id?c.id:c):[]])) return;
     const modal = document.getElementById('action-modal');
     game.tempSelections = game.tempSelections || {};
+    // Reconstruct topThree if called remotely with ids
+    if (Array.isArray(topThree) && typeof topThree[0] === 'string') {
+        topThree = topThree.map(id => game.players[opponentNum].deck.find(c => c.id === id)).filter(Boolean);
+    }
     game.tempSelections.foresightCards = topThree;
     game.tempSelections.foresightOriginal = topThree.slice();
-    game.tempSelections.foresightOpponent = opponent;
+    game.tempSelections.foresightOpponent = opponentNum;
     game.tempSelections.foresightPending = true;
 
     renderForesightModal();
@@ -8485,6 +9459,17 @@ function completeForesight() {
 }
 
 function showGachaGamingModal(player, attacker) {
+    let playerNum = (typeof player === 'number') ? player : null;
+    if (!playerNum && attacker) {
+        const attackerObj = (typeof attacker === 'string') ? findCardById(attacker) : attacker;
+        if (attackerObj && typeof game.findPlayerWithCharacter === 'function') {
+            playerNum = game.findPlayerWithCharacter(attackerObj);
+        }
+    }
+    if (!playerNum) {
+        playerNum = (game.players[1] === player ? 1 : 2);
+    }
+    if (!openModalForPlayer(playerNum, 'showGachaGamingModal', [playerNum, attacker && attacker.id ? attacker.id : attacker])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -8532,7 +9517,7 @@ function executeGachaGamingStep() {
     game.log(`Gacha Gaming: Drew ${card.name}`);
 
     const currentHp = attacker.hp - (attacker.damage || 0);
-    const maxDamage = Math.max(0, currentHp - 10);
+    const maxDamage = Math.floor(Math.max(0, currentHp - 10) / 10) * 10;
     const damage = Math.min(20, maxDamage);
     if (damage > 0) {
         game.dealDamage(attacker, damage);
@@ -8589,10 +9574,14 @@ function finalizeGachaGaming(drewBirb) {
 }
 
 function showSongVotingModal(opponent, attacker, target, move) {
+    const attackerId = attacker && attacker.id ? attacker.id : attacker;
+    const ownerNum = (game.players[1].active && game.players[1].active.id === attackerId) || (game.players[1].bench.some(c=>c&&c.id===attackerId)) ? 1 : 2;
+    if (!openModalForPlayer(ownerNum, 'showSongVotingModal', [(typeof opponent === 'number' ? opponent : (game.players[1]===opponent?1:2)), attackerId, target && target.id ? target.id : target, move ? move.name : null])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
-    const hand = opponent.hand.map(c => c.name).join(', ');
+    const opponentNum = (typeof opponent === 'number') ? opponent : (game.players[1] === opponent ? 1 : 2);
+    const hand = game.players[opponentNum].hand.map(c => c.name).join(', ');
 
     let html = `<h2>Song Voting</h2>`;
     html += `<p>Opponent's hand: ${hand}</p>`;
@@ -8608,6 +9597,7 @@ function showSongVotingModal(opponent, attacker, target, move) {
 }
 
 function showSongVotingSelectionModal(playerNum) {
+    if (!openModalForPlayer(playerNum, 'showSongVotingSelectionModal', [playerNum])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
     const player = game.players[playerNum];
@@ -8778,19 +9768,31 @@ function executeAnalysisParalysis(opponentNum, cardIdx) {
 }
 
 function showWipeoutSelection(player, opponent, attacker) {
+    const attackerId = attacker && attacker.id ? attacker.id : attacker;
+    const ownerNum = (game.players[1].active && game.players[1].active.id === attackerId) || (game.players[1].bench.some(c=>c&&c.id===attackerId)) ? 1 : 2;
+    if (!openModalForPlayer(ownerNum, 'showWipeoutSelection', [ (typeof player === 'number' ? player : (game.players[1]===player?1:2)), (typeof opponent === 'number' ? opponent : (game.players[1]===opponent?1:2)), attackerId ])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
+    // Reconstruct player and opponent from numbers if necessary
+    const playerObj = (typeof player === 'number') ? game.players[player] : player;
+    const opponentObj = (typeof opponent === 'number') ? game.players[opponent] : opponent;
+
     const allTargets = [
-        player.active,
-        ...player.bench,
-        opponent.active,
-        ...opponent.bench
+        playerObj.active,
+        ...playerObj.bench,
+        opponentObj.active,
+        ...opponentObj.bench
     ].filter(c => c);
 
     game.tempSelections = game.tempSelections || {};
-    game.tempSelections.wipeoutTargets = [attacker.id];
-    game.tempSelections.wipeoutAttacker = attacker;
+    game.tempSelections.wipeoutTargets = [attackerId];
+    // Reconstruct attacker object if only id was provided
+    let attackerObj = null;
+    [game.players[1].active, ...game.players[1].bench, game.players[2].active, ...game.players[2].bench].forEach(c => {
+        if (c && c.id === attackerId) attackerObj = c;
+    });
+    game.tempSelections.wipeoutAttacker = attackerObj || { id: attackerId };
 
     let html = `<h2>Wipeout: Select 3 Targets</h2>`;
     html += `<p>You must include yourself. Select 2 other characters:</p>`;
@@ -8864,6 +9866,11 @@ function executeWipeout() {
 }
 
 function showOutreachSelection(player, characters) {
+    let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
+    const charIds = Array.isArray(characters) ? characters.map(c => (typeof c === 'string' ? c : (c && c.id ? c.id : c))) : [];
+    if (!openModalForPlayer(playerNum, 'showOutreachSelection', [playerNum, charIds])) return;
+    player = game.players[playerNum];
+    characters = charIds.map(id => player.deck.find(c => c.id === id)).filter(Boolean);
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -8884,6 +9891,15 @@ function showOutreachSelection(player, characters) {
 }
 
 function showArtistAlleySelection(eligibleCards, attacker, target, move) {
+    const cardIds = Array.isArray(eligibleCards) ? eligibleCards.map(c => (typeof c === 'string' ? c : (c && c.id ? c.id : c))) : [];
+    const attackerId = attacker && attacker.id ? attacker.id : attacker;
+    const targetId = target && target.id ? target.id : target;
+    const moveName = move && move.name ? move.name : move;
+    if (!openModalForPlayer(game.currentPlayer, 'showArtistAlleySelection', [cardIds, attackerId, targetId, moveName])) return;
+    eligibleCards = cardIds.map(id => findCardById(id)).filter(Boolean);
+    if (typeof attacker === 'string') attacker = findCardById(attacker);
+    if (typeof target === 'string') target = findCardById(target);
+    if (typeof move === 'string') move = { name: move };
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -8959,6 +9975,11 @@ function confirmArtistAlley() {
 }
 
 function showArtistAlleyTargetSelection(attacker, move) {
+    const attackerId = attacker && attacker.id ? attacker.id : attacker;
+    const moveName = move && move.name ? move.name : move;
+    if (!openModalForPlayer(game.currentPlayer, 'showArtistAlleyTargetSelection', [attackerId, moveName])) return;
+    if (typeof attacker === 'string') attacker = findCardById(attacker);
+    if (typeof move === 'string') move = { name: move };
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
     const allChars = [
@@ -9009,6 +10030,13 @@ function executeArtistAlleyDamage(targetId) {
 }
 
 function showRossAttackTargetSelection(opponentChars, attacker, move) {
+    const charIds = Array.isArray(opponentChars) ? opponentChars.map(c => (typeof c === 'string' ? c : (c && c.id ? c.id : c))) : [];
+    const attackerId = attacker && attacker.id ? attacker.id : attacker;
+    const moveName = move && move.name ? move.name : move;
+    if (!openModalForPlayer(game.currentPlayer, 'showRossAttackTargetSelection', [charIds, attackerId, moveName])) return;
+    opponentChars = charIds.map(id => findCardById(id)).filter(Boolean);
+    if (typeof attacker === 'string') attacker = findCardById(attacker);
+    if (typeof move === 'string') move = { name: move };
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -9053,6 +10081,13 @@ function executeRossAttackTarget(targetId) {
 }
 
 function showE2ReactionSelection(opponent, attacker, move) {
+    const opponentNum = (typeof opponent === 'number') ? opponent : (game.players[1] === opponent ? 1 : 2);
+    const attackerId = attacker && attacker.id ? attacker.id : attacker;
+    const moveName = move && move.name ? move.name : move;
+    if (!openModalForPlayer(game.currentPlayer, 'showE2ReactionSelection', [opponentNum, attackerId, moveName])) return;
+    if (typeof opponent === 'number') opponent = game.players[opponent];
+    if (typeof attacker === 'string') attacker = findCardById(attacker);
+    if (typeof move === 'string') move = { name: move };
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
     const benchedChars = opponent.bench.filter(c => c);
@@ -9095,6 +10130,13 @@ function executeE2Reaction(charId) {
 }
 
 function showHarmonicsChoice(attacker, opponent, move) {
+    const attackerId = attacker && attacker.id ? attacker.id : attacker;
+    const opponentNum = (typeof opponent === 'number') ? opponent : (game.players[1] === opponent ? 1 : 2);
+    const moveName = move && move.name ? move.name : move;
+    if (!openModalForPlayer(game.currentPlayer, 'showHarmonicsChoice', [attackerId, opponentNum, moveName])) return;
+    if (typeof attacker === 'string') attacker = findCardById(attacker);
+    if (typeof opponent === 'number') opponent = game.players[opponent];
+    if (typeof move === 'string') move = { name: move };
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -9125,6 +10167,7 @@ function startHarmonicsSelection(targetCount, damage) {
 }
 
 function showHarmonicsTargetSelection() {
+    if (!openModalForPlayer(game.currentPlayer, 'showHarmonicsTargetSelection', [])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
     const opponentNum = game.currentPlayer === 1 ? 2 : 1;
@@ -10644,6 +11687,12 @@ function performMoveEffect(attacker, target, move) {
 }
 
 function showAttackTargeting(attacker, target) {
+    const attackerId = attacker && attacker.id ? attacker.id : attacker;
+    const targetId = target && target.id ? target.id : target;
+    if (!openModalForPlayer(game.currentPlayer, 'showAttackTargeting', [attackerId, targetId])) return;
+    // Reconstruct objects when called remotely
+    if (typeof attacker === 'string') attacker = findCardById(attacker);
+    if (typeof target === 'string') target = findCardById(target);
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
     const player = game.players[game.currentPlayer];
@@ -10747,6 +11796,8 @@ const EXPORTED_ACTIONS = {
     confirmFoldingStand,
     selectBUOStandCard,
     switchWithBench,
+    showForcedActiveSwitchModal,
+    confirmForcedActiveSwitch,
     selectConcertRosterCharacter,
     selectVictoriaType,
     toggleVictoriaCharacter,
@@ -10824,7 +11875,47 @@ const MULTIPLAYER_ACTION_BLACKLIST = new Set([
     'closeModal',
     'copyDeckCode',
     'processDeckImport',
-    'endTurnAction'
+    'endTurnAction',
+    'selectMove'
+]);
+
+const MULTIPLAYER_LOCAL_FIRST_ACTIONS = new Set([
+    'playCharacterToActive',
+    'playCharacterToBench',
+    'playItem',
+    'playSupporter',
+    'playStadium',
+    'useCategoryTheoryFromHand',
+    'switchToActive',
+    'retreat',
+    'confirmSwitch',
+    'handleTargetSelection',
+    'executeAttack',
+    'attachEnergy',
+    'attachEnergyFromHand',
+    'toggleDiscardCard',
+    'confirmDiscardSelection',
+    'cancelDiscardSelection',
+    'toggleOpponentDiscardCard',
+    'confirmOpponentDiscard',
+    'toggleOpponentHandSelection',
+    'confirmOpponentHandSelection',
+    'toggleSongVotingCard',
+    'confirmSongVotingSelection',
+    'toggleArtistAlleyCard',
+    'confirmArtistAlley',
+    'toggleCameraSelection',
+    'confirmCameraSelection',
+    'toggleFoldingStandCard',
+    'confirmFoldingStand',
+    'toggleVictoriaCharacter',
+    'confirmVictoriaSelection',
+    'toggleLucasCharacter',
+    'confirmLucasSelection',
+    'confirmForcedActiveSwitch',
+    'executeGachaGaming',
+    'executeGachaGamingStep',
+    'finalizeGachaGaming'
 ]);
 
 Object.keys(EXPORTED_ACTIONS).forEach((name) => {
@@ -10834,7 +11925,17 @@ Object.keys(EXPORTED_ACTIONS).forEach((name) => {
             return original(...args);
         }
 
+        if (multiplayer.enabled && !multiplayer.isApplyingRemote && name && name.startsWith('toggle')) {
+            return original(...args);
+        }
+
         if (multiplayer.enabled && !multiplayer.isApplyingRemote) {
+            const shouldRunLocalFirst = MULTIPLAYER_LOCAL_FIRST_ACTIONS.has(name) || (name && !name.startsWith('show'));
+            if (shouldRunLocalFirst) {
+                const result = original(...args);
+                sendMultiplayerAction(name, args);
+                return result;
+            }
             sendMultiplayerAction(name, args);
             return;
         }

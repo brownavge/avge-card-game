@@ -69,6 +69,31 @@ body {
     color: #764ba2;
 }
 
+.in-game-room-code {
+    margin: 4px 0 8px 0;
+    font-size: 12px;
+    color: #3f3f5f;
+    font-weight: 600;
+}
+
+.multiplayer-player-identity {
+    margin: 4px 0 8px 0;
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 700;
+    background: rgba(255, 255, 255, 0.2);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+}
+
+.in-game-player-identity {
+    background: #eef2ff;
+    color: #334155;
+    border-color: #c7d2fe;
+}
+
 .playtest-toggle {
     margin-top: 12px;
     color: #f7f7ff;
@@ -77,6 +102,29 @@ body {
 
 .playtest-toggle input {
     margin-right: 6px;
+}
+
+.multiplayer-lobby-status {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.18);
+    color: #fff;
+    font-size: 12px;
+    line-height: 1.35;
+    max-width: 560px;
+}
+
+.multiplayer-lobby-status.success {
+    background: rgba(46, 204, 113, 0.28);
+}
+
+.multiplayer-lobby-status.warning {
+    background: rgba(241, 196, 15, 0.28);
+}
+
+.multiplayer-lobby-status.error {
+    background: rgba(231, 76, 60, 0.32);
 }
 
 #phase-info {
@@ -274,6 +322,47 @@ body {
     color: #d32f2f;
 }
 
+.card-hp-delta {
+    margin-left: 3px;
+    font-weight: 700;
+    font-size: 7px;
+}
+
+.card-hp-delta.positive {
+    color: #1b8f3a;
+}
+
+.card-hp-delta.negative {
+    color: #b00020;
+}
+
+.card-stat-modifiers {
+    display: flex;
+    gap: 3px;
+    flex-wrap: wrap;
+    margin-bottom: 3px;
+}
+
+.card-mod-badge {
+    font-size: 7px;
+    font-weight: 700;
+    border-radius: 3px;
+    padding: 1px 4px;
+    line-height: 1.2;
+}
+
+.card-mod-badge.retreat-mod {
+    background: #eef2ff;
+    color: #334155;
+    border: 1px solid #c7d2fe;
+}
+
+.card-mod-badge.temp-energy-mod {
+    background: #ecfeff;
+    color: #0f766e;
+    border: 1px solid #99f6e4;
+}
+
 .card-type {
     display: flex;
     gap: 3px;
@@ -322,6 +411,37 @@ body {
     font-weight: bold;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
     z-index: 10;
+}
+
+.temp-energy-text {
+    color: #0f766e;
+    font-weight: 700;
+}
+
+.remote-prompt-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.remote-prompt-overlay.hidden {
+    display: none;
+}
+
+.remote-prompt-overlay__card {
+    background: #fff;
+    color: #1f2937;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    padding: 14px 18px;
+    font-weight: 700;
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.2);
+    max-width: 480px;
+    text-align: center;
 }
 
 .card-energy-attached {
