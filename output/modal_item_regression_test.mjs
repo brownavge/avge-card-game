@@ -27,6 +27,10 @@ async function run() {
   await page.locator('#setup-guide .setup-guide__column').nth(0).locator('.setup-guide__choice', { hasText: 'Active:' }).first().click();
   await page.waitForTimeout(120);
   await page.locator('#setup-guide .setup-guide__column').nth(1).locator('.setup-guide__choice', { hasText: 'Active:' }).first().click();
+  await page.waitForTimeout(120);
+  await page.locator('#setup-guide .setup-guide__column').nth(0).locator('.setup-guide__choice', { hasText: /Confirm Setup|Ready/ }).first().click();
+  await page.waitForTimeout(120);
+  await page.locator('#setup-guide .setup-guide__column').nth(1).locator('.setup-guide__choice', { hasText: /Confirm Setup|Ready/ }).first().click();
   await page.waitForTimeout(350);
 
   const phase = await page.evaluate(() => JSON.parse(window.render_game_to_text()).phase);

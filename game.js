@@ -756,7 +756,7 @@ class GameState {
         } else {
             this.log(`Player ${winner} wins!`, 'game-over');
         }
-        alert(`Player ${winner} wins!`);
+        showLocalAlert(`Player ${winner} wins!`);
         this.phase = 'gameover';
         this.render();
     }
@@ -1013,17 +1013,25 @@ function isMultiplayerAuthorityClient() {
 function isOpeningSetupRequiredForPlayer(playerNum) {
     const player = game?.players?.[playerNum];
     if (!player) return false;
-    return isOpeningSetupPhase() && !player.active;
+    const ready = !!game?.setupReady?.[playerNum];
+    return isOpeningSetupPhase() && (!player.active || !ready);
 }
 
 function shouldPromptOpeningSetupLocally() {
     if (!isOpeningSetupPhase()) return false;
-    if (game?.players?.[1]?.active && game?.players?.[2]?.active) return false;
+    if (
+        game?.players?.[1]?.active &&
+        game?.players?.[2]?.active &&
+        game?.setupReady?.[1] &&
+        game?.setupReady?.[2]
+    ) {
+        return false;
+    }
     if (multiplayer.enabled) {
         const localPlayerNumber = Number(multiplayer.playerNumber);
         if (Number.isFinite(localPlayerNumber)) {
             const otherPlayer = localPlayerNumber === 1 ? 2 : 1;
-            return !game?.players?.[localPlayerNumber]?.active || !game?.players?.[otherPlayer]?.active;
+            return !game?.setupReady?.[localPlayerNumber] || !game?.setupReady?.[otherPlayer];
         }
         return isOpeningSetupRequiredForPlayer(1) || isOpeningSetupRequiredForPlayer(2);
     }
@@ -1173,6 +1181,7 @@ function setOpeningReady(playerNumOverride = null) {
 function finalizeOpeningSetupIfReady() {
     if (!isOpeningSetupPhase()) return;
     if (!game.players[1]?.active || !game.players[2]?.active) return;
+    if (!game.setupReady || !game.setupReady[1] || !game.setupReady[2]) return;
     game.phase = 'main';
     game.log('Opening setup complete. Main phase begins.', 'turn-change');
 }
@@ -1189,8 +1198,8 @@ function updateSetupGuidePanel() {
 
     const localPlayerNumber = multiplayer.enabled ? Number(multiplayer.playerNumber) : 1;
     const otherPlayerNumber = localPlayerNumber === 1 ? 2 : 1;
-    const localHasActive = !!game?.players?.[localPlayerNumber]?.active;
-    const waitingForOpponent = multiplayer.enabled && localHasActive && !game?.players?.[otherPlayerNumber]?.active;
+    const localReady = !!game?.setupReady?.[localPlayerNumber];
+    const waitingForOpponent = multiplayer.enabled && localReady && !game?.setupReady?.[otherPlayerNumber];
 
     let html = `
         <div class="setup-guide__card">
@@ -1220,6 +1229,7 @@ function updateSetupGuidePanel() {
         const player = game.players[playerNum];
         const active = player?.active || null;
         const bench = (player?.bench || []).filter(Boolean);
+        const ready = !!game?.setupReady?.[playerNum];
         const characterChoices = (player?.hand || []).filter((card) => card.cardType === 'character');
         html += `<div class="setup-guide__column">`;
         html += `<div class="setup-guide__column-title">Player ${playerNum}</div>`;
@@ -1261,7 +1271,8 @@ function updateSetupGuidePanel() {
         }
 
         const readyDisabled = active ? '' : 'disabled';
-        html += `<button class="btn setup-guide__choice" ${readyDisabled} type="button" onclick="setOpeningReady(${playerNum})">Confirm Setup</button>`;
+        const readyLabel = ready ? 'Ready (Click to reconfirm)' : 'Confirm Setup';
+        html += `<button class="btn setup-guide__choice" ${readyDisabled} type="button" onclick="setOpeningReady(${playerNum})">${readyLabel}</button>`;
         html += `</div>`;
     });
     html += `</div></div>`;
@@ -1467,8 +1478,8 @@ function renderGameToText() {
         currentPlayer: game.currentPlayer,
         localPlayer: multiplayer.enabled ? (multiplayer.playerNumber || null) : null,
         setupPending: {
-            p1: !game.players[1]?.active,
-            p2: !game.players[2]?.active
+            p1: !game.players[1]?.active || !game.setupReady?.[1],
+            p2: !game.players[2]?.active || !game.setupReady?.[2]
         },
         selectedCardId: game.selectedCard?.id || null,
         selectedCardName: game.selectedCard?.name || null,
@@ -1547,6 +1558,13 @@ function canCurrentClientAct() {
     return false;
 }
 
+function syncEndTurnButtonState() {
+    const endTurnBtn = document.getElementById('end-turn-btn');
+    if (!endTurnBtn) return;
+    endTurnBtn.style.display = 'inline-block';
+    endTurnBtn.disabled = isOpeningSetupPhase() || !canCurrentClientAct() || game.phase === 'gameover';
+}
+
 function clearPendingRemotePromptLock() {
     multiplayer.pendingRemotePromptFor = null;
     multiplayer.pendingRemotePromptType = null;
@@ -1564,6 +1582,11 @@ function executeActionSafely(name, fn, args = [], source = 'local') {
         }
         return { ok: false, error };
     }
+}
+
+function showLocalAlert(message) {
+    if (multiplayer.enabled && multiplayer.isApplyingRemote) return;
+    window.alert(message);
 }
 
 function tryResumePendingAttackEndTurn() {
@@ -1608,6 +1631,7 @@ function updateRemotePromptOverlay() {
     );
     if (!shouldShow) {
         overlay.classList.add('hidden');
+        syncEndTurnButtonState();
         return;
     }
 
@@ -1620,6 +1644,7 @@ function updateRemotePromptOverlay() {
 
     if (textEl) textEl.textContent = message;
     overlay.classList.remove('hidden');
+    syncEndTurnButtonState();
 }
 
 function ensureStartingHandLogsVisible() {
@@ -1812,6 +1837,14 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
             return;
         }
 
+        const incomingSeq = Number(msg && msg.serverSeq);
+        const hasIncomingSeq = Number.isFinite(incomingSeq) && incomingSeq > 0;
+        const currentSeq = Number(multiplayer.serverSeq || 0);
+        const isOutOfOrderSeq = hasIncomingSeq && currentSeq > 0 && incomingSeq <= currentSeq;
+        if ((msg.type === 'ACTION_BROADCAST' || msg.type === 'STATE_UPDATE') && isOutOfOrderSeq) {
+            return;
+        }
+
         if (msg.type === 'ROOM_JOINED') {
             if (msg.roomId) {
                 multiplayer.roomId = msg.roomId;
@@ -1898,7 +1931,7 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
         }
 
         if (msg.type === 'STATE_UPDATE') {
-            multiplayer.serverSeq = msg.serverSeq || multiplayer.serverSeq;
+            multiplayer.serverSeq = Math.max(Number(multiplayer.serverSeq || 0), Number(msg.serverSeq || 0));
             if (!shouldIgnoreServerSnapshot(msg.state)) {
                 applyStateSnapshot(msg.state);
             }
@@ -1914,7 +1947,7 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
         }
 
         if (msg.type === 'ACTION_BROADCAST') {
-            multiplayer.serverSeq = msg.serverSeq || multiplayer.serverSeq;
+            multiplayer.serverSeq = Math.max(Number(multiplayer.serverSeq || 0), Number(msg.serverSeq || 0));
             const incoming = msg.action;
             if (incoming && incoming.type === 'CALL' && incoming.payload) {
                 const { name, args } = incoming.payload;
@@ -1959,11 +1992,19 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
                         !name.startsWith('show') &&
                         name !== 'STATE_SNAPSHOT';
                     const beforeHostSyncState = shouldHostResyncAfterRemoteAction ? JSON.stringify(getStateSnapshot()) : null;
+                    let replayArgs = Array.isArray(args) ? [...args] : [];
+                    if (senderPlayerNumber === 1 || senderPlayerNumber === 2) {
+                        if (name === 'setOpeningReady' && !Number.isFinite(Number(replayArgs[0]))) {
+                            replayArgs = [senderPlayerNumber];
+                        } else if ((name === 'chooseOpeningActive' || name === 'toggleOpeningBench') && !Number.isFinite(Number(replayArgs[1]))) {
+                            replayArgs = [replayArgs[0], senderPlayerNumber];
+                        }
+                    }
                     const wasApplying = multiplayer.isApplyingRemote;
                     multiplayer.isApplyingRemote = true;
                     let remoteExecutionOk = true;
                     try {
-                        const execution = executeActionSafely(name, window[name], (Array.isArray(args) ? args : []), `remote-player-${senderPlayerNumber}`);
+                        const execution = executeActionSafely(name, window[name], replayArgs, `remote-player-${senderPlayerNumber}`);
                         remoteExecutionOk = !!execution.ok;
                     } finally {
                         multiplayer.isApplyingRemote = wasApplying;
@@ -2029,6 +2070,7 @@ function sendMultiplayerAction(fn, args) {
     const actionPlayerNumber = Number.isFinite(setupPlayerOverride)
         ? setupPlayerOverride
         : multiplayer.playerNumber;
+    const shouldOmitActionOwner = setupPlayerFns.has(fn);
     multiplayer.clientSeq += 1;
     const payload = {
         name: fn,
@@ -2044,7 +2086,7 @@ function sendMultiplayerAction(fn, args) {
         action: {
             type: 'CALL',
             payload,
-            playerNumber: actionPlayerNumber
+            playerNumber: shouldOmitActionOwner ? null : actionPlayerNumber
         }
     }));
 }
@@ -2740,11 +2782,7 @@ function updateUI() {
     }
 
     // Update button visibility based on phase
-    const endTurnBtn = document.getElementById('end-turn-btn');
-    if (endTurnBtn) {
-        endTurnBtn.style.display = 'inline-block';
-        endTurnBtn.disabled = isOpeningSetupPhase() || !canCurrentClientAct() || game.phase === 'gameover';
-    }
+    syncEndTurnButtonState();
 
     // Render active and bench for both players
     renderCharacterSlot(game.players[1].active, document.querySelector('.active-slot[data-player="1"]'));
@@ -3391,6 +3429,8 @@ let cardBrowserSearchTerm = '';
 
 function openPlaytestCardLibrary() {
     if (!game.playtestMode) return;
+    const howToPlayModal = document.getElementById('how-to-play-modal');
+    if (howToPlayModal) howToPlayModal.classList.add('hidden');
     playtestCurrentType = 'character';
     playtestSearchTerm = '';
     renderPlaytestCardLibrary();
@@ -3401,6 +3441,8 @@ function openPlaytestCardLibrary() {
 }
 
 function openCardBrowser() {
+    const howToPlayModal = document.getElementById('how-to-play-modal');
+    if (howToPlayModal) howToPlayModal.classList.add('hidden');
     cardBrowserCurrentType = 'character';
     cardBrowserSearchTerm = '';
     renderCardBrowser();
@@ -3828,7 +3870,7 @@ function attachEnergy(target, playerNumberOverride = null) {
     }
 
     if (!targetChar) {
-        alert('Invalid target for energy attachment!');
+        showLocalAlert('Invalid target for energy attachment!');
         return;
     }
 
@@ -3838,26 +3880,26 @@ function attachEnergy(target, playerNumberOverride = null) {
     if (fermentationActive && !ignoreTurnEnergyLimit) {
         if (targetChar === player.active) {
             if (game.energyAttachedThisTurn >= 1) {
-                alert('Fermentation: You may only attach 1 energy to your active this turn.');
+                showLocalAlert('Fermentation: You may only attach 1 energy to your active this turn.');
                 return;
             }
         } else {
             if (game.energyAttachedToActiveThisTurn) {
-                alert('Fermentation: You already attached energy to your active this turn.');
+                showLocalAlert('Fermentation: You already attached energy to your active this turn.');
                 return;
             }
             if (game.energyAttachedBenchTargetId && game.energyAttachedBenchTargetId !== targetChar.id) {
-                alert('Fermentation: You may only attach to one benched character this turn.');
+                showLocalAlert('Fermentation: You may only attach to one benched character this turn.');
                 return;
             }
             if (game.energyAttachedThisTurn >= 2) {
-                alert('Fermentation: You may only attach 2 energy to one benched character this turn.');
+                showLocalAlert('Fermentation: You may only attach 2 energy to one benched character this turn.');
                 return;
             }
         }
     } else if (!ignoreTurnEnergyLimit) {
         if (playerNum === game.currentPlayer && game.energyAttachedThisTurn >= 1) {
-            alert(`You've already attached ${game.energyAttachedThisTurn} energy this turn!`);
+            showLocalAlert(`You've already attached ${game.energyAttachedThisTurn} energy this turn!`);
             return;
         }
     }
@@ -3866,7 +3908,7 @@ function attachEnergy(target, playerNumberOverride = null) {
     const barronOnOppSide = !abilitiesDisabledFor(opponentNum) && [opponent.active, ...opponent.bench].some(c => c && c.name === 'Barron Lee');
     if (barronOnOppSide && targetChar.attachedEnergy.length >= 3) {
         game.log('Barron Lee\'s Get Served: Opponent cannot have more than 3 energy on a character!', 'warning');
-        alert('Barron Lee\'s Get Served prevents attaching more than 3 energy to a character.');
+        showLocalAlert('Barron Lee\'s Get Served prevents attaching more than 3 energy to a character.');
         return;
     }
 
@@ -4107,7 +4149,7 @@ function executeItemEffect(card) {
                 }
                 game.log(`Standard Musescore File: Drew ${drawCount} cards from top of deck`, 'info');
             } else {
-                alert('Can only play this if your active character has Arranger status!');
+                showLocalAlert('Can only play this if your active character has Arranger status!');
                 closeModal('action-modal');
                 updateUI();
                 return true; // Don't discard the card
@@ -4125,7 +4167,7 @@ function executeItemEffect(card) {
                 }
                 game.log(`Corrupted Musescore File: Drew ${drawCount} cards from bottom of deck`, 'info');
             } else {
-                alert('Can only play this if your active character has Arranger status!');
+                showLocalAlert('Can only play this if your active character has Arranger status!');
                 closeModal('action-modal');
                 updateUI();
                 return true; // Don't discard the card
@@ -4236,7 +4278,7 @@ function showTopCards(player, count) {
     if (!openModalForPlayer(playerNum, 'showTopCards', [playerNum, count])) return;
     const playerObj = game.players[playerNum];
     const topCards = playerObj.deck.slice(0, Math.min(count, playerObj.deck.length));
-    alert(`Top ${count} cards: ${topCards.map(c => c.name).join(', ')}`);
+    showLocalAlert(`Top ${count} cards: ${topCards.map(c => c.name).join(', ')}`);
     game.log(`Looked at top ${count} cards`, 'info');
 }
 
@@ -4247,7 +4289,7 @@ function showDeckSelection(player, viewCount, selectCount) {
     const topCards = playerObj.deck.slice(0, Math.min(viewCount, playerObj.deck.length));
 
     if (topCards.length === 0) {
-        alert('No cards to view!');
+        showLocalAlert('No cards to view!');
         return;
     }
 
@@ -4780,7 +4822,7 @@ function attachTool(toolId, target) {
     if (!character) return;
 
     if (character.attachedTools && character.attachedTools.length > 0) {
-        alert(`${character.name} already has a tool attached.`);
+        showLocalAlert(`${character.name} already has a tool attached.`);
         return;
     }
 
@@ -4946,12 +4988,12 @@ function confirmOpponentHandSelection() {
     const sourceItemName = game.tempSelections.handSelectSourceItemName;
 
     if (mode === 'discard' && selected.length !== 1) {
-        alert('Select exactly 1 card.');
+        showLocalAlert('Select exactly 1 card.');
         return;
     }
 
     if (mode === 'shuffle' && selected.length > maxSelect) {
-        alert(`Select up to ${maxSelect} cards.`);
+        showLocalAlert(`Select up to ${maxSelect} cards.`);
         return;
     }
 
@@ -5382,7 +5424,7 @@ function toggleOpponentDiscardCard(cardId) {
             game.tempSelections.opponentDiscardCards.push(cardId);
             cardElement.classList.add('selected');
         } else {
-            alert(`You can only select ${maxCount} card${maxCount > 1 ? 's' : ''}.`);
+            showLocalAlert(`You can only select ${maxCount} card${maxCount > 1 ? 's' : ''}.`);
         }
     }
 
@@ -5412,7 +5454,7 @@ function confirmOpponentDiscard() {
         if (multiplayer.enabled || multiplayer.isApplyingRemote) {
             game.log(message, 'warning');
         } else {
-            alert(message);
+            showLocalAlert(message);
         }
         return;
     }
@@ -6050,7 +6092,7 @@ function showFoldingStandModal(player) {
     const playerObj = game.players[playerNum];
     const energyCards = playerObj.discard.filter(c => c.cardType === 'energy');
     if (energyCards.length === 0) {
-        alert('No energy cards in discard pile!');
+        showLocalAlert('No energy cards in discard pile!');
         closeModal('action-modal');
         return;
     }
@@ -6121,7 +6163,7 @@ function toggleFoldingStandCard(cardId) {
         game.tempSelections.foldingStandSelected.splice(index, 1);
         if (element) element.classList.remove('selected');
     } else {
-        alert('You can only select up to 3 cards.');
+        showLocalAlert('You can only select up to 3 cards.');
     }
 }
 
@@ -7201,7 +7243,7 @@ function playStadium(cardId) {
 
     // Check if BAI Email prevents playing stadiums this turn
     if (game.stadiumLockUntilTurn && game.turn <= game.stadiumLockUntilTurn) {
-        alert('Cannot play stadiums this turn (BAI Email effect)');
+        showLocalAlert('Cannot play stadiums this turn (BAI Email effect)');
         game.log('Cannot play stadiums this turn (BAI Email effect)', 'error');
         return;
     }
@@ -7343,13 +7385,13 @@ function showAttackMenu(cardId) {
     const attacker = player.active;
 
     if (!attacker || attacker.id !== cardId) {
-        alert('This character must be active to attack!');
+        showLocalAlert('This character must be active to attack!');
         return;
     }
 
     // Player 1 cannot attack on their first turn (like Pokémon TCG)
     if (game.isFirstTurn && game.currentPlayer === 1) {
-        alert('Player 1 cannot attack on their first turn!');
+        showLocalAlert('Player 1 cannot attack on their first turn!');
         game.log('Cannot attack: Player 1 cannot attack on their first turn', 'warning');
         closeModal('action-modal');
         return;
@@ -7357,7 +7399,7 @@ function showAttackMenu(cardId) {
 
     // Check for Meya Gao's I See Your Soul - cannot attack
     if (game.nextTurnEffects[game.currentPlayer].cannotAttack) {
-        alert('Cannot attack this turn due to Meya Gao\'s I See Your Soul!');
+        showLocalAlert('Cannot attack this turn due to Meya Gao\'s I See Your Soul!');
         game.log('Cannot attack: Meya Gao\'s I See Your Soul is active', 'warning');
         game.nextTurnEffects[game.currentPlayer].cannotAttack = false;
         closeModal('action-modal');
@@ -7370,7 +7412,7 @@ function showAttackMenu(cardId) {
     }
 
     if (game.attackedThisTurn) {
-        alert('You have already attacked this turn!');
+        showLocalAlert('You have already attacked this turn!');
         closeModal('action-modal');
         return;
     }
@@ -7510,10 +7552,10 @@ function selectMove(cardId, moveIndex) {
     // Validate energy cost
     if (!canUseMove(attacker, move)) {
         if (move.name === 'Glissando' && attacker.cantUseGlissandoTurn === game.turn) {
-            alert('Glissando cannot be used this turn.');
+            showLocalAlert('Glissando cannot be used this turn.');
         } else {
             const requiredEnergy = getMoveEnergyCost(move);
-            alert(`Not enough energy! This move requires ${requiredEnergy} energy (you have ${attacker.attachedEnergy.length})`);
+            showLocalAlert(`Not enough energy! This move requires ${requiredEnergy} energy (you have ${attacker.attachedEnergy.length})`);
         }
         closeModal('action-modal');
         return;
@@ -7686,7 +7728,7 @@ function executeAttack(attackerId, moveName, targetId) {
         }
 
         if (!target) {
-            alert('Target not found!');
+            showLocalAlert('Target not found!');
             return;
         }
     } else {
@@ -8016,11 +8058,11 @@ function showRetreatMenu(cardId) {
 
     if (!active || active.id !== cardId) return;
     if (game.nextTurnEffects[game.currentPlayer].cannotRetreat) {
-        alert('Cannot retreat this turn.');
+        showLocalAlert('Cannot retreat this turn.');
         return;
     }
     if (game.retreatUsedThisTurn) {
-        alert('You can only retreat once per turn.');
+        showLocalAlert('You can only retreat once per turn.');
         return;
     }
 
@@ -8028,7 +8070,7 @@ function showRetreatMenu(cardId) {
     const energyCount = active.attachedEnergy ? active.attachedEnergy.length : 0;
 
     if (energyCount < retreatCost) {
-        alert(`Need ${retreatCost} energy to retreat, but only have ${energyCount}`);
+        showLocalAlert(`Need ${retreatCost} energy to retreat, but only have ${energyCount}`);
         return;
     }
 
@@ -8061,11 +8103,11 @@ function retreat(activeCardId, benchSlotIndex, cost) {
 
     if (!active || active.id !== activeCardId) return;
     if (game.nextTurnEffects[game.currentPlayer].cannotRetreat) {
-        alert('Cannot retreat this turn.');
+        showLocalAlert('Cannot retreat this turn.');
         return;
     }
     if (game.retreatUsedThisTurn) {
-        alert('You can only retreat once per turn.');
+        showLocalAlert('You can only retreat once per turn.');
         return;
     }
 
@@ -8098,7 +8140,7 @@ function switchToActive(cardId) {
 
     if (benchIndex === -1) return;
     if (game.nextTurnEffects[game.currentPlayer].cannotRetreat) {
-        alert('Cannot retreat this turn.');
+        showLocalAlert('Cannot retreat this turn.');
         closeModal('action-modal');
         return;
     }
@@ -8114,7 +8156,7 @@ function switchToActive(cardId) {
         game.applyPassiveStatuses();
     } else {
         if (game.retreatUsedThisTurn) {
-            alert('You can only retreat once per turn.');
+            showLocalAlert('You can only retreat once per turn.');
             closeModal('action-modal');
             return;
         }
@@ -8124,7 +8166,7 @@ function switchToActive(cardId) {
         const energyCount = active.attachedEnergy ? active.attachedEnergy.length : 0;
 
         if (energyCount < retreatCost) {
-            alert(`Need to pay ${retreatCost} energy retreat cost from active ${active.name}, but only have ${energyCount}. Use Retreat button instead.`);
+            showLocalAlert(`Need to pay ${retreatCost} energy retreat cost from active ${active.name}, but only have ${energyCount}. Use Retreat button instead.`);
             closeModal('action-modal');
             return;
         }
@@ -8163,12 +8205,12 @@ function confirmSwitch(cardId, benchIndex, retreatCost) {
     const active = player.active;
 
     if (game.nextTurnEffects[game.currentPlayer].cannotRetreat) {
-        alert('Cannot retreat this turn.');
+        showLocalAlert('Cannot retreat this turn.');
         closeModal('action-modal');
         return;
     }
     if (game.retreatUsedThisTurn) {
-        alert('You can only retreat once per turn.');
+        showLocalAlert('You can only retreat once per turn.');
         closeModal('action-modal');
         return;
     }
@@ -8249,7 +8291,7 @@ function useActivatedAbility(cardId, abilitySlot) {
     if (!ability || ability.type !== 'activated') return;
 
     if (abilitiesDisabledFor(game.currentPlayer)) {
-        alert('Abilities are disabled this turn.');
+        showLocalAlert('Abilities are disabled this turn.');
         game.log('Abilities are disabled this turn (Nullify).', 'warning');
         return;
     }
@@ -8261,7 +8303,7 @@ function useActivatedAbility(cardId, abilitySlot) {
         case 'Nullify': {
             // Luke Xu: If benched this turn, opponent abilities have no effect during their next turn
             if (!card.wasJustBenched) {
-                alert('Nullify can only be used if Luke Xu was benched this turn.');
+                showLocalAlert('Nullify can only be used if Luke Xu was benched this turn.');
                 break;
             }
 
@@ -8275,11 +8317,11 @@ function useActivatedAbility(cardId, abilitySlot) {
         case 'Leave Rehearsal Early':
             // Happy Ruth: Bench only, no tools attached
             if (!player.bench.includes(card)) {
-                alert('Happy Ruth must be on the bench to use this ability.');
+                showLocalAlert('Happy Ruth must be on the bench to use this ability.');
                 break;
             }
             if (card.attachedTools && card.attachedTools.length > 0) {
-                alert('Happy Ruth cannot have tools attached to use this ability.');
+                showLocalAlert('Happy Ruth cannot have tools attached to use this ability.');
                 break;
             }
 
@@ -8307,17 +8349,17 @@ function useActivatedAbility(cardId, abilitySlot) {
         case 'Profit Margins':
             // Emily: Discard a tool to draw 2 cards
             if (player.active !== card) {
-                alert('Emily must be active to use Profit Margins!');
+                showLocalAlert('Emily must be active to use Profit Margins!');
                 break;
             }
-            alert('Profit Margins triggers automatically right before your attack.');
+            showLocalAlert('Profit Margins triggers automatically right before your attack.');
             break;
 
         case 'Program Production':
             // Rachel: Retrieve concert programs/tickets from discard
             if (player.active === card) {
                 if (card.usedProgramProductionThisTurn) {
-                    alert('Program Production can only be used once per turn!');
+                    showLocalAlert('Program Production can only be used once per turn!');
                     closeModal('action-modal');
                     break;
                 }
@@ -8327,10 +8369,10 @@ function useActivatedAbility(cardId, abilitySlot) {
                 if (programsAndTickets.length > 0) {
                     showProgramProductionModal(player, programsAndTickets);
                 } else {
-                    alert('No Concert Programs or Tickets in discard pile!');
+                    showLocalAlert('No Concert Programs or Tickets in discard pile!');
                 }
             } else {
-                alert('Rachel must be in the active slot to use this ability!');
+                showLocalAlert('Rachel must be in the active slot to use this ability!');
             }
             break;
 
@@ -8346,7 +8388,7 @@ function useActivatedAbility(cardId, abilitySlot) {
                 game.switchPlayer();
                 updateUI();
             } else {
-                alert('Kei must be on the bench to use this ability!');
+                showLocalAlert('Kei must be on the bench to use this ability!');
             }
             break;
 
@@ -8362,11 +8404,11 @@ function useActivatedAbility(cardId, abilitySlot) {
                     closeModal('action-modal');
                     updateUI();
                 } else {
-                    alert('No Laptop in deck!');
+                    showLocalAlert('No Laptop in deck!');
                     closeModal('action-modal');
                 }
             } else {
-                alert('Ross must be on the bench to use this ability!');
+                showLocalAlert('Ross must be on the bench to use this ability!');
                 closeModal('action-modal');
             }
             break;
@@ -8374,7 +8416,7 @@ function useActivatedAbility(cardId, abilitySlot) {
         case 'Reverse Heist':
             // David Man: Shuffle discard, randomly choose 3, put items/tools on top of deck
             if (player.discard.length < 3) {
-                alert('Need at least 3 cards in discard pile!');
+                showLocalAlert('Need at least 3 cards in discard pile!');
                 closeModal('action-modal');
                 break;
             }
@@ -8413,7 +8455,7 @@ function useActivatedAbility(cardId, abilitySlot) {
         case 'Category Theory':
             // Joshua Kou: If this is the only card in your hand, reveal it, shuffle into deck, draw 4
             if (player.hand.length !== 1 || player.hand[0].id !== card.id) {
-                alert('Category Theory can only be used if this is the only card in your hand!');
+                showLocalAlert('Category Theory can only be used if this is the only card in your hand!');
                 closeModal('action-modal');
                 break;
             }
@@ -8431,12 +8473,12 @@ function useActivatedAbility(cardId, abilitySlot) {
         case 'BAI Wrangler':
             // Izzy: Once per turn, move a stadium from discard to bottom of deck
             if (card.usedBAIWranglerThisTurn) {
-                alert('BAI Wrangler can only be used once per turn!');
+                showLocalAlert('BAI Wrangler can only be used once per turn!');
                 closeModal('action-modal');
                 break;
             }
             if (!player.discard.some(c => c.cardType === 'stadium')) {
-                alert('No Stadium cards in discard pile!');
+                showLocalAlert('No Stadium cards in discard pile!');
                 closeModal('action-modal');
                 break;
             }
@@ -8453,7 +8495,7 @@ function useActivatedAbility(cardId, abilitySlot) {
             if (player.hand.length >= opponent.hand.length * 2) {
                 showHandRevealModal(opponent, opponent.hand.length, false);
             } else {
-                alert(`Need at least ${opponent.hand.length * 2} cards (opponent has ${opponent.hand.length})`);
+                showLocalAlert(`Need at least ${opponent.hand.length * 2} cards (opponent has ${opponent.hand.length})`);
                 closeModal('action-modal');
             }
             break;
@@ -8461,7 +8503,7 @@ function useActivatedAbility(cardId, abilitySlot) {
         case 'Cleric Spell':
             // Jessica Jung: Shuffle one discard back to deck
             if (card.usedClericSpellThisTurn) {
-                alert('Cleric Spell can only be used once per turn!');
+                showLocalAlert('Cleric Spell can only be used once per turn!');
                 closeModal('action-modal');
                 break;
             }
@@ -8476,7 +8518,7 @@ function useActivatedAbility(cardId, abilitySlot) {
                 game.tempSelections.clericSpellCardId = card.id;
                 showClericSpellModal(player);
             } else {
-                alert('No cards in discard pile!');
+                showLocalAlert('No cards in discard pile!');
                 closeModal('action-modal');
             }
             break;
@@ -8484,7 +8526,7 @@ function useActivatedAbility(cardId, abilitySlot) {
         case 'Borrow a Bow':
             // Ina Ma: Move energy from another string (passive implementation in move, this is activated version)
             if (game.borrowABowUsedThisTurn) {
-                alert('Borrow a Bow can only be used once per turn!');
+                showLocalAlert('Borrow a Bow can only be used once per turn!');
                 closeModal('action-modal');
                 break;
             }
@@ -8494,7 +8536,7 @@ function useActivatedAbility(cardId, abilitySlot) {
             if (stringCharsForBorrow.length > 0) {
                 showBorrowSelection(player, stringCharsForBorrow, card, true);
             } else {
-                alert('No other strings with energy to borrow from!');
+                showLocalAlert('No other strings with energy to borrow from!');
                 closeModal('action-modal');
             }
             break;
@@ -8513,13 +8555,13 @@ function useCategoryTheoryFromHand(cardId) {
     if (!card) return;
 
     if (abilitiesDisabledFor(game.currentPlayer)) {
-        alert('Abilities are disabled this turn.');
+        showLocalAlert('Abilities are disabled this turn.');
         game.log('Abilities are disabled this turn (Nullify).', 'warning');
         return;
     }
 
     if (player.hand.length !== 1 || player.hand[0].id !== card.id) {
-        alert('Category Theory can only be used if this is the only card in your hand!');
+        showLocalAlert('Category Theory can only be used if this is the only card in your hand!');
         closeModal('action-modal');
         return;
     }
@@ -8545,7 +8587,7 @@ function showClericSpellModal(player) {
     const validCards = player.discard.filter(card => card && card.name);
 
     if (validCards.length === 0) {
-        alert('No valid cards in discard pile!');
+        showLocalAlert('No valid cards in discard pile!');
         closeModal('action-modal');
         return;
     }
@@ -9184,6 +9226,7 @@ function setupStartScreen() {
     const multiplayerToggle = document.getElementById('multiplayer-toggle');
     const multiplayerRoomInput = document.getElementById('multiplayer-room');
     const copyRoomCodeBtn = document.getElementById('copy-room-code-btn');
+    const howToPlayButton = document.getElementById('how-to-play-btn');
     setMenuBackgroundMusic();
 
     function updateMultiplayerDeckUI() {
@@ -9286,8 +9329,83 @@ function setupStartScreen() {
         openCardBrowser();
     });
 
+    if (howToPlayButton) {
+        howToPlayButton.addEventListener('click', () => {
+            openHowToPlayModal();
+        });
+    }
+
     // Load custom decks into dropdown on page load
     loadCustomDecksIntoDropdown();
+}
+
+function openHowToPlayModal() {
+    const modal = document.getElementById('how-to-play-modal');
+    const content = document.getElementById('how-to-play-content');
+    if (!modal || !content) return;
+
+    content.innerHTML = `
+        <h2>How to Play</h2>
+        <div class="how-to-play-sections">
+            <section>
+                <h3>Win Condition</h3>
+                <p>You win by knocking out 3 of your opponent's characters.</p>
+                <p>A character is knocked out when its total damage is equal to or greater than its HP.</p>
+            </section>
+            <section>
+                <h3>Before Turn 1</h3>
+                <p>Choose 1 Active character from your opening hand. You can also place up to 3 characters on your Bench.</p>
+                <p>After choosing, click <strong>Confirm Setup</strong>. The game begins once both players confirm.</p>
+            </section>
+            <section>
+                <h3>Your Turn</h3>
+                <p>On your turn you can play cards from hand, attach energy, use card effects, retreat, and attack.</p>
+                <p>Attacking ends your turn.</p>
+                <ul>
+                    <li>You can usually attach 1 energy per turn.</li>
+                    <li>You can usually play 1 supporter per turn.</li>
+                    <li>Your Bench can hold up to 3 characters.</li>
+                </ul>
+            </section>
+            <section>
+                <h3>Reading the Board</h3>
+                <ul>
+                    <li><strong>Top board:</strong> Opponent.</li>
+                    <li><strong>Bottom board:</strong> You.</li>
+                    <li><strong>Center:</strong> Shared Stadium slot.</li>
+                    <li><strong>Bottom hand area:</strong> Your current hand.</li>
+                </ul>
+            </section>
+            <section>
+                <h3>Controls</h3>
+                <ul>
+                    <li>Click a card to select it and see available actions.</li>
+                    <li>Use the action bar for quick buttons: Play, Attach Energy, Attack, and Retreat.</li>
+                    <li>Click your discard pile to inspect it (opponent discard is hidden).</li>
+                    <li>Use <strong>Hide Log</strong> if you want more board space.</li>
+                    <li>Press and hold <strong>Tab</strong> to view keyboard shortcuts.</li>
+                </ul>
+            </section>
+            <section>
+                <h3>Multiplayer</h3>
+                <ul>
+                    <li>Turn on Multiplayer on the start screen.</li>
+                    <li>Create a room by leaving the code blank, or join with a 4-digit room code.</li>
+                    <li>If a card needs your opponent to make a choice, the game pauses and resumes after they choose.</li>
+                </ul>
+            </section>
+            <section>
+                <h3>Deck Builder</h3>
+                <ul>
+                    <li>Open <strong>Build Custom Deck</strong> from the start screen.</li>
+                    <li>Add cards until your list is complete, then save it.</li>
+                    <li>Select your saved deck from the deck menu before starting a game.</li>
+                </ul>
+            </section>
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
 }
 
 // ===== DECK BUILDER FUNCTIONALITY =====
@@ -9296,6 +9414,8 @@ let currentDeck = [];
 let currentDeckName = '';
 
 function openDeckBuilder() {
+    const howToPlayModal = document.getElementById('how-to-play-modal');
+    if (howToPlayModal) howToPlayModal.classList.add('hidden');
     const modal = document.getElementById('deck-builder-modal');
     modal.classList.remove('hidden');
 
@@ -9427,10 +9547,39 @@ function getCharacterDeckBuilderDescription(card) {
     return 'No additional character description.';
 }
 
+function showDeckBuilderCardDetails(card, type) {
+    const modal = document.getElementById('card-modal');
+    const detail = document.getElementById('card-detail');
+    if (!modal || !detail || !card) return;
+
+    const cardWithType = { ...card, cardType: type };
+    let html = `<h2>${card.name}</h2>`;
+    html += `<div class="detail-section"><span class="detail-label">Type:</span> ${String(type || '').toUpperCase()}</div>`;
+
+    if (type === 'stadium') {
+        html += `<div class="detail-section"><span class="detail-label">Venue Type:</span> ${getStadiumVenueLabel(cardWithType)}</div>`;
+    }
+
+    if (type === 'character') {
+        html += `<div class="detail-section"><span class="detail-label">HP:</span> ${card.hp || 0}</div>`;
+        if (Array.isArray(card.type) && card.type.length) {
+            html += `<div class="detail-section"><span class="detail-label">Character Type:</span> ${card.type.join(', ')}</div>`;
+        }
+        html += `<div class="detail-section"><span class="detail-label">Description:</span> ${getCharacterDeckBuilderDescription(cardWithType)}</div>`;
+    } else {
+        const fullText = card.effect || card.description || 'No description available.';
+        html += `<div class="detail-section"><span class="detail-label">Description:</span> ${fullText}</div>`;
+    }
+
+    detail.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
 function createPoolCardElement(card, type) {
     const div = document.createElement('div');
     div.className = `pool-card ${type}`;
     const cardWithType = { ...card, cardType: type };
+    div.addEventListener('click', () => showDeckBuilderCardDetails(card, type));
 
     const header = document.createElement('div');
     header.className = 'pool-card-header';
@@ -9459,17 +9608,15 @@ function createPoolCardElement(card, type) {
         div.appendChild(hp);
 
         const desc = getCharacterDeckBuilderDescription(cardWithType);
-        const shortDesc = desc.length > 160 ? `${desc.slice(0, 157)}...` : desc;
         const descEl = document.createElement('div');
         descEl.className = 'pool-card-effect pool-card-description';
-        descEl.textContent = shortDesc;
+        descEl.textContent = desc;
         descEl.title = desc;
         div.appendChild(descEl);
     } else {
         const effect = document.createElement('div');
         effect.className = 'pool-card-effect';
-        const venuePrefix = type === 'stadium' ? `Venue Type: ${getStadiumVenueLabel(cardWithType)}. ` : '';
-        effect.textContent = `${venuePrefix}${card.effect || card.description || ''}`.trim();
+        effect.textContent = `${card.effect || card.description || ''}`.trim();
         div.appendChild(effect);
     }
 
@@ -9482,7 +9629,10 @@ function createPoolCardElement(card, type) {
     const addBtn = document.createElement('button');
     addBtn.className = 'pool-card-add';
     addBtn.textContent = '+ Add to Deck';
-    addBtn.onclick = () => addCardToDeck(card, type);
+    addBtn.onclick = (event) => {
+        event.stopPropagation();
+        addCardToDeck(card, type);
+    };
     div.appendChild(addBtn);
 
     return div;
@@ -9491,7 +9641,7 @@ function createPoolCardElement(card, type) {
 function addCardToDeck(card, cardCategory) {
     // Check if deck is full
     if (currentDeck.length >= 20) {
-        alert('Deck is full! Maximum 20 cards.');
+        showLocalAlert('Deck is full! Maximum 20 cards.');
         return;
     }
 
@@ -9500,7 +9650,7 @@ function addCardToDeck(card, cardCategory) {
     if (cardCategory !== 'energy') {
         const count = currentDeck.filter(c => c.name === card.name).length;
         if (count >= 4) {
-            alert('Maximum 4 copies of the same card (except energy).');
+            showLocalAlert('Maximum 4 copies of the same card (except energy).');
             return;
         }
     }
@@ -9576,12 +9726,12 @@ function saveDeck() {
     const deckName = document.getElementById('custom-deck-name').value.trim();
 
     if (!deckName) {
-        alert('Please enter a deck name.');
+        showLocalAlert('Please enter a deck name.');
         return;
     }
 
     if (currentDeck.length !== 20) {
-        alert('Deck must have exactly 20 cards.');
+        showLocalAlert('Deck must have exactly 20 cards.');
         return;
     }
 
@@ -9592,7 +9742,7 @@ function saveDeck() {
     customDecks[deckName] = currentDeck;
     localStorage.setItem('customDecks', JSON.stringify(customDecks));
 
-    alert(`Deck "${deckName}" saved successfully!`);
+    showLocalAlert(`Deck "${deckName}" saved successfully!`);
 
     // Refresh saved decks list
     loadSavedDecks();
@@ -9666,7 +9816,7 @@ function deleteDeck(deckName) {
 
 function exportDeck() {
     if (currentDeck.length === 0) {
-        alert('No deck to export! Add cards to your deck first.');
+        showLocalAlert('No deck to export! Add cards to your deck first.');
         return;
     }
 
@@ -9722,18 +9872,18 @@ function copyDeckCode() {
         // Use modern Clipboard API if available, fall back to execCommand
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(code).then(() => {
-                alert('Deck code copied to clipboard!');
+                showLocalAlert('Deck code copied to clipboard!');
             }).catch(() => {
                 // Fallback: select and copy manually
                 textarea.select();
                 document.execCommand('copy');
-                alert('Deck code copied to clipboard!');
+                showLocalAlert('Deck code copied to clipboard!');
             });
         } else {
             // Fallback for older browsers
             textarea.select();
             document.execCommand('copy');
-            alert('Deck code copied to clipboard!');
+            showLocalAlert('Deck code copied to clipboard!');
         }
     }
 }
@@ -9765,7 +9915,7 @@ function processDeckImport() {
     const code = textarea.value.trim();
 
     if (!code) {
-        alert('Please paste a deck code first!');
+        showLocalAlert('Please paste a deck code first!');
         return;
     }
 
@@ -9821,9 +9971,9 @@ function processDeckImport() {
             message += failedCards.join('\n');
         }
 
-        alert(message);
+        showLocalAlert(message);
     } catch (error) {
-        alert('Invalid deck code! Please check the code and try again.\n\nError: ' + error.message);
+        showLocalAlert('Invalid deck code! Please check the code and try again.\n\nError: ' + error.message);
     }
 }
 
@@ -9961,7 +10111,7 @@ function showEmbouchureSelection(player) {
     const charsWithEnergy = [player.active, ...player.bench].filter(c => c && c.attachedEnergy && c.attachedEnergy.length > 0);
 
     if (charsWithEnergy.length === 0) {
-        alert('No characters have energy to move!');
+        showLocalAlert('No characters have energy to move!');
         closeModal('action-modal');
         return;
     }
@@ -10753,7 +10903,7 @@ function toggleSongVotingCard(playerNum, cardId) {
         if (cardElement) cardElement.classList.remove('selected');
     } else {
         if (selection.length >= 2) {
-            alert('You can only select 2 cards.');
+            showLocalAlert('You can only select 2 cards.');
             return;
         }
         selection.push(cardId);
@@ -10768,7 +10918,7 @@ function confirmSongVotingSelection(playerNum) {
     if (!game.tempSelections || !game.tempSelections.songVoting) return;
     const selection = game.tempSelections.songVoting.selections[playerNum];
     if (selection.length !== 2) {
-        alert('Select exactly 2 cards.');
+        showLocalAlert('Select exactly 2 cards.');
         return;
     }
 
@@ -10958,7 +11108,7 @@ function executeWipeout() {
     const attacker = game.tempSelections.wipeoutAttacker;
 
     if (targets.length !== 3) {
-        alert('Must select exactly 3 targets!');
+        showLocalAlert('Must select exactly 3 targets!');
         return;
     }
 
@@ -11341,7 +11491,7 @@ function confirmHarmonicsTargets() {
 
     const targetCount = game.tempSelections.harmonicsTargetCount;
     if (selected.size !== targetCount) {
-        alert(`Select exactly ${targetCount} targets.`);
+        showLocalAlert(`Select exactly ${targetCount} targets.`);
         return;
     }
 

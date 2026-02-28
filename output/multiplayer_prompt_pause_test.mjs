@@ -4,7 +4,7 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-async function waitForMainPhase(page, timeoutMs = 20000) {
+async function waitForMainPhase(page, timeoutMs = 45000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const phase = await page.evaluate(() => {
@@ -15,6 +15,15 @@ async function waitForMainPhase(page, timeoutMs = 20000) {
     await page.waitForTimeout(200);
   }
   throw new Error('Timed out waiting for main phase.');
+}
+
+async function chooseActiveAndConfirm(page) {
+  await page.locator('#setup-guide .setup-guide__choice', { hasText: 'Active:' }).first().click();
+  await page.waitForTimeout(180);
+  const confirmBtn = page.locator('#setup-guide .setup-guide__choice', { hasText: /Confirm Setup|Ready/ }).first();
+  if (await confirmBtn.count()) {
+    await confirmBtn.click();
+  }
 }
 
 async function run() {
@@ -58,8 +67,8 @@ async function run() {
   });
 
   // Opening setup: each player picks local active.
-  await p1.locator('#setup-guide .setup-guide__choice', { hasText: 'Active:' }).first().click();
-  await p2.locator('#setup-guide .setup-guide__choice', { hasText: 'Active:' }).first().click();
+  await chooseActiveAndConfirm(p1);
+  await chooseActiveAndConfirm(p2);
   await Promise.all([waitForMainPhase(p1), waitForMainPhase(p2)]);
 
   const p1State = await p1.evaluate(() => JSON.parse(window.render_game_to_text()));

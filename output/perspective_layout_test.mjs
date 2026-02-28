@@ -20,15 +20,9 @@ async function run() {
   await page.waitForTimeout(150);
   await page.locator('#setup-guide .setup-guide__column').nth(1).locator('.setup-guide__choice', { hasText: 'Active:' }).first().click();
   await page.waitForTimeout(120);
-  const confirmButtons = page.locator('#setup-guide .setup-guide__choice', { hasText: 'Confirm Setup' });
-  const confirmCount = await confirmButtons.count();
-  if (confirmCount >= 1) {
-    await confirmButtons.nth(0).click();
-    await page.waitForTimeout(120);
-  }
-  if (confirmCount >= 2) {
-    await confirmButtons.nth(1).click();
-  }
+  await page.locator('#setup-guide .setup-guide__column').nth(0).locator('.setup-guide__choice', { hasText: /Confirm Setup|Ready/ }).first().click();
+  await page.waitForTimeout(120);
+  await page.locator('#setup-guide .setup-guide__column').nth(1).locator('.setup-guide__choice', { hasText: /Confirm Setup|Ready/ }).first().click();
   await page.waitForTimeout(250);
 
   const defaultGeometry = await page.evaluate(() => {

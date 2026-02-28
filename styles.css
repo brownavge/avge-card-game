@@ -4823,7 +4823,8 @@ body {
 /* Start screen CTA buttons: keep them visibly interactive (lighter, higher-luminance) */
 #start-screen #start-game-btn,
 #start-screen #open-deck-builder-btn,
-#start-screen #view-cards-btn {
+#start-screen #view-cards-btn,
+#start-screen #how-to-play-btn {
     background: linear-gradient(180deg, #f8fbff 0%, #dbeafe 100%) !important;
     color: #0f2a46 !important;
     border: 1px solid rgba(59, 130, 246, 0.36) !important;
@@ -4834,7 +4835,8 @@ body {
 
 #start-screen #start-game-btn:hover,
 #start-screen #open-deck-builder-btn:hover,
-#start-screen #view-cards-btn:hover {
+#start-screen #view-cards-btn:hover,
+#start-screen #how-to-play-btn:hover {
     background: linear-gradient(180deg, #ffffff 0%, #e2ecff 100%) !important;
     box-shadow: 0 14px 24px rgba(15, 42, 70, 0.26) !important;
 }
@@ -5854,4 +5856,80 @@ body.multiplayer-perspective-p2 #player1-board {
 
 body.multiplayer-perspective-p2 #player2-board {
     grid-row: 4 !important;
+}
+
+#how-to-play-modal .modal-content {
+    width: min(900px, calc(100vw - 36px)) !important;
+    max-height: calc(100vh - 56px) !important;
+    overflow: auto !important;
+    padding: 18px 20px 20px !important;
+}
+
+#how-to-play-content h2 {
+    margin: 0 0 10px !important;
+}
+
+.how-to-play-sections {
+    display: grid !important;
+    gap: 10px !important;
+}
+
+.how-to-play-sections section {
+    background: rgba(15, 23, 42, 0.06) !important;
+    border: 1px solid rgba(148, 163, 184, 0.28) !important;
+    border-radius: 10px !important;
+    padding: 10px 12px !important;
+}
+
+.how-to-play-sections h3 {
+    margin: 0 0 6px !important;
+    font-size: 15px !important;
+}
+
+.how-to-play-sections p,
+.how-to-play-sections li {
+    font-size: 13px !important;
+    line-height: 1.45 !important;
+}
+
+.how-to-play-sections ul {
+    margin: 6px 0 0 16px !important;
+}
+
+/* Keep gameplay/deck modals above help modal when multiple are open. */
+#how-to-play-modal {
+    z-index: 1000 !important;
+}
+
+#card-modal {
+    z-index: 1030 !important;
+}
+
+#action-modal,
+#playtest-modal,
+#deck-builder-modal,
+#deck-code-modal,
+#card-browser-modal {
+    z-index: 1010 !important;
+}
+
+/* Reduce obstruction of game log by keyboard hint until hovered away. */
+#keyboard-shortcuts-hint {
+    opacity: 0.92 !important;
+    pointer-events: auto !important;
+    transition: opacity 0.22s ease, transform 0.22s ease !important;
+}
+
+#keyboard-shortcuts-hint:hover {
+    opacity: 0.08 !important;
+}
+
+/* Ensure playtest remove button sits above card content and remains clickable. */
+#hand-cards .hand-card-wrapper {
+    overflow: visible !important;
+}
+
+.playtest-remove-card {
+    z-index: 24 !important;
+    pointer-events: auto !important;
 }
