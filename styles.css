@@ -5649,6 +5649,27 @@ body.multiplayer-perspective-p2 #player2-board .bench-zone {
     color: #263b52;
 }
 
+.pool-card-character-line {
+    margin-top: 4px !important;
+    padding-top: 2px;
+    border-top: 1px dashed rgba(37, 99, 235, 0.18);
+}
+
+#card-detail .detail-card-list {
+    display: grid;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+#card-detail .detail-card-row {
+    font-size: 13px;
+    line-height: 1.4;
+    padding: 6px 8px;
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.05);
+    border: 1px solid rgba(148, 163, 184, 0.28);
+}
+
 #deck-builder-modal .pool-card-type,
 #card-browser-modal .pool-card-type {
     white-space: normal;
@@ -5902,10 +5923,13 @@ body.multiplayer-perspective-p2 #player2-board {
 }
 
 #card-modal {
-    z-index: 1030 !important;
+    z-index: 1040 !important;
 }
 
-#action-modal,
+#action-modal {
+    z-index: 1040 !important;
+}
+
 #playtest-modal,
 #deck-builder-modal,
 #deck-code-modal,
@@ -5932,4 +5956,67 @@ body.multiplayer-perspective-p2 #player2-board {
 .playtest-remove-card {
     z-index: 24 !important;
     pointer-events: auto !important;
+}
+
+/* Final board symmetry: both sides match the bottom-board spacing style. */
+#player1-board .board-section,
+#player2-board .board-section {
+    display: grid !important;
+    grid-template-columns: minmax(190px, 240px) minmax(130px, 190px) minmax(280px, 1fr) !important;
+    grid-template-areas: "piles active bench" !important;
+    align-items: start !important;
+    column-gap: clamp(24px, 4vw, 72px) !important;
+}
+
+#player1-board .deck-discard-zone,
+#player2-board .deck-discard-zone {
+    grid-area: piles !important;
+    justify-self: start !important;
+}
+
+#player1-board .active-zone,
+#player2-board .active-zone {
+    grid-area: active !important;
+    justify-self: center !important;
+    align-self: start !important;
+}
+
+#player1-board .bench-zone,
+#player2-board .bench-zone {
+    grid-area: bench !important;
+    justify-self: end !important;
+    align-self: start !important;
+}
+
+#player1-board .bench-zone .bench-slots,
+#player2-board .bench-zone .bench-slots {
+    justify-content: flex-end !important;
+}
+
+/* Keep symmetry even in Player 2 perspective mode. */
+body.multiplayer-perspective-p2 #player1-board .board-section,
+body.multiplayer-perspective-p2 #player2-board .board-section {
+    grid-template-columns: minmax(190px, 240px) minmax(130px, 190px) minmax(280px, 1fr) !important;
+    grid-template-areas: "piles active bench" !important;
+}
+
+@media (max-width: 1180px) {
+    #player1-board .board-section,
+    #player2-board .board-section {
+        grid-template-columns: 1fr !important;
+        grid-template-areas:
+            "active"
+            "bench"
+            "piles" !important;
+        row-gap: 8px !important;
+    }
+
+    #player1-board .bench-zone,
+    #player2-board .bench-zone,
+    #player1-board .active-zone,
+    #player2-board .active-zone,
+    #player1-board .deck-discard-zone,
+    #player2-board .deck-discard-zone {
+        justify-self: stretch !important;
+    }
 }

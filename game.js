@@ -337,12 +337,40 @@ class GameState {
         if (game.nextTurnEffects[this.currentPlayer].ominousChimesDamage) {
             const targetId = game.nextTurnEffects[this.currentPlayer].ominousChimesTarget;
             const target = [player.active, ...player.bench].find(c => c && c.id === targetId);
+            const sourceInfo = game.nextTurnEffects[this.currentPlayer].ominousChimesSource || null;
 
             if (target) {
-                this.dealDamage(target, game.nextTurnEffects[this.currentPlayer].ominousChimesDamage);
-                this.log(`Ominous Chimes: ${target.name} takes ${game.nextTurnEffects[this.currentPlayer].ominousChimesDamage} delayed damage!`, 'damage');
+                const baseDamage = Number(game.nextTurnEffects[this.currentPlayer].ominousChimesDamage || 0);
+                const sourceSnapshot = sourceInfo && Array.isArray(sourceInfo.type)
+                    ? {
+                        id: sourceInfo.id || `ominous_${this.currentPlayer}_${this.turn}`,
+                        name: sourceInfo.name || 'Ominous Chimes',
+                        type: sourceInfo.type
+                    }
+                    : {
+                        id: `ominous_${this.currentPlayer}_${this.turn}`,
+                        name: 'Ominous Chimes',
+                        type: []
+                    };
+
+                // Delayed attack damage should still run through standard attack modifiers.
+                const originalCurrentPlayer = game.currentPlayer;
+                const sourcePlayerNum = Number(sourceInfo && sourceInfo.playerNum);
+                if (sourcePlayerNum === 1 || sourcePlayerNum === 2) {
+                    game.currentPlayer = sourcePlayerNum;
+                }
+                const finalDamage = calculateDamage(sourceSnapshot, target, baseDamage, { name: 'Ominous Chimes' });
+                game.currentPlayer = originalCurrentPlayer;
+
+                this.dealDamage(target, finalDamage, sourceSnapshot, {
+                    isAttack: true,
+                    baseDamage,
+                    superEffectiveApplied: game.lastSuperEffectiveApplied
+                });
+                this.log(`Ominous Chimes: ${target.name} takes ${finalDamage} delayed damage!`, 'damage');
             }
             game.nextTurnEffects[this.currentPlayer].ominousChimesDamage = 0;
+            game.nextTurnEffects[this.currentPlayer].ominousChimesSource = null;
         }
 
     // Katie Xiang's Nausicaa's Undying Heartbeat - At ≤60 HP, heal 20 from all other characters
@@ -6999,8 +7027,19 @@ function selectSATBTarget(targetId) {
     const target = [opponent.active, ...opponent.bench].find(c => c && c.id === targetId);
 
     if (target) {
-        game.dealDamage(target, 20);
-        game.log(`SATB hit ${target.name} for 20 damage`, 'damage');
+        const attackerRef = game.tempSelections && game.tempSelections.satbAttacker;
+        const attacker = (attackerRef && attackerRef.id) ? (findCardById(attackerRef.id) || attackerRef) : game.lastAttackSource;
+        const baseDamage = 20;
+        const hasValidAttacker = !!(attacker && Array.isArray(attacker.type));
+        const finalDamage = hasValidAttacker
+            ? calculateDamage(attacker, target, baseDamage, { name: 'SATB' })
+            : Math.max(0, baseDamage);
+        game.dealDamage(target, finalDamage, attacker, {
+            isAttack: true,
+            baseDamage,
+            superEffectiveApplied: game.lastSuperEffectiveApplied
+        });
+        game.log(`SATB hit ${target.name} for ${finalDamage} damage`, 'damage');
 
         game.tempSelections.satbHitsRemaining--;
 
@@ -9537,14 +9576,70 @@ function getStadiumVenueLabel(card) {
     return card.isConcertHall ? 'Concert Hall' : 'Not a Concert Hall';
 }
 
+function escapeHtml(value) {
+    return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function getCharacterDeckBuilderEntries(card) {
+    if (!card || card.cardType !== 'character') return [];
+    const entries = [];
+
+    if (card.description) {
+        entries.push({
+            kind: 'description',
+            label: 'Overview',
+            text: String(card.description).trim()
+        });
+    }
+
+    if (card.ability) {
+        entries.push({
+            kind: 'ability',
+            label: card.ability.name || 'Ability',
+            text: card.ability.description || 'No additional ability text.'
+        });
+    }
+
+    if (card.ability2) {
+        entries.push({
+            kind: 'ability',
+            label: card.ability2.name || 'Ability',
+            text: card.ability2.description || 'No additional ability text.'
+        });
+    }
+
+    if (Array.isArray(card.moves) && card.moves.length) {
+        card.moves.forEach((move) => {
+            if (!move) return;
+            const moveName = move.name || 'Move';
+            const moveCost = Number.isFinite(Number(move.cost)) ? Number(move.cost) : 0;
+            const moveDamage = Number.isFinite(Number(move.damage)) ? Number(move.damage) : 0;
+            const moveText = move.effect || 'No additional move effect.';
+            entries.push({
+                kind: 'move',
+                label: moveName,
+                meta: `Cost ${moveCost} • ${moveDamage} dmg`,
+                text: moveText
+            });
+        });
+    }
+
+    return entries;
+}
+
 function getCharacterDeckBuilderDescription(card) {
-    if (!card || card.cardType !== 'character') return '';
-    if (card.description) return card.description;
-    if (card.ability && card.ability.description) return `${card.ability.name}: ${card.ability.description}`;
-    if (card.ability2 && card.ability2.description) return `${card.ability2.name}: ${card.ability2.description}`;
-    const moveWithEffect = (card.moves || []).find((move) => move && move.effect);
-    if (moveWithEffect) return `${moveWithEffect.name}: ${moveWithEffect.effect}`;
-    return 'No additional character description.';
+    const entries = getCharacterDeckBuilderEntries(card);
+    if (!entries.length) return 'No additional character description.';
+    return entries.map((entry) => {
+        if (entry.kind === 'move') return `Move - ${entry.label} (${entry.meta}): ${entry.text}`;
+        if (entry.kind === 'ability') return `Ability - ${entry.label}: ${entry.text}`;
+        return entry.text;
+    }).join(' ');
 }
 
 function showDeckBuilderCardDetails(card, type) {
@@ -9565,10 +9660,26 @@ function showDeckBuilderCardDetails(card, type) {
         if (Array.isArray(card.type) && card.type.length) {
             html += `<div class="detail-section"><span class="detail-label">Character Type:</span> ${card.type.join(', ')}</div>`;
         }
-        html += `<div class="detail-section"><span class="detail-label">Description:</span> ${getCharacterDeckBuilderDescription(cardWithType)}</div>`;
+        const entries = getCharacterDeckBuilderEntries(cardWithType);
+        if (!entries.length) {
+            html += `<div class="detail-section"><span class="detail-label">Description:</span> No additional character description.</div>`;
+        } else {
+            html += `<div class="detail-section"><span class="detail-label">Details:</span></div>`;
+            html += `<div class="detail-card-list">`;
+            entries.forEach((entry) => {
+                if (entry.kind === 'description') {
+                    html += `<div class="detail-card-row"><strong>Overview:</strong> ${escapeHtml(entry.text)}</div>`;
+                } else if (entry.kind === 'ability') {
+                    html += `<div class="detail-card-row"><strong>Ability:</strong> ${escapeHtml(entry.label)} - ${escapeHtml(entry.text)}</div>`;
+                } else if (entry.kind === 'move') {
+                    html += `<div class="detail-card-row"><strong>${escapeHtml(entry.label)}</strong> (${escapeHtml(entry.meta)}): ${escapeHtml(entry.text)}</div>`;
+                }
+            });
+            html += `</div>`;
+        }
     } else {
         const fullText = card.effect || card.description || 'No description available.';
-        html += `<div class="detail-section"><span class="detail-label">Description:</span> ${fullText}</div>`;
+        html += `<div class="detail-section"><span class="detail-label">Description:</span> ${escapeHtml(fullText)}</div>`;
     }
 
     detail.innerHTML = html;
@@ -9607,12 +9718,26 @@ function createPoolCardElement(card, type) {
         hp.textContent = `HP: ${card.hp || 0}${card.type ? ` • Type: ${card.type.join(', ')}` : ''}`;
         div.appendChild(hp);
 
-        const desc = getCharacterDeckBuilderDescription(cardWithType);
-        const descEl = document.createElement('div');
-        descEl.className = 'pool-card-effect pool-card-description';
-        descEl.textContent = desc;
-        descEl.title = desc;
-        div.appendChild(descEl);
+        const entries = getCharacterDeckBuilderEntries(cardWithType);
+        if (!entries.length) {
+            const descEl = document.createElement('div');
+            descEl.className = 'pool-card-effect pool-card-description';
+            descEl.textContent = 'No additional character description.';
+            div.appendChild(descEl);
+        } else {
+            entries.forEach((entry) => {
+                const lineEl = document.createElement('div');
+                lineEl.className = 'pool-card-effect pool-card-description pool-card-character-line';
+                if (entry.kind === 'description') {
+                    lineEl.innerHTML = `<strong>Overview:</strong> ${escapeHtml(entry.text)}`;
+                } else if (entry.kind === 'ability') {
+                    lineEl.innerHTML = `<strong>Ability:</strong> ${escapeHtml(entry.label)} - ${escapeHtml(entry.text)}`;
+                } else if (entry.kind === 'move') {
+                    lineEl.innerHTML = `<strong>${escapeHtml(entry.label)}</strong> (${escapeHtml(entry.meta)}): ${escapeHtml(entry.text)}`;
+                }
+                div.appendChild(lineEl);
+            });
+        }
     } else {
         const effect = document.createElement('div');
         effect.className = 'pool-card-effect';
@@ -12388,6 +12513,12 @@ function performMoveEffect(attacker, target, move) {
             // Shuffle self back, 70 damage at end of opponent's turn
             game.nextTurnEffects[opponentNum].ominousChimesDamage = 70;
             game.nextTurnEffects[opponentNum].ominousChimesTarget = target.id;
+            game.nextTurnEffects[opponentNum].ominousChimesSource = {
+                id: attacker.id,
+                name: attacker.name,
+                type: Array.isArray(attacker.type) ? [...attacker.type] : [],
+                playerNum: game.currentPlayer
+            };
 
             // Shuffle attacker back into deck
             player.active = null;
