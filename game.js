@@ -92,6 +92,78 @@ function getCharacterHpSummary(card) {
     };
 }
 
+function getPlayerPanelSummary(playerNum) {
+    const resolvedPlayerNum = Number(playerNum);
+    const player = game?.players?.[resolvedPlayerNum];
+    if (!player) return null;
+
+    const active = player.active || null;
+    const benchCount = (player.bench || []).filter(Boolean).length;
+    const inPlayCount = benchCount + (active ? 1 : 0);
+    const activeEnergy = active && Array.isArray(active.attachedEnergy) ? active.attachedEnergy.length : 0;
+    const activeStatuses = active && Array.isArray(active.status) ? active.status.filter(Boolean) : [];
+
+    let activeName = 'No Active';
+    let activeHpText = '--';
+    let activeStatusText = 'No status';
+    let retreatText = '--';
+
+    if (active) {
+        const hpSummary = getCharacterHpSummary(active);
+        const maxHp = Number(hpSummary.currentHp || 0);
+        const damage = Number(active.damage || 0);
+        const remainingHp = Math.max(0, maxHp - damage);
+        activeName = active.name || 'Active Character';
+        activeHpText = `${remainingHp}/${maxHp}`;
+        activeStatusText = activeStatuses.length ? activeStatuses.join(', ') : 'No status';
+        retreatText = String(getEffectiveRetreatCost(active));
+    }
+
+    return {
+        playerNum: resolvedPlayerNum,
+        deck: player.deck.length,
+        hand: player.hand.length,
+        discard: player.discard.length,
+        ko: player.koCount,
+        benchCount,
+        inPlayCount,
+        activeName,
+        activeHpText,
+        activeEnergy,
+        activeStatusText,
+        retreatText
+    };
+}
+
+function buildSummaryChips(chips) {
+    return chips.map((chip) => {
+        const toneClass = chip.tone ? ` ${chip.tone}` : '';
+        return `<span class="summary-chip${toneClass}"><span class="summary-chip__label">${chip.label}</span><span class="summary-chip__value">${chip.value}</span></span>`;
+    }).join('');
+}
+
+function renderHeaderSecondaryPanel(playerNum) {
+    void playerNum;
+    return '';
+}
+
+function renderMidlinePanel(playerNum) {
+    void playerNum;
+    return '';
+}
+
+function updateAuxSummaryPanels() {
+    const p1Header = document.getElementById('player1-header-secondary');
+    const p2Header = document.getElementById('player2-header-secondary');
+    const p1Mid = document.getElementById('p1-midline-panel');
+    const p2Mid = document.getElementById('p2-midline-panel');
+
+    if (p1Header) p1Header.innerHTML = '';
+    if (p2Header) p2Header.innerHTML = '';
+    if (p1Mid) p1Mid.innerHTML = '';
+    if (p2Mid) p2Mid.innerHTML = '';
+}
+
 function promptForcedActiveReplacementIfNeeded(playerNum) {
     if (!game || !game.players || !Number.isFinite(Number(playerNum))) return;
     const resolvedPlayerNum = Number(playerNum);
@@ -152,6 +224,7 @@ class GameState {
 
         this.stadium = null;
         this.selectedCard = null;
+        this.setupReady = { 1: false, 2: false };
         this.attackModifiers = { 1: {}, 2: {} }; // Temporary attack modifiers and effects
         this.nextTurnEffects = { 1: {}, 2: {} }; // Effects for next turn
         this.gameLog = [];
@@ -225,9 +298,7 @@ class GameState {
         this.firstEnergyAttached = false; // Reset for Sophia S. Wang
         this.turn++;
         this.phase = 'main';
-        this.log(`═════════════════════════════════════`, 'turn-change');
         this.log(`Turn ${this.turn}: Player ${this.currentPlayer}'s turn begins`, 'turn-change');
-        this.log(`═════════════════════════════════════`, 'turn-change');
 
         if (this.stadium && this.stadium.name === 'Main Hall' && this.mainHallActivatedTurn !== null && this.turn > this.mainHallActivatedTurn) {
             const remaining = Math.max(0, 3 - this.cardsPlayedThisTurn);
@@ -426,7 +497,7 @@ class GameState {
                     game.tempSelections = game.tempSelections || {};
                     game.tempSelections.friedmanCards = drawn;
                     game.tempSelections.friedmanPlayer = this.currentPlayer;
-                    showFriedmanHallChoice(drawn);
+                    showFriedmanHallChoice(drawn, this.currentPlayer);
                 } else if (player.deck.length === 1) {
                     this.drawCards(this.currentPlayer, 1);
                     this.log('Friedman Hall: Drew 1 card (only 1 left in deck)');
@@ -834,8 +905,611 @@ const multiplayer = {
     hasLocalSeededState: false,
     pendingRemotePromptFor: null,
     pendingRemotePromptType: null,
+    pendingRemotePromptAction: null,
     hasShownInitialStartLogs: false
 };
+
+const uiState = {
+    logCollapsed: false,
+    logCollapsedUserSet: false
+};
+
+const bgmState = {
+    initialized: false,
+    unlocked: false,
+    currentTrack: 'menu',
+    lastError: null,
+    menuAudio: null,
+    battleAudio: null
+};
+
+function initializeBackgroundMusic() {
+    if (bgmState.initialized) return;
+    bgmState.initialized = true;
+
+    const menuAudio = new Audio('assets/audio/menu-idle.mp3');
+    const battleAudio = new Audio('assets/audio/battle.mp3');
+
+    [menuAudio, battleAudio].forEach((audio) => {
+        audio.preload = 'auto';
+        audio.loop = true;
+        audio.crossOrigin = 'anonymous';
+    });
+    menuAudio.volume = 0.38;
+    battleAudio.volume = 0.34;
+
+    bgmState.menuAudio = menuAudio;
+    bgmState.battleAudio = battleAudio;
+
+    const unlock = () => {
+        bgmState.unlocked = true;
+        tryPlayActiveBackgroundTrack();
+    };
+    document.addEventListener('pointerdown', unlock, { once: true, passive: true });
+    document.addEventListener('keydown', unlock, { once: true });
+}
+
+function getActiveBackgroundAudio() {
+    return bgmState.currentTrack === 'battle' ? bgmState.battleAudio : bgmState.menuAudio;
+}
+
+function pauseBackgroundAudio(audio) {
+    if (!audio) return;
+    try {
+        audio.pause();
+        audio.currentTime = 0;
+    } catch (error) {
+        bgmState.lastError = String(error);
+    }
+}
+
+async function tryPlayActiveBackgroundTrack() {
+    initializeBackgroundMusic();
+    const active = getActiveBackgroundAudio();
+    const inactive = bgmState.currentTrack === 'battle' ? bgmState.menuAudio : bgmState.battleAudio;
+    if (!active) return;
+
+    pauseBackgroundAudio(inactive);
+
+    try {
+        const maybePromise = active.play();
+        if (maybePromise && typeof maybePromise.then === 'function') {
+            await maybePromise;
+        }
+        bgmState.lastError = null;
+    } catch (error) {
+        bgmState.lastError = String(error);
+    }
+}
+
+function setMenuBackgroundMusic() {
+    bgmState.currentTrack = 'menu';
+    tryPlayActiveBackgroundTrack();
+}
+
+function setBattleBackgroundMusic() {
+    bgmState.currentTrack = 'battle';
+    tryPlayActiveBackgroundTrack();
+}
+
+function getBgmDebugState() {
+    return {
+        currentTrack: bgmState.currentTrack,
+        unlocked: bgmState.unlocked,
+        menuPaused: bgmState.menuAudio ? bgmState.menuAudio.paused : true,
+        battlePaused: bgmState.battleAudio ? bgmState.battleAudio.paused : true,
+        lastError: bgmState.lastError
+    };
+}
+
+function isOpeningSetupPhase() {
+    return !!game && game.phase === 'setup';
+}
+
+function isMultiplayerAuthorityClient() {
+    return !!(multiplayer.enabled && Number(multiplayer.playerNumber) === 1);
+}
+
+function isOpeningSetupRequiredForPlayer(playerNum) {
+    const player = game?.players?.[playerNum];
+    if (!player) return false;
+    return isOpeningSetupPhase() && !player.active;
+}
+
+function shouldPromptOpeningSetupLocally() {
+    if (!isOpeningSetupPhase()) return false;
+    if (game?.players?.[1]?.active && game?.players?.[2]?.active) return false;
+    if (multiplayer.enabled) {
+        const localPlayerNumber = Number(multiplayer.playerNumber);
+        if (Number.isFinite(localPlayerNumber)) {
+            const otherPlayer = localPlayerNumber === 1 ? 2 : 1;
+            return !game?.players?.[localPlayerNumber]?.active || !game?.players?.[otherPlayer]?.active;
+        }
+        return isOpeningSetupRequiredForPlayer(1) || isOpeningSetupRequiredForPlayer(2);
+    }
+    return isOpeningSetupRequiredForPlayer(1) || isOpeningSetupRequiredForPlayer(2);
+}
+
+function canEditOpeningSetupForPlayer(playerNum) {
+    const resolvedPlayerNum = Number(playerNum);
+    if (!isOpeningSetupPhase() || !Number.isFinite(resolvedPlayerNum)) return false;
+    if (multiplayer.enabled && !multiplayer.isApplyingRemote) {
+        const localPlayerNumber = Number(multiplayer.playerNumber);
+        if (Number.isFinite(localPlayerNumber) && resolvedPlayerNum !== localPlayerNumber) {
+            return false;
+        }
+    }
+    return true;
+}
+
+function chooseOpeningActive(cardId, playerNumOverride = null) {
+    if (!isOpeningSetupPhase()) return;
+
+    const resolvedOverride = Number(playerNumOverride);
+    const playerNum = Number.isFinite(resolvedOverride)
+        ? resolvedOverride
+        : (multiplayer.enabled
+            ? Number(multiplayer.playerNumber || game.currentPlayer)
+            : Number(game.currentPlayer));
+
+    if (!canEditOpeningSetupForPlayer(playerNum)) {
+        const localPlayerNumber = Number(multiplayer.playerNumber);
+        if (Number.isFinite(localPlayerNumber)) {
+            game.log(`You can only edit opening setup for Player ${localPlayerNumber}.`, 'warning');
+        }
+        return;
+    }
+
+    const player = game.players[playerNum];
+    if (!player) return;
+
+    const existingBenchIndex = (player.bench || []).findIndex((c) => c && c.id === cardId);
+    if (existingBenchIndex !== -1) {
+        const benchCard = player.bench[existingBenchIndex];
+        player.hand.push(benchCard);
+        player.bench[existingBenchIndex] = null;
+    }
+    if (player.active && player.active.id === cardId) return;
+    if (player.active) {
+        player.hand.push(player.active);
+        player.active = null;
+    }
+
+    const card = player.hand.find((c) => c.id === cardId && c.cardType === 'character');
+    if (!card) {
+        game.log('Select a character from your hand for your opening active.', 'warning');
+        return;
+    }
+
+    player.active = card;
+    player.hand = player.hand.filter((c) => c.id !== cardId);
+    if (game.setupReady) {
+        game.setupReady[playerNum] = false;
+    }
+    game.selectedCard = null;
+    game.log(`Opening setup: Player ${playerNum} chose ${card.name} as Active`, 'info');
+
+    finalizeOpeningSetupIfReady();
+    updateUI();
+}
+
+function toggleOpeningBench(cardId, playerNumOverride = null) {
+    if (!isOpeningSetupPhase()) return;
+    const resolvedOverride = Number(playerNumOverride);
+    const playerNum = Number.isFinite(resolvedOverride)
+        ? resolvedOverride
+        : (multiplayer.enabled
+            ? Number(multiplayer.playerNumber || game.currentPlayer)
+            : Number(game.currentPlayer));
+
+    if (!canEditOpeningSetupForPlayer(playerNum)) {
+        const localPlayerNumber = Number(multiplayer.playerNumber);
+        if (Number.isFinite(localPlayerNumber)) {
+            game.log(`You can only edit opening setup for Player ${localPlayerNumber}.`, 'warning');
+        }
+        return;
+    }
+
+    const player = game.players[playerNum];
+    if (!player) return;
+
+    const existingBenchIndex = (player.bench || []).findIndex((c) => c && c.id === cardId);
+    if (existingBenchIndex !== -1) {
+        const benchCard = player.bench[existingBenchIndex];
+        player.hand.push(benchCard);
+        player.bench[existingBenchIndex] = null;
+        if (game.setupReady) game.setupReady[playerNum] = false;
+        game.log(`Opening setup: Player ${playerNum} removed ${benchCard.name} from Bench`, 'info');
+        updateUI();
+        return;
+    }
+
+    const card = player.hand.find((c) => c.id === cardId && c.cardType === 'character');
+    if (!card) {
+        game.log('Select a character from your hand for the opening bench.', 'warning');
+        return;
+    }
+
+    if (player.active && player.active.id === card.id) {
+        game.log('Active character cannot also be benched.', 'warning');
+        return;
+    }
+
+    const emptyBenchSlot = player.bench.findIndex((slot) => !slot);
+    if (emptyBenchSlot === -1) {
+        game.log('Bench is full (max 3) during opening setup.', 'warning');
+        return;
+    }
+
+    player.bench[emptyBenchSlot] = card;
+    player.hand = player.hand.filter((c) => c.id !== card.id);
+    if (game.setupReady) game.setupReady[playerNum] = false;
+    game.log(`Opening setup: Player ${playerNum} benched ${card.name}`, 'info');
+    updateUI();
+}
+
+function setOpeningReady(playerNumOverride = null) {
+    if (!isOpeningSetupPhase()) return;
+    const resolvedOverride = Number(playerNumOverride);
+    const playerNum = Number.isFinite(resolvedOverride)
+        ? resolvedOverride
+        : (multiplayer.enabled
+            ? Number(multiplayer.playerNumber || game.currentPlayer)
+            : Number(game.currentPlayer));
+
+    if (!canEditOpeningSetupForPlayer(playerNum)) return;
+    const player = game.players[playerNum];
+    if (!player || !player.active) {
+        game.log('Choose an opening Active before confirming setup.', 'warning');
+        return;
+    }
+    if (!game.setupReady) game.setupReady = { 1: false, 2: false };
+    game.setupReady[playerNum] = true;
+    game.log(`Opening setup: Player ${playerNum} locked in active`, 'info');
+    finalizeOpeningSetupIfReady();
+    updateUI();
+}
+
+function finalizeOpeningSetupIfReady() {
+    if (!isOpeningSetupPhase()) return;
+    if (!game.players[1]?.active || !game.players[2]?.active) return;
+    game.phase = 'main';
+    game.log('Opening setup complete. Main phase begins.', 'turn-change');
+}
+
+function updateSetupGuidePanel() {
+    const panel = document.getElementById('setup-guide');
+    if (!panel) return;
+
+    if (!shouldPromptOpeningSetupLocally()) {
+        panel.classList.add('hidden');
+        panel.innerHTML = '';
+        return;
+    }
+
+    const localPlayerNumber = multiplayer.enabled ? Number(multiplayer.playerNumber) : 1;
+    const otherPlayerNumber = localPlayerNumber === 1 ? 2 : 1;
+    const localHasActive = !!game?.players?.[localPlayerNumber]?.active;
+    const waitingForOpponent = multiplayer.enabled && localHasActive && !game?.players?.[otherPlayerNumber]?.active;
+
+    let html = `
+        <div class="setup-guide__card">
+        <div class="setup-guide__title">Opening Setup</div>
+        <div class="setup-guide__body">Choose opening Active and optional Bench characters, then confirm when ready.</div>
+    `;
+
+    if (waitingForOpponent) {
+        html += `
+            <div class="setup-guide__waiting">
+                Waiting for opponent (Player ${otherPlayerNumber}) to finish opening setup...
+            </div>
+        `;
+    }
+
+    html += `
+        <div class="setup-guide__columns">
+    `;
+
+    const localOnlyPlayerNums = multiplayer.enabled
+        ? (Number.isFinite(Number(multiplayer.playerNumber))
+            ? [Number(multiplayer.playerNumber)]
+            : [1, 2])
+        : [1, 2];
+
+    localOnlyPlayerNums.forEach((playerNum) => {
+        const player = game.players[playerNum];
+        const active = player?.active || null;
+        const bench = (player?.bench || []).filter(Boolean);
+        const characterChoices = (player?.hand || []).filter((card) => card.cardType === 'character');
+        html += `<div class="setup-guide__column">`;
+        html += `<div class="setup-guide__column-title">Player ${playerNum}</div>`;
+        if (active) {
+            html += `<div class="setup-guide__done">Active: ${active.name}</div>`;
+        } else {
+            html += `<div class="setup-guide__empty">Choose 1 Active:</div>`;
+        }
+
+        if (characterChoices.length === 0 && !active) {
+            html += `<div class="setup-guide__empty">No character in hand. This deck cannot complete opening setup.</div>`;
+        } else {
+            const activeChoices = characterChoices.filter((card) => !bench.some((b) => b.id === card.id));
+            if (activeChoices.length > 0) {
+                html += `<div class="setup-guide__choices">`;
+                html += activeChoices.map((card) => (
+                    `<button class="btn setup-guide__choice" type="button" onclick="chooseOpeningActive('${card.id}', ${playerNum})">Active: ${card.name}${card.hp ? ` • HP ${card.hp}` : ''}</button>`
+                )).join('');
+                html += `</div>`;
+            }
+        }
+
+        html += `<div class="setup-guide__empty">Bench (optional, up to 3):</div>`;
+        if (bench.length > 0) {
+            html += `<div class="setup-guide__choices">`;
+            html += bench.map((card) => (
+                `<button class="btn setup-guide__choice" type="button" onclick="toggleOpeningBench('${card.id}', ${playerNum})">Bench: ${card.name} (Remove)</button>`
+            )).join('');
+            html += `</div>`;
+        }
+
+        const benchChoices = characterChoices.filter((card) => !active || card.id !== active.id);
+        if (benchChoices.length > 0 && bench.length < 3) {
+            html += `<div class="setup-guide__choices">`;
+            html += benchChoices.map((card) => (
+                `<button class="btn setup-guide__choice" type="button" onclick="toggleOpeningBench('${card.id}', ${playerNum})">Bench: ${card.name}${card.hp ? ` • HP ${card.hp}` : ''}</button>`
+            )).join('');
+            html += `</div>`;
+        }
+
+        const readyDisabled = active ? '' : 'disabled';
+        html += `<button class="btn setup-guide__choice" ${readyDisabled} type="button" onclick="setOpeningReady(${playerNum})">Confirm Setup</button>`;
+        html += `</div>`;
+    });
+    html += `</div></div>`;
+
+    panel.innerHTML = html;
+    panel.classList.remove('hidden');
+}
+
+function applyGameLogCollapsedState() {
+    const container = document.getElementById('game-container');
+    const toggleBtn = document.getElementById('toggle-log-btn');
+    if (container) {
+        container.classList.toggle('game-log-collapsed', !!uiState.logCollapsed);
+    }
+    if (toggleBtn) {
+        toggleBtn.textContent = uiState.logCollapsed ? 'Show Log' : 'Hide Log';
+        toggleBtn.setAttribute('aria-pressed', uiState.logCollapsed ? 'true' : 'false');
+    }
+}
+
+function toggleGameLogCollapsed() {
+    uiState.logCollapsed = !uiState.logCollapsed;
+    uiState.logCollapsedUserSet = true;
+    applyGameLogCollapsedState();
+}
+
+function syncResponsiveUiDefaults() {
+    if (uiState.logCollapsedUserSet) return;
+    const shouldCollapseLog = typeof window !== 'undefined' && window.innerWidth <= 900;
+    uiState.logCollapsed = !!shouldCollapseLog;
+    applyGameLogCollapsedState();
+}
+
+function updateToolbarState() {
+    const selectedLabel = document.getElementById('toolbar-selected-card');
+    const playBtn = document.getElementById('toolbar-play-btn');
+    const energyBtn = document.getElementById('toolbar-energy-btn');
+    const attackBtn = document.getElementById('toolbar-attack-btn');
+    const retreatBtn = document.getElementById('toolbar-retreat-btn');
+
+    const selected = game.selectedCard || null;
+    if (selectedLabel) {
+        if (!selected) {
+            selectedLabel.textContent = 'No card selected';
+            selectedLabel.onclick = null;
+        } else {
+            selectedLabel.innerHTML = '';
+            const text = document.createElement('span');
+            text.textContent = `Selected: ${selected.name}`;
+            const clearBtn = document.createElement('button');
+            clearBtn.type = 'button';
+            clearBtn.className = 'toolbar-clear-selection';
+            clearBtn.textContent = 'Clear';
+            clearBtn.onclick = (event) => {
+                event.stopPropagation();
+                clearSelectedCard();
+            };
+            selectedLabel.appendChild(text);
+            selectedLabel.appendChild(clearBtn);
+            selectedLabel.onclick = () => clearSelectedCard();
+        }
+    }
+
+    const localPlayerNum = multiplayer.enabled ? Number(multiplayer.playerNumber || game.currentPlayer) : Number(game.currentPlayer);
+    const localPlayer = game.players[localPlayerNum];
+    const canAct = canCurrentClientAct() && game.phase !== 'gameover';
+    const inSetup = isOpeningSetupPhase();
+    const maxEnergy = getEnergyAttachLimit(localPlayerNum);
+    const selectedInHand = !!(selected && localPlayer?.hand?.some((c) => c.id === selected.id));
+    const selectedIsCharacter = !!(selected && selected.cardType === 'character');
+    const selectedIsLocalCharacterInPlay = !!(selected && selectedIsCharacter && localPlayer && [localPlayer.active, ...(localPlayer.bench || [])].some((c) => c && c.id === selected.id));
+
+    if (playBtn) {
+        playBtn.disabled = !canAct || (!selectedInHand && !inSetup);
+    }
+    if (energyBtn) {
+        const maxReached = Number.isFinite(maxEnergy) && game.energyAttachedThisTurn >= maxEnergy;
+        energyBtn.disabled = !canAct || inSetup || !localPlayer || maxReached || (!localPlayer.active && !(localPlayer.bench || []).some(Boolean));
+    }
+    if (attackBtn) {
+        attackBtn.disabled = !canAct || inSetup || !localPlayer?.active || game.attackedThisTurn;
+    }
+    if (retreatBtn) {
+        retreatBtn.disabled = !canAct || inSetup || !selectedIsLocalCharacterInPlay || localPlayer?.active?.id !== selected?.id;
+    }
+}
+
+function getEnergyAttachLimit(playerNum) {
+    if (!game) return 1;
+    if (game.playtestMode) return Infinity;
+    const resolvedPlayerNum = Number.isFinite(Number(playerNum)) ? Number(playerNum) : Number(game.currentPlayer);
+    const player = game.players?.[resolvedPlayerNum];
+    const fermentationActive = player?.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(resolvedPlayerNum);
+    return fermentationActive ? 2 : 1;
+}
+
+function formatEnergyAttachStatus(playerNum) {
+    const limit = getEnergyAttachLimit(playerNum);
+    if (!Number.isFinite(limit)) return `${game.energyAttachedThisTurn}/∞`;
+    return `${game.energyAttachedThisTurn}/${limit}`;
+}
+
+function clearSelectedCard() {
+    if (!game || !game.selectedCard) return;
+    game.selectedCard = null;
+    updateToolbarState();
+    renderSelectionInspector();
+}
+
+function showAttachEnergyPicker() {
+    if (game.playtestMode !== true && game.phase !== 'main') return;
+    if (!canCurrentClientAct()) return;
+
+    const playerNum = multiplayer.enabled ? Number(multiplayer.playerNumber || game.currentPlayer) : Number(game.currentPlayer);
+    const player = game.players[playerNum];
+    if (!player) return;
+    const maxEnergy = getEnergyAttachLimit(playerNum);
+    const maxReached = Number.isFinite(maxEnergy) && game.energyAttachedThisTurn >= maxEnergy;
+
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+    if (!modal || !content) return;
+
+    let html = `<h2>Attach Energy</h2>`;
+    html += `<p>Select a character to attach energy to (${formatEnergyAttachStatus(playerNum)} used this turn).</p>`;
+    html += `<div class="action-buttons">`;
+
+    if (player.active) {
+        html += `<button class="action-btn" ${maxReached ? 'disabled' : ''} onclick="attachEnergy('active', ${playerNum})">Active: ${player.active.name}</button>`;
+    }
+    (player.bench || []).forEach((char, idx) => {
+        if (!char) return;
+        html += `<button class="action-btn" ${maxReached ? 'disabled' : ''} onclick="attachEnergy(${idx}, ${playerNum})">Bench ${idx + 1}: ${char.name}</button>`;
+    });
+
+    if (!player.active && !(player.bench || []).some(Boolean)) {
+        html += `<p style="color:#ef4444;">No valid character to attach energy to.</p>`;
+    }
+    if (maxReached) {
+        html += `<p style="color:#94a3b8;">Energy already attached this turn.</p>`;
+    }
+
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    html += `</div>`;
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function renderSelectionInspector() {
+    const panel = document.getElementById('selection-inspector');
+    if (!panel) return;
+
+    const card = game.selectedCard;
+    if (!card) {
+        panel.classList.add('hidden');
+        panel.innerHTML = '';
+        return;
+    }
+
+    let meta = [];
+    if (card.cardType) meta.push(String(card.cardType).toUpperCase());
+    if (card.cardType === 'character') {
+        const hpSummary = getCharacterHpSummary(card);
+        const remaining = Math.max(0, Number(hpSummary.currentHp || 0) - Number(card.damage || 0));
+        meta.push(`HP ${remaining}/${hpSummary.currentHp}`);
+        if (Array.isArray(card.type) && card.type.length) {
+            meta.push(card.type.join(', '));
+        }
+    }
+
+    let bodyHtml = '';
+    if (card.cardType === 'character') {
+        const moves = Array.isArray(card.moves) ? card.moves : [];
+        const moveLines = moves.slice(0, 3).map((move) => (
+            `<div class="selection-inspector__line"><strong>${move.name}</strong> (${move.cost || 0}) • ${move.damage || 0} dmg${move.effect ? ` • ${move.effect}` : ''}</div>`
+        )).join('');
+        const abilities = [card.ability, card.ability2].filter(Boolean).slice(0, 2).map((ability) => (
+            `<div class="selection-inspector__line"><strong>${ability.name}</strong>: ${ability.description || ''}</div>`
+        )).join('');
+        bodyHtml = `${moveLines}${abilities}` || '<div class="selection-inspector__line">No moves/abilities listed.</div>';
+    } else {
+        const text = card.effect || card.description || 'No description available.';
+        bodyHtml = `<div class="selection-inspector__line">${text}</div>`;
+    }
+
+    panel.innerHTML = `
+        <div class="selection-inspector__header">
+            <div class="selection-inspector__title">${card.name || 'Selected Card'}</div>
+            <div class="selection-inspector__meta">${meta.join(' • ')}</div>
+        </div>
+        <div class="selection-inspector__body">${bodyHtml}</div>
+    `;
+    panel.classList.remove('hidden');
+}
+
+function renderGameToText() {
+    const payload = {
+        note: 'Coordinates use DOM/card zones, not canvas. Origin is top-left in page layout.',
+        bgm: getBgmDebugState(),
+        phase: game.phase,
+        turn: game.turn,
+        currentPlayer: game.currentPlayer,
+        localPlayer: multiplayer.enabled ? (multiplayer.playerNumber || null) : null,
+        setupPending: {
+            p1: !game.players[1]?.active,
+            p2: !game.players[2]?.active
+        },
+        selectedCardId: game.selectedCard?.id || null,
+        selectedCardName: game.selectedCard?.name || null,
+        players: [1, 2].map((n) => {
+            const p = game.players[n];
+            return {
+                player: n,
+                deck: p.deck.length,
+                hand: p.hand.length,
+                discard: p.discard.length,
+                ko: p.koCount,
+                active: p.active ? {
+                    id: p.active.id,
+                    name: p.active.name,
+                    hp: p.active.hp,
+                    damage: p.active.damage || 0,
+                    attachedEnergy: (p.active.attachedEnergy || []).length
+                } : null,
+                bench: (p.bench || []).map((c, idx) => c ? ({
+                    slot: idx,
+                    id: c.id,
+                    name: c.name,
+                    hp: c.hp,
+                    damage: c.damage || 0,
+                    attachedEnergy: (c.attachedEnergy || []).length
+                }) : null)
+            };
+        }),
+        stadium: game.stadium ? { id: game.stadium.id, name: game.stadium.name } : null,
+        lastLog: (game.gameLog || []).slice(-5).map((entry) => entry.message)
+    };
+    return JSON.stringify(payload);
+}
+
+function advanceTimeForAutomation(ms = 16) {
+    const steps = Math.max(1, Math.round(Number(ms || 16) / (1000 / 60)));
+    for (let i = 0; i < steps; i++) {
+        // DOM game is event-driven; re-rendering is sufficient for deterministic snapshots.
+        updateUI();
+    }
+}
 
 function shouldIgnoreServerSnapshot(snapshot) {
     if (!snapshot || !multiplayer.enabled) return false;
@@ -850,6 +1524,9 @@ function shouldIgnoreServerSnapshot(snapshot) {
 function canCurrentClientAct() {
     if (!multiplayer.enabled) return true;
     const localPlayerNumber = Number(multiplayer.playerNumber);
+    if (isOpeningSetupPhase() && Number.isFinite(localPlayerNumber) && isOpeningSetupRequiredForPlayer(localPlayerNumber)) {
+        return true;
+    }
     const waitingForPlayer = Number(multiplayer.pendingRemotePromptFor);
     const hasValidRemotePromptLock = waitingForPlayer === 1 || waitingForPlayer === 2;
     if (
@@ -873,6 +1550,33 @@ function canCurrentClientAct() {
 function clearPendingRemotePromptLock() {
     multiplayer.pendingRemotePromptFor = null;
     multiplayer.pendingRemotePromptType = null;
+    multiplayer.pendingRemotePromptAction = null;
+}
+
+function executeActionSafely(name, fn, args = [], source = 'local') {
+    try {
+        return { ok: true, value: fn(...args) };
+    } catch (error) {
+        const message = `Action "${name}" failed (${source}): ${error && error.message ? error.message : String(error)}`;
+        console.error(error);
+        if (game && typeof game.log === 'function') {
+            game.log(message, 'error');
+        }
+        return { ok: false, error };
+    }
+}
+
+function tryResumePendingAttackEndTurn() {
+    const waitingForPlayer = Number(multiplayer.pendingRemotePromptFor);
+    if (waitingForPlayer === 1 || waitingForPlayer === 2) return;
+    if (!game || !game.pendingAttackEndTurn) return;
+    if (!canCurrentClientAct()) return;
+    game.pendingAttackEndTurn = false;
+    if (typeof window.endTurnAction === 'function') {
+        window.endTurnAction();
+    } else {
+        endTurnAction();
+    }
 }
 
 function ensureRemotePromptOverlay() {
@@ -910,6 +1614,8 @@ function updateRemotePromptOverlay() {
     let message = `Waiting for Player ${waitingFor} to respond...`;
     if (multiplayer.pendingRemotePromptType === 'forced_active_switch') {
         message = `Waiting for Player ${waitingFor} to choose a new active character...`;
+    } else if (multiplayer.pendingRemotePromptAction) {
+        message = `Waiting for Player ${waitingFor} to resolve ${multiplayer.pendingRemotePromptAction}...`;
     }
 
     if (textEl) textEl.textContent = message;
@@ -937,6 +1643,50 @@ function ensureStartingHandLogsVisible() {
     multiplayer.hasShownInitialStartLogs = true;
 }
 
+let lastRenderedTurnSignature = null;
+let turnChangeOverlayTimeout = null;
+
+function ensureTurnChangeOverlay() {
+    let overlay = document.getElementById('turn-change-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'turn-change-overlay';
+        overlay.className = 'turn-change-overlay hidden';
+        overlay.innerHTML = '<div class="turn-change-overlay__text" id="turn-change-overlay-text"></div>';
+        document.body.appendChild(overlay);
+    }
+    return overlay;
+}
+
+function showTurnChangeOverlay() {
+    if (!game || game.phase === 'gameover') return;
+    const overlay = ensureTurnChangeOverlay();
+    const textEl = document.getElementById('turn-change-overlay-text');
+    if (textEl) {
+        textEl.textContent = `Player ${game.currentPlayer}'s Turn`;
+    }
+    overlay.classList.remove('hidden');
+    if (turnChangeOverlayTimeout) {
+        clearTimeout(turnChangeOverlayTimeout);
+    }
+    turnChangeOverlayTimeout = setTimeout(() => {
+        overlay.classList.add('hidden');
+    }, 900);
+}
+
+function maybeShowTurnChangeOverlay() {
+    if (!game) return;
+    const signature = `${Number(game.turn) || 0}:${Number(game.currentPlayer) || 0}`;
+    if (lastRenderedTurnSignature == null) {
+        lastRenderedTurnSignature = signature;
+        return;
+    }
+    if (lastRenderedTurnSignature !== signature) {
+        lastRenderedTurnSignature = signature;
+        showTurnChangeOverlay();
+    }
+}
+
 function refreshMultiplayerPlayerIdentityDisplay() {
     const lobbyEl = document.getElementById('multiplayer-player-identity');
     const inGameEl = document.getElementById('in-game-player-identity');
@@ -952,6 +1702,12 @@ function refreshMultiplayerPlayerIdentityDisplay() {
     if (inGameEl) inGameEl.textContent = text;
 }
 
+function updateLocalPerspectiveLayout() {
+    if (!document || !document.body) return;
+    const isPlayerTwoPerspective = multiplayer.enabled && Number(multiplayer.playerNumber) === 2;
+    document.body.classList.toggle('multiplayer-perspective-p2', isPlayerTwoPerspective);
+}
+
 function refreshInGameRoomCodeDisplay() {
     const roomEl = document.getElementById('in-game-room-code');
     if (!roomEl) return;
@@ -964,6 +1720,21 @@ function refreshInGameRoomCodeDisplay() {
         roomEl.textContent = 'Room: Local Game';
     }
     refreshMultiplayerPlayerIdentityDisplay();
+}
+
+function refreshBoardOwnerLabels() {
+    const player1Label = document.getElementById('player1-owner-label');
+    const player2Label = document.getElementById('player2-owner-label');
+    if (!player1Label || !player2Label) return;
+
+    const localPlayerNumber = multiplayer.enabled ? Number(multiplayer.playerNumber) : 1;
+    if (localPlayerNumber === 2) {
+        player1Label.textContent = 'Opponent';
+        player2Label.textContent = 'You';
+        return;
+    }
+    player1Label.textContent = 'You';
+    player2Label.textContent = 'Opponent';
 }
 
 function setMultiplayerLobbyStatus(message, level = 'info') {
@@ -1067,7 +1838,7 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
 
             setMultiplayerLobbyStatus(`Room ${multiplayer.roomId} ready. Starting game...`, 'success');
 
-            if (multiplayer.playerNumber === 1 && msg.config && msg.config.deck1Name && msg.config.deck2Name) {
+            if (!multiplayer.hasLocalSeededState && msg.config && msg.config.deck1Name && msg.config.deck2Name) {
                 initGame(
                     msg.config.deck1Name,
                     msg.config.deck2Name,
@@ -1075,7 +1846,9 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
                     msg.seed
                 );
                 multiplayer.hasLocalSeededState = true;
-                sendMultiplayerAction('STATE_SNAPSHOT', []);
+                if (multiplayer.playerNumber === 1) {
+                    sendMultiplayerAction('STATE_SNAPSHOT', []);
+                }
             }
             return;
         }
@@ -1089,7 +1862,7 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
             setMultiplayerLobbyStatus(`Room ${multiplayer.roomId} ready. Match started.`, 'success');
 
             if (
-                multiplayer.playerNumber === 1 &&
+                !multiplayer.hasLocalSeededState &&
                 msg.config &&
                 msg.config.deck1Name &&
                 msg.config.deck2Name
@@ -1101,7 +1874,9 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
                     msg.seed
                 );
                 multiplayer.hasLocalSeededState = true;
-                sendMultiplayerAction('STATE_SNAPSHOT', []);
+                if (multiplayer.playerNumber === 1) {
+                    sendMultiplayerAction('STATE_SNAPSHOT', []);
+                }
             }
             return;
         }
@@ -1116,6 +1891,7 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
                 if ((waitingFor === 1 || waitingFor === 2) && game.players?.[waitingFor]?.active) {
                     clearPendingRemotePromptLock();
                     updateRemotePromptOverlay();
+                    tryResumePendingAttackEndTurn();
                 }
             }
             return;
@@ -1131,6 +1907,7 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
                 if ((waitingFor === 1 || waitingFor === 2) && game.players?.[waitingFor]?.active) {
                     clearPendingRemotePromptLock();
                     updateRemotePromptOverlay();
+                    tryResumePendingAttackEndTurn();
                 }
             }
             return;
@@ -1141,16 +1918,17 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
             const incoming = msg.action;
             if (incoming && incoming.type === 'CALL' && incoming.payload) {
                 const { name, args } = incoming.payload;
-                if (name === 'endTurnAction' && incoming.playerNumber && incoming.playerNumber === multiplayer.playerNumber) {
+                const senderPlayerNumber = Number(msg.playerNumber || incoming.playerNumber);
+                if (name === 'endTurnAction' && senderPlayerNumber && senderPlayerNumber === Number(multiplayer.playerNumber)) {
                     return;
                 }
-                if (name === 'executeAttack' && incoming.playerNumber && incoming.playerNumber === multiplayer.playerNumber) {
+                if (name === 'executeAttack' && senderPlayerNumber && senderPlayerNumber === Number(multiplayer.playerNumber)) {
                     return;
                 }
-                if (name === 'handleTargetSelection' && incoming.playerNumber && incoming.playerNumber === multiplayer.playerNumber) {
+                if (name === 'handleTargetSelection' && senderPlayerNumber && senderPlayerNumber === Number(multiplayer.playerNumber)) {
                     return;
                 }
-                if ((name === 'attachEnergy' || name === 'attachEnergyFromHand') && incoming.playerNumber && incoming.playerNumber === multiplayer.playerNumber) {
+                if ((name === 'attachEnergy' || name === 'attachEnergyFromHand') && senderPlayerNumber && senderPlayerNumber === Number(multiplayer.playerNumber)) {
                     return;
                 }
                 if (name === 'STATE_SNAPSHOT' && incoming.payload && incoming.payload.state) {
@@ -1160,24 +1938,51 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
                 const waitingFor = Number(multiplayer.pendingRemotePromptFor);
                 if (
                     (waitingFor === 1 || waitingFor === 2) &&
-                    Number(incoming.playerNumber) === waitingFor &&
+                    senderPlayerNumber === waitingFor &&
                     name &&
                     !name.startsWith('show')
                 ) {
                     clearPendingRemotePromptLock();
                     updateRemotePromptOverlay();
+                    tryResumePendingAttackEndTurn();
                 }
-                const samePlayerReplay = Number(incoming.playerNumber) === Number(multiplayer.playerNumber);
+                const samePlayerReplay = senderPlayerNumber === Number(multiplayer.playerNumber);
                 if (samePlayerReplay && name && !name.startsWith('show')) {
                     return;
                 }
                 if (name && typeof window[name] === 'function') {
+                    const setupSyncActions = new Set(['chooseOpeningActive', 'toggleOpeningBench', 'setOpeningReady']);
+                    const shouldHostResyncAfterRemoteAction =
+                        isMultiplayerAuthorityClient() &&
+                        senderPlayerNumber === 2 &&
+                        !!name &&
+                        !name.startsWith('show') &&
+                        name !== 'STATE_SNAPSHOT';
+                    const beforeHostSyncState = shouldHostResyncAfterRemoteAction ? JSON.stringify(getStateSnapshot()) : null;
                     const wasApplying = multiplayer.isApplyingRemote;
                     multiplayer.isApplyingRemote = true;
+                    let remoteExecutionOk = true;
                     try {
-                        window[name](...(Array.isArray(args) ? args : []));
+                        const execution = executeActionSafely(name, window[name], (Array.isArray(args) ? args : []), `remote-player-${senderPlayerNumber}`);
+                        remoteExecutionOk = !!execution.ok;
                     } finally {
                         multiplayer.isApplyingRemote = wasApplying;
+                    }
+                    if (!remoteExecutionOk) {
+                        const waitingPlayer = Number(multiplayer.pendingRemotePromptFor);
+                        if ((waitingPlayer === 1 || waitingPlayer === 2) && waitingPlayer === senderPlayerNumber) {
+                            clearPendingRemotePromptLock();
+                            updateRemotePromptOverlay();
+                            tryResumePendingAttackEndTurn();
+                        }
+                        return;
+                    }
+                    if (shouldHostResyncAfterRemoteAction) {
+                        const afterHostSyncState = JSON.stringify(getStateSnapshot());
+                        const shouldForceSetupResync = setupSyncActions.has(name);
+                        if (shouldForceSetupResync || beforeHostSyncState !== afterHostSyncState) {
+                            sendMultiplayerAction('STATE_SNAPSHOT', []);
+                        }
                     }
                 }
             }
@@ -1210,20 +2015,36 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
 function sendMultiplayerAction(fn, args) {
     if (!multiplayer.enabled || !multiplayer.socket || multiplayer.isApplyingRemote) return;
     if (multiplayer.socket.readyState !== WebSocket.OPEN) return;
-    const snapshot = getStateSnapshot();
+    const shouldIncludeSnapshot = (fn === 'STATE_SNAPSHOT') || isMultiplayerAuthorityClient();
+    const snapshot = shouldIncludeSnapshot ? getStateSnapshot() : undefined;
+    const setupPlayerFns = new Set(['chooseOpeningActive', 'toggleOpeningBench', 'setOpeningReady']);
+    let setupPlayerOverride = null;
+    if (setupPlayerFns.has(fn) && Array.isArray(args)) {
+        if (fn === 'setOpeningReady' && Number.isFinite(Number(args[0]))) {
+            setupPlayerOverride = Number(args[0]);
+        } else if (Number.isFinite(Number(args[1]))) {
+            setupPlayerOverride = Number(args[1]);
+        }
+    }
+    const actionPlayerNumber = Number.isFinite(setupPlayerOverride)
+        ? setupPlayerOverride
+        : multiplayer.playerNumber;
     multiplayer.clientSeq += 1;
+    const payload = {
+        name: fn,
+        args
+    };
+    if (snapshot) {
+        payload.state = snapshot;
+    }
     multiplayer.socket.send(JSON.stringify({
         type: 'ACTION',
         roomId: multiplayer.roomId,
         clientSeq: multiplayer.clientSeq,
         action: {
             type: 'CALL',
-            payload: {
-                name: fn,
-                args,
-                state: snapshot
-            },
-            playerNumber: multiplayer.playerNumber
+            payload,
+            playerNumber: actionPlayerNumber
         }
     }));
 }
@@ -1245,6 +2066,11 @@ function applyStateSnapshot(snapshot) {
     multiplayer.isApplyingRemote = true;
     const restored = new GameState();
     Object.assign(restored, snapshot);
+    if (!restored.setupReady || typeof restored.setupReady !== 'object') {
+        restored.setupReady = (restored.phase === 'setup')
+            ? { 1: !!restored.players?.[1]?.active, 2: !!restored.players?.[2]?.active }
+            : { 1: true, 2: true };
+    }
     if (restored.currentPlayer != null) {
         const parsedCurrent = Number(restored.currentPlayer);
         if (Number.isFinite(parsedCurrent)) {
@@ -1304,9 +2130,10 @@ function initGame(deck1Name = 'strings-aggro', deck2Name = 'piano-control', play
     game.drawCards(1, 4); // Draw 4 more to make 5 total
     game.drawCards(2, 4);
 
-    game.phase = 'main';
+    game.phase = 'setup';
     updateUI();
     setupEventListeners();
+    game.log('Opening setup: Choose Active and optional Bench musicians, then confirm setup.', 'info');
 
     if (game.playtestMode) {
         game.log('Playtest mode enabled: you can add any card to hand and play outside normal phase limits.', 'info');
@@ -1846,9 +2673,16 @@ function generateCardId() {
 function updateUI() {
     syncAllStatusDerivedStats();
     if (enforceStatusDerivedKnockouts()) return;
+    if (document && document.body) {
+        document.body.classList.toggle('phase-setup', game.phase === 'setup');
+    }
+    updateLocalPerspectiveLayout();
+    refreshBoardOwnerLabels();
     updateRemotePromptOverlay();
+    maybeShowTurnChangeOverlay();
     game.applyPassiveStatuses();
     refreshInGameRoomCodeDisplay();
+    applyGameLogCollapsedState();
 
     // Update deck and discard counts
     document.getElementById('p1-deck-count').textContent = game.players[1].deck.length;
@@ -1860,15 +2694,30 @@ function updateUI() {
     document.getElementById('p2-hand-count').textContent = game.players[2].hand.length;
     document.getElementById('p2-discard-count').textContent = game.players[2].discard.length;
     document.getElementById('p2-ko-count').textContent = game.players[2].koCount;
+    updateAuxSummaryPanels();
 
     // Update pile displays
     document.getElementById('p1-deck-pile').textContent = game.players[1].deck.length;
     document.getElementById('p1-discard-pile').textContent = game.players[1].discard.length;
     document.getElementById('p2-deck-pile').textContent = game.players[2].deck.length;
     document.getElementById('p2-discard-pile').textContent = game.players[2].discard.length;
+    const localDiscardPlayer = (multiplayer.enabled && Number.isFinite(Number(multiplayer.playerNumber)))
+        ? Number(multiplayer.playerNumber)
+        : Number(game.currentPlayer);
+    document.querySelectorAll('.discard-pile').forEach((pile) => {
+        const pilePlayer = Number(pile.getAttribute('data-player'));
+        const isLocalDiscard = pilePlayer === localDiscardPlayer;
+        pile.classList.toggle('discard-pile-disabled', !isLocalDiscard);
+        pile.setAttribute('aria-disabled', isLocalDiscard ? 'false' : 'true');
+        pile.title = isLocalDiscard ? 'View your discard pile' : "You cannot view your opponent's discard pile";
+    });
 
     // Update turn info
-    document.getElementById('current-turn').textContent = `Player ${game.currentPlayer}'s Turn`;
+    const currentTurnEl = document.getElementById('current-turn');
+    if (currentTurnEl) {
+        const isYourTurn = !multiplayer.enabled || Number(multiplayer.playerNumber) === Number(game.currentPlayer);
+        currentTurnEl.textContent = isYourTurn ? 'Your Turn' : `Opponent's Turn`;
+    }
     const phaseInfo = document.getElementById('phase-info');
     if (phaseInfo) {
         phaseInfo.textContent = game.phase === 'gameover' ? 'Game Over' : '';
@@ -1877,8 +2726,7 @@ function updateUI() {
 
     // Show energy attached count (normal is 1, Eugenia allows 3)
     const player = game.players[game.currentPlayer];
-    const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 2 : 1;
-    document.getElementById('energy-status').textContent = `${game.energyAttachedThisTurn}/${maxEnergy}`;
+    document.getElementById('energy-status').textContent = formatEnergyAttachStatus(game.currentPlayer);
 
     document.getElementById('supporter-status').textContent = game.supporterPlayedThisTurn ? 'Yes' : 'No';
     const attackedStatus = document.getElementById('attacked-status');
@@ -1895,6 +2743,7 @@ function updateUI() {
     const endTurnBtn = document.getElementById('end-turn-btn');
     if (endTurnBtn) {
         endTurnBtn.style.display = 'inline-block';
+        endTurnBtn.disabled = isOpeningSetupPhase() || !canCurrentClientAct() || game.phase === 'gameover';
     }
 
     // Render active and bench for both players
@@ -1929,6 +2778,9 @@ function updateUI() {
     renderHand();
 
     updatePlaytestUI();
+    updateSetupGuidePanel();
+    updateToolbarState();
+    renderSelectionInspector();
 }
 
 function renderCharacterSlot(characterCard, slotElement) {
@@ -2168,11 +3020,12 @@ function renderCard(card) {
             <div class="card-effect" style="font-size: 9px; margin-top: 5px;">${card.effect || ''}</div>
         `;
     } else if (card.cardType === 'stadium') {
+        const venueLabel = getStadiumVenueLabel(card);
         html += `
             <div class="card-header">
                 <span class="card-name">${card.name}</span>
             </div>
-            <div class="card-effect" style="font-size: 9px; margin-top: 5px;">${card.description || ''}</div>
+            <div class="card-effect" style="font-size: 9px; margin-top: 5px;"><strong>Venue Type:</strong> ${venueLabel}. ${card.description || ''}</div>
         `;
     }
 
@@ -2234,6 +3087,7 @@ function openModalForPlayer(targetPlayerNumber, fnName, args = []) {
         if (fnName && fnName.startsWith('show') && Number.isFinite(localPlayerNumber) && Number.isFinite(resolvedTarget) && resolvedTarget !== localPlayerNumber) {
             multiplayer.pendingRemotePromptFor = resolvedTarget;
             multiplayer.pendingRemotePromptType = (fnName === 'showForcedActiveSwitchModal') ? 'forced_active_switch' : 'generic';
+            multiplayer.pendingRemotePromptAction = fnName.replace(/^show/, '').replace(/Modal$/, '') || 'opponent choice';
             updateRemotePromptOverlay();
         }
         sendMultiplayerAction(fnName, args);
@@ -2257,10 +3111,13 @@ function selectCard(card) {
         return;
     }
     if (game.selectedCard === card) {
-        game.selectedCard = null;
-    } else {
-        game.selectedCard = card;
+        clearSelectedCard();
+        closeModal('action-modal');
+        return;
     }
+    game.selectedCard = card;
+    updateToolbarState();
+    renderSelectionInspector();
 
     // Show available actions based on card type
     showCardActions(card, localPlayerNum, { skipSync: isOpponentCharacterInspection });
@@ -2268,6 +3125,7 @@ function selectCard(card) {
 
 function showCardActions(card, targetPlayerNum, options = {}) {
     const skipSync = !!options.skipSync;
+    const forceInspection = !!options.forceInspection;
     // Only show modal for the intended chooser (serialized for multiplayer)
     const resolvedTargetNum = Number(targetPlayerNum || (multiplayer.enabled ? (multiplayer.playerNumber || game.currentPlayer) : game.currentPlayer));
     if (!skipSync && !openModalForPlayer(resolvedTargetNum, 'showCardActions', [card && card.id ? card.id : card, resolvedTargetNum])) return;
@@ -2293,7 +3151,9 @@ function showCardActions(card, targetPlayerNum, options = {}) {
     const resolvedPlayerNum = localPlayerNum;
     const player = game.players[localPlayerNum];
     const canPlayAnytime = game.playtestMode || game.phase === 'main';
-    const inspectionOnly = !canCurrentClientAct() || isOpponentCharacterInspection;
+    const canPlaceOpeningActive = game.phase === 'setup' && !!player && !player.active;
+    const canPlaceOpeningBench = game.phase === 'setup' && !!player && player.active && (player.bench || []).some((slot) => !slot);
+    const inspectionOnly = forceInspection || !canCurrentClientAct() || isOpponentCharacterInspection;
 
     let html = `<h2>${card.name}</h2>`;
 
@@ -2362,6 +3222,10 @@ function showCardActions(card, targetPlayerNum, options = {}) {
         html += `</div>`;
     } else {
         // For non-character cards, show effect/description
+        if (card.cardType === 'stadium') {
+            const venueLabel = getStadiumVenueLabel(card);
+            html += `<p><strong>Venue Type:</strong> ${venueLabel}</p>`;
+        }
         html += `<p>${card.effect || card.description || ''}</p>`;
     }
 
@@ -2379,17 +3243,25 @@ function showCardActions(card, targetPlayerNum, options = {}) {
 
     if (card.cardType === 'character') {
         // Check if can play to bench or active (only during main phase)
-        if (canPlayAnytime) {
+        if (canPlayAnytime || canPlaceOpeningActive || canPlaceOpeningBench) {
             if (!player.active) {
-                html += `<button class="action-btn" onclick="playCharacterToActive('${card.id}')">Play to Active</button>`;
+                if (game.phase === 'setup') {
+                    html += `<button class="action-btn" onclick="chooseOpeningActive('${card.id}', ${resolvedPlayerNum})">Choose as Opening Active</button>`;
+                } else {
+                    html += `<button class="action-btn" onclick="playCharacterToActive('${card.id}')">Play to Active</button>`;
+                }
             } else {
-                const emptyBenchSlot = player.bench.indexOf(null);
-                if (emptyBenchSlot !== -1) {
-                    html += `<button class="action-btn" onclick="playCharacterToBench('${card.id}', ${emptyBenchSlot})">Play to Bench</button>`;
+                if (game.phase === 'setup') {
+                    html += `<button class="action-btn" onclick="toggleOpeningBench('${card.id}', ${resolvedPlayerNum})">Toggle Opening Bench</button>`;
+                } else {
+                    const emptyBenchSlot = player.bench.indexOf(null);
+                    if (emptyBenchSlot !== -1) {
+                        html += `<button class="action-btn" onclick="playCharacterToBench('${card.id}', ${emptyBenchSlot})">Play to Bench</button>`;
+                    }
                 }
             }
         } else {
-            html += `<p style="color: red;">Can only play characters during Main Phase</p>`;
+            html += `<p style="color: red;">Finish opening setup before playing cards.</p>`;
         }
 
         // Hand-activated abilities (Category Theory)
@@ -2407,17 +3279,18 @@ function showCardActions(card, targetPlayerNum, options = {}) {
             const attackLabel = game.attackedThisTurn
                 ? ' (Already Used)'
                 : (cannotAttackFirstTurn ? ' (P1 First Turn)' : (cannotAttackEffect ? ' (Cannot Attack)' : ''));
-            html += `<button class="action-btn" ${attackDisabled} onclick="showAttackMenu('${card.id}')">Attack${attackLabel}</button>`;
+            html += `<button class="action-btn" ${attackDisabled} onclick="showAttackMenu('${card.id}')">Attack (Ends Turn)${attackLabel}</button>`;
             const retreatDisabled = game.retreatUsedThisTurn ? 'disabled' : '';
             const retreatLabel = game.retreatUsedThisTurn ? ' (Used)' : '';
             html += `<button class="action-btn" ${retreatDisabled} onclick="showRetreatMenu('${card.id}')">Retreat${retreatLabel}</button>`;
 
             // Show attach energy button (only during main phase)
             if (game.phase === 'main') {
-                const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 2 : 1;
-                const energyDisabled = (game.energyAttachedThisTurn >= maxEnergy) ? 'disabled' : '';
-                const energyLabel = (game.energyAttachedThisTurn >= maxEnergy) ? ' (Max Reached)' : ` (${game.energyAttachedThisTurn}/${maxEnergy})`;
-                html += `<button class="action-btn" ${energyDisabled} onclick="attachEnergy('active', ${resolvedPlayerNum})">⚡ Attach Energy${energyLabel}</button>`;
+                const maxEnergy = getEnergyAttachLimit(game.currentPlayer);
+                const maxReached = Number.isFinite(maxEnergy) && game.energyAttachedThisTurn >= maxEnergy;
+                const energyDisabled = maxReached ? 'disabled' : '';
+                const energyLabel = maxReached ? ' (Max Reached)' : ` (${formatEnergyAttachStatus(game.currentPlayer)})`;
+                html += `<button class="action-btn" ${energyDisabled} onclick="showAttachEnergyPicker()">⚡ Attach Energy${energyLabel}</button>`;
             }
 
             // Show activated abilities for active character
@@ -2442,10 +3315,11 @@ function showCardActions(card, targetPlayerNum, options = {}) {
 
             // Show attach energy button for bench (only during main phase)
             if (game.phase === 'main') {
-                const maxEnergy = (player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(game.currentPlayer)) ? 2 : 1;
-                const energyDisabled = (game.energyAttachedThisTurn >= maxEnergy) ? 'disabled' : '';
-                const energyLabel = (game.energyAttachedThisTurn >= maxEnergy) ? ' (Max Reached)' : ` (${game.energyAttachedThisTurn}/${maxEnergy})`;
-                html += `<button class="action-btn" ${energyDisabled} onclick="attachEnergy(${benchIndex}, ${resolvedPlayerNum})">⚡ Attach Energy${energyLabel}</button>`;
+                const maxEnergy = getEnergyAttachLimit(game.currentPlayer);
+                const maxReached = Number.isFinite(maxEnergy) && game.energyAttachedThisTurn >= maxEnergy;
+                const energyDisabled = maxReached ? 'disabled' : '';
+                const energyLabel = maxReached ? ' (Max Reached)' : ` (${formatEnergyAttachStatus(game.currentPlayer)})`;
+                html += `<button class="action-btn" ${energyDisabled} onclick="showAttachEnergyPicker()">⚡ Attach Energy${energyLabel}</button>`;
             }
 
             // Show bench-activated abilities
@@ -2512,6 +3386,8 @@ const PLAYTEST_CARD_SOURCES = {
 
 let playtestCurrentType = 'character';
 let playtestSearchTerm = '';
+let cardBrowserCurrentType = 'character';
+let cardBrowserSearchTerm = '';
 
 function openPlaytestCardLibrary() {
     if (!game.playtestMode) return;
@@ -2522,6 +3398,145 @@ function openPlaytestCardLibrary() {
     if (modal) {
         modal.classList.remove('hidden');
     }
+}
+
+function openCardBrowser() {
+    cardBrowserCurrentType = 'character';
+    cardBrowserSearchTerm = '';
+    renderCardBrowser();
+    const modal = document.getElementById('card-browser-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+    }
+}
+
+function setCardBrowserType(type) {
+    cardBrowserCurrentType = type;
+    renderCardBrowser();
+}
+
+function updateCardBrowserSearch(value) {
+    cardBrowserSearchTerm = value || '';
+    filterCardBrowser();
+}
+
+function renderCardBrowser() {
+    const content = document.getElementById('card-browser-content');
+    if (!content) return;
+
+    const types = ['character', 'item', 'tool', 'supporter', 'stadium'];
+    const source = PLAYTEST_CARD_SOURCES[cardBrowserCurrentType] || {};
+    const entries = Object.entries(source);
+
+    let html = `<h2>All Cards</h2>`;
+    html += `<p class="cards-browser-subtitle">Search and browse every card without leaving the game.</p>`;
+    html += `<div class="deck-builder-cards">`;
+    html += `<div class="card-type-tabs">`;
+    types.forEach(type => {
+        const active = type === cardBrowserCurrentType ? 'active' : '';
+        html += `<button class="tab-btn ${active}" type="button" onclick="setCardBrowserType('${type}')">${type.toUpperCase()}</button>`;
+    });
+    html += `</div>`;
+    html += `<div class="card-search-container">`;
+    html += `<input id="card-browser-search" type="text" placeholder="Search by name, effect, ability..." value="${(cardBrowserSearchTerm || '').replace(/"/g, '&quot;')}" oninput="updateCardBrowserSearch(this.value)">`;
+    html += `</div>`;
+    html += `<div class="cards-browser-count" id="cards-browser-count"></div>`;
+    html += `<div class="card-pool">`;
+
+    if (entries.length === 0) {
+        html += `<div class="cards-browser-empty">No cards found for this type.</div>`;
+    } else {
+        entries.forEach(([key, card]) => {
+            const abilitiesText = [card.ability?.name, card.ability?.description, card.ability2?.name, card.ability2?.description]
+                .filter(Boolean)
+                .join(' ');
+            const movesText = Array.isArray(card.moves)
+                ? card.moves.map((move) => `${move.name} ${move.effect || ''}`).join(' ')
+                : '';
+            const searchable = `${card.name} ${card.effect || ''} ${card.description || ''} ${abilitiesText} ${movesText}`
+                .toLowerCase()
+                .replace(/"/g, '&quot;');
+
+            html += `<div class="pool-card ${cardBrowserCurrentType}" data-search="${searchable}">`;
+            html += `<div class="pool-card-header">`;
+            html += `<div class="pool-card-name">${card.name}</div>`;
+            if (cardBrowserCurrentType === 'stadium') {
+                const venueLabel = card.isConcertHall ? 'Concert Hall' : 'Not a Concert Hall';
+                html += `<div class="pool-card-type">${cardBrowserCurrentType.toUpperCase()} • ${venueLabel}</div>`;
+            } else {
+                html += `<div class="pool-card-type">${cardBrowserCurrentType.toUpperCase()}</div>`;
+            }
+            html += `</div>`;
+
+            if (cardBrowserCurrentType === 'character') {
+                html += `<div class="pool-card-effect">HP: ${card.hp || 0}${card.type ? ` • Type: ${card.type.join(', ')}` : ''}</div>`;
+                if (Array.isArray(card.moves) && card.moves.length) {
+                    card.moves.forEach((move) => {
+                        html += `<div class="pool-card-effect"><strong>${move.name}</strong> (${move.cost || 0}): ${move.damage || 0} dmg${move.effect ? ` • ${move.effect}` : ''}</div>`;
+                    });
+                }
+                if (card.ability) {
+                    html += `<div class="pool-card-effect"><strong>Ability:</strong> ${card.ability.name} - ${card.ability.description || ''}</div>`;
+                }
+                if (card.ability2) {
+                    html += `<div class="pool-card-effect"><strong>Ability:</strong> ${card.ability2.name} - ${card.ability2.description || ''}</div>`;
+                }
+            } else {
+                if (cardBrowserCurrentType === 'stadium') {
+                    const venueLabel = card.isConcertHall ? 'Concert Hall' : 'Not a Concert Hall';
+                    html += `<div class="pool-card-effect"><strong>Venue Type:</strong> ${venueLabel}</div>`;
+                }
+                html += `<div class="pool-card-effect">${card.effect || card.description || 'No description'}</div>`;
+            }
+
+            html += `<button class="pool-card-add cards-browser-preview-btn" type="button" onclick="showCardBrowserPreview('${cardBrowserCurrentType}', '${key}')">Preview in modal</button>`;
+            html += `</div>`;
+        });
+    }
+
+    html += `</div>`;
+    html += `</div>`;
+
+    content.innerHTML = html;
+    filterCardBrowser();
+    focusCardBrowserSearch();
+}
+
+function focusCardBrowserSearch() {
+    const input = document.getElementById('card-browser-search');
+    if (!input) return;
+    setTimeout(() => {
+        input.focus();
+        const len = input.value.length;
+        input.selectionStart = len;
+        input.selectionEnd = len;
+    }, 0);
+}
+
+function filterCardBrowser() {
+    const content = document.getElementById('card-browser-content');
+    if (!content) return;
+    const lowerSearch = (cardBrowserSearchTerm || '').toLowerCase();
+    const cards = Array.from(content.querySelectorAll('.pool-card'));
+    let visibleCount = 0;
+
+    cards.forEach(card => {
+        const haystack = card.getAttribute('data-search') || '';
+        const visible = !lowerSearch || haystack.includes(lowerSearch);
+        card.style.display = visible ? '' : 'none';
+        if (visible) visibleCount += 1;
+    });
+
+    const countEl = document.getElementById('cards-browser-count');
+    if (countEl) {
+        countEl.textContent = `${visibleCount} card${visibleCount === 1 ? '' : 's'} shown`;
+    }
+}
+
+function showCardBrowserPreview(type, key) {
+    const source = PLAYTEST_CARD_SOURCES[type];
+    if (!source || !source[key]) return;
+    showCardActions({ ...source[key], cardType: type, id: `browser_preview_${type}_${key}` }, game.currentPlayer, { skipSync: true, forceInspection: true });
 }
 
 function setPlaytestCardType(type) {
@@ -2657,6 +3672,10 @@ function addPlaytestCard(type, key) {
 }
 
 function playCharacterToActive(cardId) {
+    if (game.phase === 'setup') {
+        chooseOpeningActive(cardId);
+        return;
+    }
     const playerNum = game.currentPlayer;
     const player = game.players[playerNum];
     const opponentNum = playerNum === 1 ? 2 : 1;
@@ -2813,9 +3832,10 @@ function attachEnergy(target, playerNumberOverride = null) {
         return;
     }
 
-    // Check if we've already attached max energy this turn
+    // Check if we've already attached max energy this turn (playtest mode bypasses turn limits)
     const fermentationActive = player.active && player.active.name === 'Eugenia Ampofo' && !abilitiesDisabledFor(playerNum);
-    if (fermentationActive) {
+    const ignoreTurnEnergyLimit = !!(game.playtestMode && playerNum === game.currentPlayer);
+    if (fermentationActive && !ignoreTurnEnergyLimit) {
         if (targetChar === player.active) {
             if (game.energyAttachedThisTurn >= 1) {
                 alert('Fermentation: You may only attach 1 energy to your active this turn.');
@@ -2835,8 +3855,8 @@ function attachEnergy(target, playerNumberOverride = null) {
                 return;
             }
         }
-    } else {
-        if (!game.playtestMode && playerNum === game.currentPlayer && game.energyAttachedThisTurn >= 1) {
+    } else if (!ignoreTurnEnergyLimit) {
+        if (playerNum === game.currentPlayer && game.energyAttachedThisTurn >= 1) {
             alert(`You've already attached ${game.energyAttachedThisTurn} energy this turn!`);
             return;
         }
@@ -2875,7 +3895,7 @@ function attachEnergy(target, playerNumberOverride = null) {
         game.log(`Sophia S. Wang's Original is Better: Opponent discarded top card of deck!`);
     }
 
-    closeModal('card-modal');
+    closeModal('action-modal');
     updateUI();
 }
 
@@ -3305,12 +4325,19 @@ function selectMultipleFromDiscard(player, cardType, count, callback) {
 
 // Show discard pile contents (read-only view)
 function showDiscardPileModal(playerNum) {
+    const localPlayerNumber = (multiplayer.enabled && Number.isFinite(Number(multiplayer.playerNumber)))
+        ? Number(multiplayer.playerNumber)
+        : Number(game.currentPlayer);
+    if (playerNum !== localPlayerNumber) {
+        game.log("You can only view your own discard pile.", 'warning');
+        return;
+    }
     if (!openModalForPlayer(playerNum, 'showDiscardPileModal', [playerNum])) return;
     const player = game.players[playerNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
-    const playerLabel = playerNum === game.currentPlayer ? 'Your' : "Opponent's";
+    const playerLabel = 'Your';
 
     let html = `<h2>${playerLabel} Discard Pile (${player.discard.length} cards)</h2>`;
     
@@ -4292,6 +5319,14 @@ function discardOpponentCard(cardId) {
 
 // Show modal for opponent to choose which cards to discard from their own hand
 function showOpponentDiscardChoice(opponentNum, discardCount, callback, options = {}) {
+    if (!game.tempSelections) game.tempSelections = {};
+    game.tempSelections.opponentDiscardCards = [];
+    game.tempSelections.opponentDiscardCount = discardCount;
+    game.tempSelections.opponentNum = opponentNum;
+    game.tempSelections.opponentDiscardCallback = callback;
+    game.tempSelections.pendingEndTurn = !!options.pendingEndTurn;
+    game.tempSelections.opponentDiscardLogMessage = options.logMessage || null;
+
     // Gate interactive discard choice to the opponent player in multiplayer
     if (!openModalForPlayer(opponentNum, 'showOpponentDiscardChoice', [opponentNum, discardCount, null, {
         pendingEndTurn: !!options.pendingEndTurn,
@@ -4301,14 +5336,6 @@ function showOpponentDiscardChoice(opponentNum, discardCount, callback, options 
     const opponent = game.players[opponentNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
-
-    if (!game.tempSelections) game.tempSelections = {};
-    game.tempSelections.opponentDiscardCards = [];
-    game.tempSelections.opponentDiscardCount = discardCount;
-    game.tempSelections.opponentNum = opponentNum;
-    game.tempSelections.opponentDiscardCallback = callback;
-    game.tempSelections.pendingEndTurn = !!options.pendingEndTurn;
-    game.tempSelections.opponentDiscardLogMessage = options.logMessage || null;
 
     let html = `<h2>Choose ${discardCount} card${discardCount > 1 ? 's' : ''} to discard</h2>`;
     html += `<p>Selected: <span id="opponent-discard-count">0</span> / ${discardCount}</p>`;
@@ -4369,13 +5396,24 @@ function toggleOpponentDiscardCard(cardId) {
 function confirmOpponentDiscard() {
     if (!game.tempSelections) return;
 
-    const selectedCardIds = game.tempSelections.opponentDiscardCards;
-    const requiredCount = game.tempSelections.opponentDiscardCount;
+    const selectedCardIds = Array.isArray(game.tempSelections.opponentDiscardCards)
+        ? game.tempSelections.opponentDiscardCards
+        : [];
+    const requiredCount = Number(game.tempSelections.opponentDiscardCount || 0);
     const opponentNum = game.tempSelections.opponentNum;
     const opponent = game.players[opponentNum];
+    if (!opponent) {
+        game.log('Discard target is unavailable.', 'warning');
+        return;
+    }
 
     if (selectedCardIds.length !== requiredCount) {
-        alert(`Please select exactly ${requiredCount} card${requiredCount > 1 ? 's' : ''} to discard.`);
+        const message = `Please select exactly ${requiredCount} card${requiredCount > 1 ? 's' : ''} to discard.`;
+        if (multiplayer.enabled || multiplayer.isApplyingRemote) {
+            game.log(message, 'warning');
+        } else {
+            alert(message);
+        }
         return;
     }
 
@@ -4606,15 +5644,25 @@ function forceOpponentSwitch(opponentNum, benchIndex) {
 }
 
 // Friedman Hall: Opponent chooses which card to keep
-function showFriedmanHallChoice(cards) {
+function showFriedmanHallChoice(cards, friedmanPlayerOverride = null) {
+    const friedmanPlayer = Number.isFinite(Number(friedmanPlayerOverride))
+        ? Number(friedmanPlayerOverride)
+        : Number((game.tempSelections && game.tempSelections.friedmanPlayer) || game.currentPlayer);
+    const normalizedCards = Array.isArray(cards)
+        ? cards.map((card) => (card ? { ...card } : card)).filter(Boolean)
+        : [];
+    game.tempSelections = game.tempSelections || {};
+    game.tempSelections.friedmanCards = normalizedCards;
+    game.tempSelections.friedmanPlayer = friedmanPlayer;
+
     // Opponent chooses which card to keep. Gate to opponent in multiplayer and send ids.
-    const opponentNum = (game.currentPlayer === 1 ? 2 : 1);
-    const cardDisplayPayload = Array.isArray(cards)
-        ? cards.map(c => (typeof c === 'string'
+    const opponentNum = (friedmanPlayer === 1 ? 2 : 1);
+    const cardDisplayPayload = Array.isArray(normalizedCards)
+        ? normalizedCards.map(c => (typeof c === 'string'
             ? { id: c, name: c, cardType: '' }
             : { id: c.id, name: c.name, cardType: c.cardType || '' }))
         : [];
-    if (!openModalForPlayer(opponentNum, 'showFriedmanHallChoice', [cardDisplayPayload, opponentNum])) return;
+    if (!openModalForPlayer(opponentNum, 'showFriedmanHallChoice', [cardDisplayPayload, opponentNum, friedmanPlayer])) return;
 
     // Reconstruct cards if applied remotely
     if (Array.isArray(cardDisplayPayload) && cardDisplayPayload.length > 0) {
@@ -4704,9 +5752,24 @@ function executeSteinertPracticeDiscard(playerNum, benchIndex) {
 }
 
 function chooseFriedmanCard(cardIndex) {
-    const cards = game.tempSelections.friedmanCards;
-    const playerNum = game.tempSelections.friedmanPlayer;
+    if (!game.tempSelections) {
+        game.log('Friedman Hall selection expired.', 'warning');
+        closeModal('action-modal');
+        return;
+    }
+    const cards = Array.isArray(game.tempSelections.friedmanCards) ? game.tempSelections.friedmanCards : [];
+    const playerNum = Number(game.tempSelections.friedmanPlayer);
+    if (!Number.isFinite(playerNum) || cards.length < 2 || !cards[cardIndex]) {
+        game.log('Friedman Hall selection data is unavailable.', 'warning');
+        closeModal('action-modal');
+        return;
+    }
     const player = game.players[playerNum];
+    if (!player) {
+        game.log('Friedman Hall player is unavailable.', 'warning');
+        closeModal('action-modal');
+        return;
+    }
 
     // Keep the chosen card, shuffle the other back into deck
     const keptCard = cards[cardIndex];
@@ -6245,6 +7308,10 @@ function closeModal(modalId) {
         updateUI();
     }
 
+    if (modalId === 'action-modal' || modalId === 'card-modal') {
+        clearSelectedCard();
+    }
+
     if (modalId === 'action-modal') {
         game.lastAttackSource = null;
     }
@@ -6312,6 +7379,7 @@ function showAttackMenu(cardId) {
     const content = document.getElementById('action-content');
 
     let html = `<h2>${attacker.name} - Select Move</h2>`;
+    html += `<p style="margin-bottom:8px; color:#475569;">Attacking will end your turn after the move resolves.</p>`;
     html += `<div class="action-buttons">`;
 
     // Show available moves
@@ -6650,6 +7718,12 @@ function executeAttack(attackerId, moveName, targetId) {
     closeModal('action-modal');
     updateUI();
     if (multiplayer.enabled && multiplayer.isApplyingRemote) {
+        return;
+    }
+    const waitingForPlayer = Number(multiplayer.pendingRemotePromptFor);
+    if (multiplayer.enabled && (waitingForPlayer === 1 || waitingForPlayer === 2) && waitingForPlayer !== Number(multiplayer.playerNumber)) {
+        game.pendingAttackEndTurn = true;
+        game.pendingAttackAttackerId = attacker.id;
         return;
     }
     endTurn();
@@ -7740,32 +8814,62 @@ function setupEventListeners() {
         });
     }
 
+    const toolbarPlayBtn = document.getElementById('toolbar-play-btn');
+    const toolbarEnergyBtn = document.getElementById('toolbar-energy-btn');
+    const toolbarAttackBtn = document.getElementById('toolbar-attack-btn');
+    const toolbarRetreatBtn = document.getElementById('toolbar-retreat-btn');
+    const toggleLogBtn = document.getElementById('toggle-log-btn');
+    if (toolbarPlayBtn) toolbarPlayBtn.addEventListener('click', () => playSelectedCardHotkey());
+    if (toolbarEnergyBtn) toolbarEnergyBtn.addEventListener('click', () => attachEnergyHotkey());
+    if (toolbarAttackBtn) toolbarAttackBtn.addEventListener('click', () => attackHotkey());
+    if (toolbarRetreatBtn) toolbarRetreatBtn.addEventListener('click', () => retreatHotkey());
+    if (toggleLogBtn) toggleLogBtn.addEventListener('click', () => toggleGameLogCollapsed());
+
     // Discard pile click handlers
     document.querySelectorAll('.discard-pile').forEach(pile => {
         pile.addEventListener('click', () => {
             const playerNum = parseInt(pile.getAttribute('data-player'));
+            const localPlayerNumber = (multiplayer.enabled && Number.isFinite(Number(multiplayer.playerNumber)))
+                ? Number(multiplayer.playerNumber)
+                : Number(game.currentPlayer);
+            if (playerNum !== localPlayerNumber) return;
             showDiscardPileModal(playerNum);
         });
     });
 
-    // Close modals
+    setupGlobalModalEventListeners();
+}
+
+let eventListenersInitialized = false;
+let globalModalListenersInitialized = false;
+
+function setupGlobalModalEventListeners() {
+    if (globalModalListenersInitialized) return;
+    globalModalListenersInitialized = true;
+
     document.querySelectorAll('.close-modal').forEach(closeBtn => {
         closeBtn.addEventListener('click', (e) => {
-            e.target.closest('.modal').classList.add('hidden');
-        });
-    });
-
-    // Click outside modal to close
-    document.querySelectorAll('.modal').forEach(modal => {
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
+            const modal = e.target.closest('.modal');
+            if (modal && modal.id) {
+                closeModal(modal.id);
+            } else if (modal) {
                 modal.classList.add('hidden');
             }
         });
     });
-}
 
-let eventListenersInitialized = false;
+    document.querySelectorAll('.modal').forEach(modal => {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                if (modal.id) {
+                    closeModal(modal.id);
+                } else {
+                    modal.classList.add('hidden');
+                }
+            }
+        });
+    });
+}
 
 function endTurn() {
     if (multiplayer.enabled && !multiplayer.isApplyingRemote) {
@@ -7821,7 +8925,6 @@ let hotkeysInitialized = false;
 let tabShortcutOverlayVisible = false;
 
 function showKeyboardShortcutsOverlay() {
-    if (!openModalForPlayer(game.currentPlayer, 'showKeyboardShortcutsOverlay', [])) return;
     const overlay = document.getElementById('keyboard-shortcuts-overlay');
     if (!overlay) return;
     overlay.classList.remove('hidden');
@@ -7966,11 +9069,21 @@ function playSelectedCardHotkey() {
     if (!inHand) return;
 
     const canPlayAnytime = game.playtestMode || game.phase === 'main';
-    if (!canPlayAnytime) return;
+    const canPlaceOpeningActive = game.phase === 'setup' && !!player && !player.active;
+    const canPlaceOpeningBench = game.phase === 'setup' && !!player && !!player.active && (player.bench || []).some((slot) => !slot);
+    if (!canPlayAnytime && !canPlaceOpeningActive && !canPlaceOpeningBench) return;
 
     if (card.cardType === 'character') {
         if (!player.active) {
-            playCharacterToActive(card.id);
+            if (game.phase === 'setup') {
+                chooseOpeningActive(card.id, game.currentPlayer);
+            } else {
+                playCharacterToActive(card.id);
+            }
+            return;
+        }
+        if (game.phase === 'setup') {
+            toggleOpeningBench(card.id, game.currentPlayer);
             return;
         }
         const emptyBenchSlot = player.bench.indexOf(null);
@@ -7999,43 +9112,7 @@ function playSelectedCardHotkey() {
 
 function attachEnergyHotkey() {
     if (!game.playtestMode && game.phase !== 'main') return;
-    const player = game.players[game.currentPlayer];
-    const selected = game.selectedCard;
-    if (selected && selected.cardType === 'character') {
-        if (player.active && player.active.id === selected.id) {
-            if (typeof window.attachEnergy === 'function') {
-                window.attachEnergy('active', game.currentPlayer);
-            } else {
-                attachEnergy('active', game.currentPlayer);
-            }
-            return;
-        }
-        const selectedBenchIndex = player.bench.findIndex(c => c && c.id === selected.id);
-        if (selectedBenchIndex !== -1) {
-            if (typeof window.attachEnergy === 'function') {
-                window.attachEnergy(selectedBenchIndex, game.currentPlayer);
-            } else {
-                attachEnergy(selectedBenchIndex, game.currentPlayer);
-            }
-            return;
-        }
-    }
-    if (player.active) {
-        if (typeof window.attachEnergy === 'function') {
-            window.attachEnergy('active', game.currentPlayer);
-        } else {
-            attachEnergy('active', game.currentPlayer);
-        }
-        return;
-    }
-    const benchIndex = player.bench.findIndex(c => c);
-    if (benchIndex !== -1) {
-        if (typeof window.attachEnergy === 'function') {
-            window.attachEnergy(benchIndex, game.currentPlayer);
-        } else {
-            attachEnergy(benchIndex, game.currentPlayer);
-        }
-    }
+    showAttachEnergyPicker();
 }
 
 function attackHotkey() {
@@ -8064,6 +9141,10 @@ function endTurnHotkey() {
 }
 
 function endTurnAction() {
+    if (isOpeningSetupPhase()) {
+        game.log('Complete opening setup before ending the turn.', 'warning');
+        return;
+    }
     if (multiplayer.enabled && !multiplayer.isApplyingRemote) {
         if (!canCurrentClientAct()) {
             return;
@@ -8083,6 +9164,11 @@ function endTurnAction() {
 
 // Start game when page loads
 window.addEventListener('DOMContentLoaded', () => {
+    initializeBackgroundMusic();
+    setMenuBackgroundMusic();
+    setupGlobalModalEventListeners();
+    syncResponsiveUiDefaults();
+    window.addEventListener('resize', syncResponsiveUiDefaults);
     setupStartScreen();
 });
 
@@ -8098,6 +9184,7 @@ function setupStartScreen() {
     const multiplayerToggle = document.getElementById('multiplayer-toggle');
     const multiplayerRoomInput = document.getElementById('multiplayer-room');
     const copyRoomCodeBtn = document.getElementById('copy-room-code-btn');
+    setMenuBackgroundMusic();
 
     function updateMultiplayerDeckUI() {
         const multiplayerOn = !!(multiplayerToggle && multiplayerToggle.checked);
@@ -8169,6 +9256,7 @@ function setupStartScreen() {
         // Hide start screen and show game
         startScreen.classList.add('hidden');
         gameContainer.classList.remove('hidden');
+        setBattleBackgroundMusic();
 
         if (multiplayerToggle?.checked) {
             setMultiplayerLobbyStatus('Connecting...', 'warning');
@@ -8195,7 +9283,7 @@ function setupStartScreen() {
     // View cards button
     const viewCardsButton = document.getElementById('view-cards-btn');
     viewCardsButton.addEventListener('click', () => {
-        window.open('cards.md', '_blank');
+        openCardBrowser();
     });
 
     // Load custom decks into dropdown on page load
@@ -8315,10 +9403,8 @@ function filterCardPool(searchTerm) {
     const lowerSearch = searchTerm.toLowerCase();
 
     cards.forEach(cardElement => {
-        const cardName = cardElement.querySelector('.pool-card-name').textContent.toLowerCase();
-        const cardEffect = cardElement.querySelector('.pool-card-effect')?.textContent.toLowerCase() || '';
-        
-        if (cardName.includes(lowerSearch) || cardEffect.includes(lowerSearch)) {
+        const haystack = (cardElement.getAttribute('data-search') || cardElement.textContent || '').toLowerCase();
+        if (haystack.includes(lowerSearch)) {
             cardElement.style.display = '';
         } else {
             cardElement.style.display = 'none';
@@ -8326,9 +9412,25 @@ function filterCardPool(searchTerm) {
     });
 }
 
+function getStadiumVenueLabel(card) {
+    if (!card || card.cardType !== 'stadium') return '';
+    return card.isConcertHall ? 'Concert Hall' : 'Not a Concert Hall';
+}
+
+function getCharacterDeckBuilderDescription(card) {
+    if (!card || card.cardType !== 'character') return '';
+    if (card.description) return card.description;
+    if (card.ability && card.ability.description) return `${card.ability.name}: ${card.ability.description}`;
+    if (card.ability2 && card.ability2.description) return `${card.ability2.name}: ${card.ability2.description}`;
+    const moveWithEffect = (card.moves || []).find((move) => move && move.effect);
+    if (moveWithEffect) return `${moveWithEffect.name}: ${moveWithEffect.effect}`;
+    return 'No additional character description.';
+}
+
 function createPoolCardElement(card, type) {
     const div = document.createElement('div');
     div.className = `pool-card ${type}`;
+    const cardWithType = { ...card, cardType: type };
 
     const header = document.createElement('div');
     header.className = 'pool-card-header';
@@ -8339,27 +9441,42 @@ function createPoolCardElement(card, type) {
 
     const typeLabel = document.createElement('div');
     typeLabel.className = 'pool-card-type';
-    typeLabel.textContent = type.toUpperCase();
+    if (type === 'stadium') {
+        typeLabel.textContent = `${type.toUpperCase()} • ${getStadiumVenueLabel(cardWithType)}`;
+    } else {
+        typeLabel.textContent = type.toUpperCase();
+    }
 
     header.appendChild(name);
     header.appendChild(typeLabel);
     div.appendChild(header);
 
-    // Add effect/description
-    if (card.effect || card.description) {
+    // Add effect/description and category annotations
+    if (type === 'character') {
+        const hp = document.createElement('div');
+        hp.className = 'pool-card-effect';
+        hp.textContent = `HP: ${card.hp || 0}${card.type ? ` • Type: ${card.type.join(', ')}` : ''}`;
+        div.appendChild(hp);
+
+        const desc = getCharacterDeckBuilderDescription(cardWithType);
+        const shortDesc = desc.length > 160 ? `${desc.slice(0, 157)}...` : desc;
+        const descEl = document.createElement('div');
+        descEl.className = 'pool-card-effect pool-card-description';
+        descEl.textContent = shortDesc;
+        descEl.title = desc;
+        div.appendChild(descEl);
+    } else {
         const effect = document.createElement('div');
         effect.className = 'pool-card-effect';
-        effect.textContent = card.effect || card.description || '';
+        const venuePrefix = type === 'stadium' ? `Venue Type: ${getStadiumVenueLabel(cardWithType)}. ` : '';
+        effect.textContent = `${venuePrefix}${card.effect || card.description || ''}`.trim();
         div.appendChild(effect);
     }
 
-    // Show HP for characters
-    if (type === 'character' && card.hp) {
-        const hp = document.createElement('div');
-        hp.className = 'pool-card-effect';
-        hp.textContent = `HP: ${card.hp}`;
-        div.appendChild(hp);
-    }
+    const searchable = `${card.name} ${card.effect || ''} ${card.description || ''} ${getCharacterDeckBuilderDescription(cardWithType)} ${getStadiumVenueLabel(cardWithType)}`
+        .toLowerCase()
+        .replace(/"/g, '&quot;');
+    div.setAttribute('data-search', searchable);
 
     // Add button
     const addBtn = document.createElement('button');
@@ -10270,7 +11387,13 @@ function executeOutreach(charId) {
 }
 
 function loadCustomDecksIntoDropdown() {
-    const customDecks = JSON.parse(localStorage.getItem('customDecks') || '{}');
+    let customDecks = {};
+    try {
+        customDecks = JSON.parse(localStorage.getItem('customDecks') || '{}') || {};
+    } catch (error) {
+        console.warn('Invalid customDecks in localStorage; resetting.', error);
+        localStorage.removeItem('customDecks');
+    }
     const player1Select = document.getElementById('player1-deck-select');
     const player2Select = document.getElementById('player2-deck-select');
 
@@ -11753,6 +12876,7 @@ const EXPORTED_ACTIONS = {
     showAttackMenu,
     showRetreatMenu,
     attachEnergy,
+    showAttachEnergyPicker,
     useCategoryTheoryFromHand,
     useActivatedAbility,
     switchToActive,
@@ -11760,6 +12884,10 @@ const EXPORTED_ACTIONS = {
     playSupporter,
     playStadium,
     closeModal,
+    openCardBrowser,
+    setCardBrowserType,
+    updateCardBrowserSearch,
+    showCardBrowserPreview,
     setPlaytestCardType,
     updatePlaytestCardSearch,
     addPlaytestCard,
@@ -11862,6 +12990,9 @@ const EXPORTED_ACTIONS = {
     executeAttack,
     handleTargetSelection,
     executeOutreach,
+    chooseOpeningActive,
+    toggleOpeningBench,
+    setOpeningReady,
     toggleArtistAlleyCard,
     confirmArtistAlley,
     executeRossAttackTarget,
@@ -11873,6 +13004,7 @@ Object.assign(window, EXPORTED_ACTIONS);
 
 const MULTIPLAYER_ACTION_BLACKLIST = new Set([
     'closeModal',
+    'showAttachEnergyPicker',
     'copyDeckCode',
     'processDeckImport',
     'endTurnAction',
@@ -11916,30 +13048,41 @@ const MULTIPLAYER_LOCAL_FIRST_ACTIONS = new Set([
     'executeGachaGaming',
     'executeGachaGamingStep',
     'finalizeGachaGaming'
+    ,
+    'toggleOpeningBench',
+    'setOpeningReady'
 ]);
 
 Object.keys(EXPORTED_ACTIONS).forEach((name) => {
     const original = EXPORTED_ACTIONS[name];
     window[name] = (...args) => {
         if (MULTIPLAYER_ACTION_BLACKLIST.has(name)) {
-            return original(...args);
-        }
-
-        if (multiplayer.enabled && !multiplayer.isApplyingRemote && name && name.startsWith('toggle')) {
-            return original(...args);
+            const execution = executeActionSafely(name, original, args, 'local');
+            return execution.ok ? execution.value : undefined;
         }
 
         if (multiplayer.enabled && !multiplayer.isApplyingRemote) {
+            const forceMultiplayerSyncActions = new Set(['chooseOpeningActive', 'toggleOpeningBench', 'setOpeningReady']);
             const shouldRunLocalFirst = MULTIPLAYER_LOCAL_FIRST_ACTIONS.has(name) || (name && !name.startsWith('show'));
             if (shouldRunLocalFirst) {
-                const result = original(...args);
-                sendMultiplayerAction(name, args);
-                return result;
+                const beforeState = JSON.stringify(getStateSnapshot());
+                const execution = executeActionSafely(name, original, args, 'local');
+                if (!execution.ok) return;
+                const afterState = JSON.stringify(getStateSnapshot());
+                if (forceMultiplayerSyncActions.has(name) || beforeState !== afterState) {
+                    sendMultiplayerAction(name, args);
+                }
+                return execution.value;
             }
             sendMultiplayerAction(name, args);
             return;
         }
 
-        return original(...args);
+        const execution = executeActionSafely(name, original, args, 'local');
+        return execution.ok ? execution.value : undefined;
     };
 });
+
+window.render_game_to_text = renderGameToText;
+window.advanceTime = advanceTimeForAutomation;
+window.__bgmDebugState = getBgmDebugState;

@@ -444,6 +444,409 @@ body {
     text-align: center;
 }
 
+/* =========================================================
+   Follow-up UX improvements: setup guide, toolbar, log toggle, unclipped layout
+   ========================================================= */
+
+body {
+    min-height: 100vh;
+    height: auto;
+    overflow: auto;
+}
+
+#game-container {
+    min-height: 100vh;
+    height: auto;
+    align-items: flex-start;
+}
+
+.setup-guide {
+    margin: 4px 0 6px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(251, 191, 36, 0.16), rgba(59, 130, 246, 0.14));
+    border: 1px solid rgba(251, 191, 36, 0.25);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.setup-guide__title {
+    font-weight: 800;
+    font-size: 12px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #f8fafc;
+    margin-bottom: 4px;
+}
+
+.setup-guide__body {
+    color: #dbeafe;
+    font-size: 13px;
+    margin-bottom: 8px;
+}
+
+.setup-guide__choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.setup-guide__choice {
+    padding: 7px 10px;
+    font-size: 12px;
+    border-radius: 999px;
+}
+
+.setup-guide__empty {
+    color: #fecaca;
+    font-size: 12px;
+}
+
+.game-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 2px 0 6px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.toolbar-selected-card {
+    min-width: 0;
+    flex: 1 1 auto;
+    color: #e2e8f0;
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.game-toolbar-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+
+.toolbar-btn {
+    padding: 6px 9px;
+    font-size: 12px;
+    border-radius: 8px;
+}
+
+.toolbar-btn-secondary {
+    background: rgba(148, 163, 184, 0.16);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.toolbar-btn-secondary:hover {
+    background: rgba(148, 163, 184, 0.24);
+}
+
+#game-container.game-log-collapsed #game-log {
+    display: none;
+}
+
+.btn:focus-visible,
+button:focus-visible,
+select:focus-visible,
+input:focus-visible,
+.card-slot:focus-visible {
+    outline: 2px solid #facc15;
+    outline-offset: 2px;
+}
+
+@media (max-width: 1200px) {
+    .game-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .game-toolbar-actions {
+        justify-content: flex-start;
+    }
+}
+
+.cards-browser-content .modal-content,
+#card-browser-modal .modal-content {
+    max-width: min(1200px, 96vw);
+}
+
+.cards-browser-subtitle {
+    margin: 2px 0 10px;
+    color: #475569;
+    font-size: 13px;
+}
+
+.cards-browser-count {
+    margin: 0 0 10px;
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.cards-browser-empty {
+    padding: 12px;
+    color: #64748b;
+}
+
+.cards-browser-preview-btn {
+    background: #2563eb;
+}
+
+.cards-browser-preview-btn:hover {
+    background: #1d4ed8;
+}
+
+.selection-inspector {
+    margin: 0 0 6px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.42);
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    color: #e2e8f0;
+}
+
+.selection-inspector__header {
+    margin-bottom: 6px;
+}
+
+.selection-inspector__title {
+    font-weight: 800;
+    font-size: 13px;
+    line-height: 1.2;
+}
+
+.selection-inspector__meta {
+    margin-top: 2px;
+    color: #bfdbfe;
+    font-size: 11px;
+}
+
+.selection-inspector__body {
+    display: grid;
+    gap: 4px;
+}
+
+.selection-inspector__line {
+    font-size: 12px;
+    line-height: 1.3;
+    color: #dbeafe;
+}
+
+@media (hover: hover) and (pointer: fine) {
+    .hand-card-wrapper:hover .card {
+        transform: translateY(-8px) scale(1.08);
+        z-index: 5;
+        position: relative;
+    }
+}
+
+/* Final mobile usability pass */
+@media (max-width: 900px) {
+    body {
+        overflow-x: hidden;
+    }
+
+    #game-container {
+        flex-direction: column;
+        height: auto !important;
+        min-height: 100vh;
+        padding: 6px;
+        gap: 6px;
+    }
+
+    #main-game-area {
+        gap: 4px;
+    }
+
+    #game-header {
+        flex-wrap: wrap;
+        align-items: stretch;
+        gap: 6px;
+        padding: 6px 8px;
+    }
+
+    #turn-info {
+        order: -1;
+        width: 100%;
+    }
+
+    .player-header-secondary {
+        display: none;
+    }
+
+    #midline-band {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+    }
+
+    .midline-side-panel {
+        min-height: 0;
+    }
+
+    #stadium-zone {
+        width: 100%;
+    }
+
+    .player-board {
+        padding: 6px;
+        margin-bottom: 0;
+    }
+
+    #player1-board .board-section,
+    #player2-board .board-section {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 6px;
+        justify-items: center;
+    }
+
+    .bench-zone,
+    .active-zone,
+    .deck-discard-zone {
+        width: 100% !important;
+        min-width: 0 !important;
+        justify-self: stretch !important;
+        padding: 4px;
+    }
+
+    .bench-zone .bench-slots {
+        width: 100%;
+        justify-content: center;
+        overflow-x: auto;
+        padding-bottom: 2px;
+    }
+
+    .deck-discard-zone {
+        display: flex;
+        justify-content: center;
+        gap: 8px;
+    }
+
+    #game-toolbar {
+        position: sticky;
+        bottom: 0;
+        z-index: 15;
+        background: rgba(15, 23, 42, 0.92);
+        backdrop-filter: blur(8px);
+    }
+
+    .toolbar-selected-card {
+        white-space: normal;
+    }
+
+    .game-toolbar-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        width: 100%;
+    }
+
+    .toolbar-btn {
+        width: 100%;
+        min-height: 38px;
+    }
+
+    #hand-zone {
+        min-height: 0;
+        padding: 8px 8px 10px;
+    }
+
+    #hand-zone h3 {
+        margin-bottom: 6px;
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        background: inherit;
+    }
+
+    #hand-cards {
+        display: grid !important;
+        grid-auto-flow: column;
+        grid-auto-columns: max-content;
+        gap: 8px;
+        overflow-x: auto;
+        overflow-y: visible;
+        padding: 2px 2px 6px;
+        scroll-snap-type: x proximity;
+        justify-content: start !important;
+    }
+
+    #hand-cards .hand-card-wrapper {
+        scroll-snap-align: start;
+    }
+
+    #hand-cards .card {
+        width: 112px !important;
+        height: 150px !important;
+    }
+
+    #game-log {
+        width: 100% !important;
+        max-height: 180px;
+        min-height: 120px;
+    }
+
+    #keyboard-shortcuts-hint {
+        right: 8px;
+        bottom: 8px;
+        font-size: 11px;
+        padding: 8px 10px;
+    }
+
+    .selection-inspector__line {
+        font-size: 11px;
+    }
+}
+
+@media (max-width: 480px) {
+    .game-toolbar-actions {
+        grid-template-columns: 1fr;
+    }
+
+    #keyboard-shortcuts-hint {
+        display: none;
+    }
+
+    .setup-guide__choices {
+        flex-direction: column;
+    }
+
+    .setup-guide__choice {
+        width: 100%;
+        text-align: left;
+    }
+}
+
+.turn-change-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(107, 114, 128, 0.28);
+    z-index: 1090;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.turn-change-overlay.hidden {
+    display: none;
+}
+
+.turn-change-overlay__text {
+    background: rgba(17, 24, 39, 0.88);
+    color: #fff;
+    padding: 12px 18px;
+    border-radius: 10px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.25);
+}
+
 .card-energy-attached {
     margin-top: 5px;
     display: flex;
@@ -1250,4 +1653,4205 @@ body {
 .pool-card-add:disabled {
     background: #ccc;
     cursor: not-allowed;
+}
+
+/* =========================================================
+   UI Refresh Overrides (safe append-only visual layer)
+   ========================================================= */
+
+:root {
+    --ui-bg-1: #081226;
+    --ui-bg-2: #10213d;
+    --ui-bg-3: #1c355d;
+    --ui-panel: rgba(10, 18, 34, 0.72);
+    --ui-panel-solid: #101b32;
+    --ui-panel-soft: rgba(255, 255, 255, 0.08);
+    --ui-border: rgba(255, 255, 255, 0.14);
+    --ui-border-strong: rgba(148, 163, 184, 0.32);
+    --ui-text: #e5edf9;
+    --ui-text-muted: #a8b7d1;
+    --ui-accent: #74c0fc;
+    --ui-accent-2: #8b5cf6;
+    --ui-success: #34d399;
+    --ui-danger: #fb7185;
+    --ui-warning: #fbbf24;
+    --ui-shadow: 0 14px 40px rgba(2, 6, 23, 0.35);
+    --ui-radius-lg: 18px;
+    --ui-radius-md: 12px;
+    --ui-radius-sm: 9px;
+    --ui-font: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
+}
+
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+
+*::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+*::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.35);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+body {
+    font-family: var(--ui-font);
+    background:
+        radial-gradient(circle at 12% 18%, rgba(116, 192, 252, 0.24), transparent 40%),
+        radial-gradient(circle at 85% 16%, rgba(139, 92, 246, 0.22), transparent 44%),
+        radial-gradient(circle at 48% 80%, rgba(52, 211, 153, 0.12), transparent 45%),
+        linear-gradient(160deg, var(--ui-bg-1) 0%, var(--ui-bg-2) 52%, var(--ui-bg-3) 100%);
+    color: var(--ui-text);
+}
+
+button,
+select,
+input {
+    font-family: inherit;
+}
+
+.btn {
+    background: linear-gradient(135deg, #3b82f6, #6366f1);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 10px;
+    box-shadow: 0 8px 18px rgba(59, 130, 246, 0.22);
+    font-weight: 700;
+    letter-spacing: 0.15px;
+    transition: transform 0.14s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+
+.btn:hover {
+    background: linear-gradient(135deg, #2563eb, #5b21b6);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 22px rgba(37, 99, 235, 0.28);
+}
+
+.btn:active {
+    transform: translateY(0);
+}
+
+.btn:disabled {
+    background: rgba(148, 163, 184, 0.35);
+    border-color: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.65);
+    box-shadow: none;
+}
+
+.btn-large {
+    background: linear-gradient(135deg, #ffffff, #e6eefb);
+    color: #18233a;
+    border: 1px solid rgba(255, 255, 255, 0.4);
+    border-radius: 14px;
+    box-shadow: 0 18px 40px rgba(2, 6, 23, 0.28);
+}
+
+.btn-large:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 24px 46px rgba(2, 6, 23, 0.32);
+}
+
+/* Start screen */
+#start-screen {
+    position: relative;
+    background:
+        radial-gradient(circle at 10% 10%, rgba(116, 192, 252, 0.25), transparent 38%),
+        radial-gradient(circle at 90% 20%, rgba(167, 139, 250, 0.2), transparent 40%),
+        radial-gradient(circle at 50% 100%, rgba(52, 211, 153, 0.15), transparent 48%),
+        linear-gradient(165deg, #081226 0%, #122445 50%, #1b3158 100%);
+    padding: 20px;
+    overflow-y: auto;
+}
+
+#start-screen h1 {
+    font-size: clamp(2.1rem, 4vw, 3.4rem);
+    letter-spacing: 0.6px;
+    margin-bottom: 26px;
+    text-shadow: 0 8px 28px rgba(2, 6, 23, 0.45);
+}
+
+#deck-selection {
+    gap: 24px;
+    width: min(1100px, 100%);
+    margin-bottom: 22px;
+    padding: 24px;
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.07);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 20px 50px rgba(2, 6, 23, 0.28);
+    backdrop-filter: blur(10px);
+}
+
+.player-deck-selection {
+    flex: 1;
+    text-align: left;
+    background: rgba(4, 10, 24, 0.28);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 14px;
+}
+
+.player-deck-selection h2 {
+    font-size: 1.05rem;
+    margin-bottom: 10px;
+    color: #f1f5ff;
+}
+
+.player-deck-selection select {
+    width: 100%;
+    min-width: 0;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    border-radius: 10px;
+    background: rgba(248, 250, 252, 0.97);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+
+.deck-description {
+    max-width: none;
+    color: rgba(236, 242, 255, 0.88);
+    font-size: 13px;
+}
+
+.playtest-toggle {
+    width: min(1100px, 100%);
+    margin-top: 8px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #eff6ff;
+}
+
+#multiplayer-room {
+    border-radius: 10px;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+    background: rgba(255, 255, 255, 0.97);
+    color: #0f172a;
+    min-width: 320px;
+}
+
+.multiplayer-player-identity {
+    background: rgba(255, 255, 255, 0.11);
+    color: #eef4ff;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.multiplayer-lobby-status {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* Main game layout */
+#game-container {
+    gap: 12px;
+    padding: 12px;
+    background:
+        radial-gradient(circle at 8% 15%, rgba(116, 192, 252, 0.18), transparent 36%),
+        radial-gradient(circle at 92% 14%, rgba(139, 92, 246, 0.14), transparent 36%);
+}
+
+#main-game-area {
+    gap: 8px;
+}
+
+#game-header,
+.player-board,
+#hand-zone,
+#game-log,
+#stadium-zone {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-lg);
+    box-shadow: var(--ui-shadow);
+    backdrop-filter: blur(10px);
+    color: var(--ui-text);
+}
+
+#game-header {
+    align-items: stretch;
+    padding: 10px 12px;
+    gap: 12px;
+    margin-bottom: 0;
+}
+
+.player-info {
+    flex: 1;
+    min-width: 0;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    padding: 10px;
+}
+
+.player-info h2 {
+    color: #dbeafe;
+    margin-bottom: 6px;
+    font-size: 15px;
+    letter-spacing: 0.2px;
+}
+
+.player-info .stats {
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.player-info .stats span {
+    background: rgba(255, 255, 255, 0.06);
+    color: #d9e5fb;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 11px;
+}
+
+#turn-info {
+    min-width: 260px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    background: rgba(3, 7, 18, 0.22);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 14px;
+    padding: 10px 12px;
+}
+
+#turn-info h3 {
+    color: #f1f5ff;
+    margin-bottom: 6px;
+    text-shadow: 0 2px 12px rgba(59, 130, 246, 0.25);
+}
+
+.in-game-room-code {
+    color: #bfd0ec;
+}
+
+.in-game-player-identity {
+    background: rgba(116, 192, 252, 0.12);
+    color: #dff3ff;
+    border-color: rgba(116, 192, 252, 0.35);
+}
+
+#energy-played,
+#supporter-played,
+#attacked-played,
+#phase-info {
+    color: var(--ui-text-muted);
+    font-size: 11px;
+}
+
+.player-board {
+    margin-bottom: 0;
+    padding: 10px;
+    position: relative;
+    overflow: hidden;
+}
+
+.player-board::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(140deg, rgba(255, 255, 255, 0.02), transparent 38%),
+        radial-gradient(circle at 14% 15%, rgba(116, 192, 252, 0.05), transparent 44%);
+    pointer-events: none;
+}
+
+.board-section {
+    position: relative;
+    gap: 12px;
+}
+
+.bench-zone,
+.active-zone,
+.deck-discard-zone {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+    padding: 8px;
+}
+
+.bench-zone h3,
+.active-zone h3,
+#stadium-zone h3,
+#hand-zone h3,
+#game-log h3 {
+    color: #dce8ff;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+}
+
+.bench-slots {
+    gap: 8px;
+}
+
+.card-slot {
+    border: 1px dashed rgba(148, 163, 184, 0.45);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.02)),
+        rgba(15, 23, 42, 0.38);
+    border-radius: 10px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
+    color: var(--ui-text-muted);
+    transition: transform 0.14s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+}
+
+.card-slot:hover {
+    border-color: rgba(116, 192, 252, 0.7);
+    background:
+        linear-gradient(180deg, rgba(116, 192, 252, 0.12), rgba(255, 255, 255, 0.02)),
+        rgba(15, 23, 42, 0.46);
+    box-shadow: inset 0 0 0 1px rgba(116, 192, 252, 0.1);
+}
+
+.card-slot.occupied {
+    border-color: rgba(148, 163, 184, 0.28);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.card-slot.can-drop {
+    border-color: rgba(52, 211, 153, 0.8);
+    background: rgba(16, 185, 129, 0.1);
+    box-shadow: 0 0 0 2px rgba(52, 211, 153, 0.15) inset;
+}
+
+.empty-slot-text {
+    color: rgba(191, 210, 236, 0.65);
+    line-height: 1.2;
+}
+
+/* Card refresh */
+.card {
+    border-radius: 9px;
+    border-width: 2px;
+    border-color: rgba(51, 65, 85, 0.6);
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(246, 250, 255, 0.95));
+    color: #152238;
+    box-shadow:
+        0 6px 14px rgba(15, 23, 42, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+
+.card:hover {
+    transform: translateY(-3px) scale(1.03);
+    box-shadow:
+        0 14px 26px rgba(15, 23, 42, 0.22),
+        inset 0 1px 0 rgba(255, 255, 255, 0.95);
+}
+
+.card.character {
+    border-color: #fb7185;
+    background:
+        linear-gradient(180deg, rgba(255, 241, 242, 0.96), rgba(255, 255, 255, 0.96));
+}
+
+.card.item,
+.card.tool {
+    border-color: #22d3ee;
+    background:
+        linear-gradient(180deg, rgba(236, 254, 255, 0.96), rgba(255, 255, 255, 0.96));
+}
+
+.card.stadium {
+    border-color: #facc15;
+    background:
+        linear-gradient(180deg, rgba(254, 252, 232, 0.96), rgba(255, 255, 255, 0.96));
+}
+
+.card.energy {
+    border-color: #34d399;
+    background:
+        linear-gradient(180deg, rgba(236, 253, 245, 0.96), rgba(255, 255, 255, 0.96));
+}
+
+.card.supporter {
+    border-color: #c084fc;
+    background:
+        linear-gradient(180deg, rgba(250, 245, 255, 0.96), rgba(255, 255, 255, 0.96));
+}
+
+.card-header {
+    margin-bottom: 3px;
+    padding-bottom: 2px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.card-name {
+    font-size: 9px;
+    color: #0f172a;
+}
+
+.card-hp {
+    color: #be123c;
+    font-weight: 800;
+}
+
+.card-stat-modifiers {
+    margin-bottom: 4px;
+}
+
+.card-mod-badge {
+    border-radius: 999px;
+    padding: 1px 5px;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+.card-damage-counter {
+    background: linear-gradient(180deg, #ef4444, #b91c1c);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    box-shadow: 0 4px 8px rgba(127, 29, 29, 0.28);
+}
+
+.card-status {
+    background: linear-gradient(180deg, #22c55e, #15803d);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 5px;
+    font-size: 8px;
+    padding: 2px 5px;
+}
+
+.card-energy-attached {
+    gap: 4px;
+}
+
+.energy-icon {
+    width: 13px;
+    height: 13px;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.25);
+}
+
+.card-moves {
+    border-top: 1px solid rgba(148, 163, 184, 0.2);
+    margin-top: 4px;
+}
+
+.move-cost {
+    color: #1d4ed8;
+}
+
+.card.selected {
+    border-color: rgba(16, 185, 129, 0.85);
+    box-shadow:
+        0 0 0 2px rgba(16, 185, 129, 0.22),
+        0 14px 24px rgba(16, 185, 129, 0.16);
+}
+
+/* Deck / discard / stadium / hand */
+.deck-pile,
+.discard-pile {
+    border-radius: 10px;
+    border-color: rgba(255, 255, 255, 0.14);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.deck-pile {
+    background:
+        linear-gradient(145deg, rgba(59, 130, 246, 0.9), rgba(91, 33, 182, 0.92));
+}
+
+.discard-pile {
+    background:
+        linear-gradient(145deg, rgba(251, 191, 36, 0.95), rgba(245, 158, 11, 0.95));
+    color: #2b1800;
+}
+
+.deck-pile:hover,
+.discard-pile:hover {
+    transform: translateY(-2px) scale(1.03);
+}
+
+.pile-label {
+    letter-spacing: 0.2px;
+    font-size: 10px;
+}
+
+.pile-count {
+    font-size: 20px;
+}
+
+#stadium-zone {
+    margin: 0;
+    padding: 8px;
+    background:
+        linear-gradient(180deg, rgba(250, 204, 21, 0.12), rgba(255, 255, 255, 0.03));
+}
+
+#stadium-card {
+    width: 108px;
+    height: 138px;
+}
+
+#hand-zone {
+    margin-top: 0;
+    max-height: 180px;
+    padding: 10px;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.03));
+}
+
+#hand-cards {
+    justify-content: flex-start;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 2px;
+}
+
+#hand-cards .card {
+    box-shadow:
+        0 7px 14px rgba(15, 23, 42, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+/* Log panel */
+#game-log {
+    width: 320px;
+    padding: 10px;
+    border-radius: 18px;
+}
+
+#game-log h3 {
+    text-align: left;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    margin-bottom: 8px;
+    padding-bottom: 8px;
+    color: #e2ebff;
+}
+
+#log-content {
+    font-family: "Avenir Next", "Segoe UI", sans-serif;
+    color: #d6e2f6;
+    line-height: 1.45;
+}
+
+.log-entry {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid transparent;
+    border-radius: 8px;
+    padding: 6px 8px;
+}
+
+.log-entry:hover {
+    background: rgba(116, 192, 252, 0.08);
+    border-color: rgba(116, 192, 252, 0.14);
+}
+
+.log-entry.info {
+    color: #d3def0;
+}
+
+.log-entry.damage {
+    color: #fecdd3;
+    background: rgba(244, 63, 94, 0.12);
+    border-left-color: #fb7185;
+}
+
+.log-entry.heal {
+    color: #bbf7d0;
+    background: rgba(16, 185, 129, 0.1);
+    border-left-color: #34d399;
+}
+
+.log-entry.turn-change {
+    color: #e0e7ff;
+    background: rgba(99, 102, 241, 0.14);
+    border-left-color: #818cf8;
+    border-right-color: #818cf8;
+}
+
+#keyboard-shortcuts-hint {
+    background: rgba(2, 6, 23, 0.78);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    color: #ecf3ff;
+    box-shadow: 0 10px 24px rgba(2, 6, 23, 0.28);
+}
+
+#keyboard-shortcuts-overlay {
+    background: rgba(2, 6, 23, 0.58);
+}
+
+#keyboard-shortcuts-overlay .shortcut-card {
+    background: linear-gradient(180deg, #f8fbff, #eef4ff);
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 16px;
+    box-shadow: 0 22px 52px rgba(15, 23, 42, 0.28);
+}
+
+#keyboard-shortcuts-overlay h3 {
+    color: #1f2d4b;
+}
+
+#keyboard-shortcuts-overlay .key {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #334155;
+    box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+}
+
+/* Modals */
+.modal {
+    background: rgba(2, 6, 23, 0.62);
+    backdrop-filter: blur(6px);
+}
+
+.modal-content {
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 249, 255, 0.98));
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 18px;
+    box-shadow: 0 28px 60px rgba(15, 23, 42, 0.3);
+    padding: 22px 24px;
+}
+
+.close-modal {
+    width: 34px;
+    height: 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.12);
+    color: #475569;
+    line-height: 1;
+}
+
+.close-modal:hover {
+    color: #0f172a;
+    background: rgba(148, 163, 184, 0.22);
+}
+
+#card-detail h2,
+.deck-builder-content h2 {
+    color: #1e3a8a;
+}
+
+#card-detail .detail-label {
+    color: #4338ca;
+}
+
+.action-buttons {
+    gap: 8px;
+}
+
+.action-btn {
+    flex: 1 1 140px;
+    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    font-weight: 700;
+    background: linear-gradient(135deg, #2563eb, #4338ca);
+    box-shadow: 0 8px 18px rgba(37, 99, 235, 0.18);
+}
+
+.action-btn:hover {
+    background: linear-gradient(135deg, #1d4ed8, #5b21b6);
+}
+
+.target-option {
+    border-radius: 10px;
+    border-color: rgba(148, 163, 184, 0.35);
+    background: #f8fbff;
+}
+
+.target-option:hover {
+    background: #eef5ff;
+    border-color: #60a5fa;
+}
+
+.target-option.selected {
+    background: linear-gradient(180deg, #e7f1ff, #edf5ff);
+    border-color: #3b82f6;
+}
+
+/* Overlay polish */
+.remote-prompt-overlay {
+    background:
+        radial-gradient(circle at 50% 50%, rgba(255, 255, 255, 0.06), transparent 60%),
+        rgba(15, 23, 42, 0.56);
+    backdrop-filter: blur(3px);
+}
+
+.remote-prompt-overlay__card {
+    background: linear-gradient(180deg, #ffffff, #f4f8ff);
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    border-radius: 16px;
+    box-shadow: 0 24px 50px rgba(15, 23, 42, 0.24);
+    color: #1f2937;
+}
+
+.turn-change-overlay {
+    background: rgba(2, 6, 23, 0.38);
+    backdrop-filter: blur(2px);
+}
+
+.turn-change-overlay__text {
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.92), rgba(30, 41, 59, 0.92));
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 14px;
+    padding: 14px 18px;
+    letter-spacing: 0.25px;
+}
+
+/* Deck builder polish (keeps current structure) */
+.deck-builder-content {
+    background: linear-gradient(180deg, #f8fbff, #eef4ff);
+    border: 1px solid rgba(148, 163, 184, 0.26);
+    border-radius: 18px;
+}
+
+.deck-builder-sidebar {
+    border-right-color: rgba(99, 102, 241, 0.3);
+}
+
+.current-deck-list,
+.card-pool-container {
+    border-color: rgba(148, 163, 184, 0.3);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.8);
+}
+
+.deck-item,
+.saved-deck-item,
+.pool-card {
+    border-radius: 10px;
+    box-shadow: 0 6px 14px rgba(15, 23, 42, 0.06);
+}
+
+.tab-btn {
+    border-radius: 10px 10px 0 0;
+}
+
+/* Responsive tune-ups */
+@media (max-width: 1200px) {
+    #game-container {
+        flex-direction: column;
+        height: auto;
+        min-height: 100vh;
+        overflow-y: auto;
+    }
+
+    #main-game-area {
+        min-height: 0;
+    }
+
+    #game-log {
+        width: 100%;
+        max-height: 230px;
+    }
+
+    #game-header {
+        flex-wrap: wrap;
+    }
+
+    #turn-info {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
+@media (max-width: 900px) {
+    #deck-selection {
+        flex-direction: column;
+        padding: 16px;
+        gap: 14px;
+    }
+
+    .playtest-toggle {
+        font-size: 12px;
+    }
+
+    #multiplayer-room {
+        min-width: 0;
+        width: 100%;
+        display: block;
+        margin: 8px 0 0 !important;
+    }
+
+    #copy-room-code-btn {
+        margin: 8px 0 0 !important;
+    }
+
+    .player-board {
+        padding: 8px;
+    }
+
+    .bench-zone,
+    .active-zone,
+    .deck-discard-zone {
+        width: 100%;
+    }
+
+    #hand-zone {
+        max-height: 220px;
+    }
+
+    #hand-cards {
+        justify-content: center;
+    }
+}
+
+/* =========================================================
+   UI Refresh Follow-up: readability + board density
+   ========================================================= */
+
+/* Modal readability: ensure dark text on light modal surfaces */
+.modal-content,
+#card-detail,
+#action-content,
+#playtest-content,
+#deck-builder-modal .modal-content {
+    color: #0f172a;
+    font-size: 15px;
+    line-height: 1.45;
+}
+
+.modal-content h1,
+.modal-content h2,
+.modal-content h3,
+.modal-content h4 {
+    color: #102a61;
+}
+
+.modal-content p,
+.modal-content li,
+.modal-content label,
+.modal-content small {
+    color: #334155;
+}
+
+.modal-content input,
+.modal-content select,
+.modal-content textarea {
+    color: #0f172a;
+    background: #fff;
+    border: 1px solid rgba(148, 163, 184, 0.45);
+}
+
+.modal-content .btn,
+.modal-content .action-btn {
+    color: #fff;
+}
+
+/* Slightly larger typography across game screen */
+#turn-info h3 {
+    font-size: 20px;
+}
+
+.in-game-room-code,
+.multiplayer-player-identity {
+    font-size: 13px;
+}
+
+.player-info h2 {
+    font-size: 17px;
+}
+
+.player-info .stats span {
+    font-size: 12px;
+    padding: 5px 9px;
+}
+
+#energy-played,
+#supporter-played,
+#attacked-played,
+#phase-info {
+    font-size: 12px;
+}
+
+.bench-zone h3,
+.active-zone h3,
+#stadium-zone h3,
+#hand-zone h3,
+#game-log h3 {
+    font-size: 14px;
+}
+
+#log-content {
+    font-size: 13px;
+}
+
+#keyboard-shortcuts-hint {
+    font-size: 13px;
+}
+
+/* Use board space better: larger cards + tighter top/stadium spacing */
+#game-container {
+    padding: 10px;
+    gap: 10px;
+}
+
+#main-game-area {
+    gap: 6px;
+}
+
+#game-header {
+    padding: 8px 10px;
+    gap: 10px;
+}
+
+.player-info,
+#turn-info {
+    padding: 8px 10px;
+}
+
+.player-board {
+    padding: 8px;
+}
+
+.bench-zone,
+.active-zone,
+.deck-discard-zone {
+    padding: 6px;
+}
+
+.bench-zone h3,
+.active-zone h3 {
+    margin-bottom: 4px;
+}
+
+.card-slot {
+    width: 92px;
+    height: 124px;
+}
+
+#hand-cards .card {
+    width: 92px;
+    height: 124px;
+}
+
+#stadium-zone {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    padding: 6px 10px;
+    min-height: 94px;
+}
+
+#stadium-zone h3 {
+    margin: 0;
+    white-space: nowrap;
+}
+
+#stadium-card {
+    margin: 0;
+    width: 92px;
+    height: 124px;
+    flex: 0 0 auto;
+}
+
+/* Make the hand area more legible and reduce dead space */
+#hand-zone {
+    max-height: 196px;
+    padding: 8px 10px;
+}
+
+#hand-zone h3 {
+    margin-bottom: 6px;
+}
+
+/* Make text on tiny cards easier to read without blowing up layout */
+.card {
+    font-size: 9px;
+    padding: 5px;
+}
+
+.card-name {
+    font-size: 10px;
+    line-height: 1.15;
+}
+
+.card-hp {
+    font-size: 9px;
+}
+
+.card-hp-delta {
+    font-size: 8px;
+}
+
+.type-icon {
+    font-size: 8px;
+    padding: 1px 4px;
+}
+
+.card-mod-badge {
+    font-size: 8px;
+}
+
+.card-damage-counter,
+.card-status {
+    font-size: 8px;
+}
+
+.energy-icon {
+    width: 14px;
+    height: 14px;
+    font-size: 8px;
+}
+
+.card-moves {
+    font-size: 8px;
+}
+
+/* Deck/discard cards and counts can be bigger without taking much room */
+.deck-pile,
+.discard-pile {
+    width: 76px;
+    height: 102px;
+}
+
+.pile-label {
+    font-size: 11px;
+}
+
+.pile-count {
+    font-size: 22px;
+}
+
+/* Responsive guardrails after larger card sizes */
+@media (max-width: 1200px) {
+    .card-slot {
+        width: 80px;
+        height: 108px;
+    }
+
+    #hand-cards .card {
+        width: 80px;
+        height: 108px;
+    }
+
+    #stadium-card {
+        width: 84px;
+        height: 112px;
+    }
+}
+
+@media (max-width: 900px) {
+    #game-header {
+        gap: 8px;
+    }
+
+    .player-info h2 {
+        font-size: 15px;
+    }
+
+    .player-info .stats span {
+        font-size: 11px;
+        padding: 4px 7px;
+    }
+
+    #stadium-zone {
+        justify-content: flex-start;
+        overflow-x: auto;
+    }
+
+    .card-slot {
+        width: 74px;
+        height: 100px;
+    }
+
+    #hand-cards .card {
+        width: 74px;
+        height: 100px;
+    }
+}
+
+/* =========================================================
+   Layout refinement: perspective flip + better space use
+   ========================================================= */
+
+/* Multiplayer perspective: local Player 2 sees own board on bottom */
+body.multiplayer-perspective-p2 #player1-board {
+    order: 1;
+}
+
+body.multiplayer-perspective-p2 #stadium-zone {
+    order: 2;
+}
+
+body.multiplayer-perspective-p2 #player2-board {
+    order: 3;
+}
+
+body.multiplayer-perspective-p2 #hand-zone {
+    order: 4;
+}
+
+/* Reduce wasted header space caused by stretched center turn panel */
+#game-header {
+    align-items: flex-start;
+    padding-top: 7px;
+    padding-bottom: 7px;
+}
+
+.player-info {
+    align-self: flex-start;
+}
+
+#turn-info {
+    align-self: stretch;
+    min-width: 290px;
+    gap: 3px;
+}
+
+/* Board section uses horizontal space more efficiently */
+.board-section {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    align-items: center;
+    column-gap: 10px;
+}
+
+/* Top board DOM order is bench, active, deck/discard */
+#player2-board .bench-zone {
+    grid-column: 1;
+}
+
+#player2-board .active-zone {
+    grid-column: 2;
+}
+
+#player2-board .deck-discard-zone {
+    grid-column: 3;
+}
+
+/* Bottom board DOM order is deck/discard, active, bench */
+#player1-board .deck-discard-zone {
+    grid-column: 1;
+    justify-self: start;
+}
+
+#player1-board .active-zone {
+    grid-column: 2;
+}
+
+#player1-board .bench-zone {
+    grid-column: 3;
+}
+
+.bench-zone {
+    min-width: 0;
+}
+
+.active-zone {
+    width: 112px;
+    flex: 0 0 auto;
+}
+
+.active-zone .card-slot.active-slot {
+    margin: 0 auto;
+}
+
+/* Deck/discard should sit side-by-side, not stacked */
+.deck-discard-zone {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: auto;
+    flex: 0 0 auto;
+    padding: 6px;
+}
+
+/* Tighter board panels so more of the viewport is gameplay */
+.player-board {
+    padding: 7px 8px;
+}
+
+.bench-zone,
+.active-zone,
+.deck-discard-zone {
+    padding: 6px;
+}
+
+.bench-zone h3,
+.active-zone h3 {
+    font-size: 13px;
+    margin-bottom: 4px;
+}
+
+/* Stadium row: compact center pill instead of full-width strip */
+#stadium-zone {
+    align-self: center;
+    width: auto;
+    min-width: 240px;
+    max-width: min(60vw, 460px);
+    justify-content: center;
+    padding: 4px 10px;
+    gap: 10px;
+    min-height: 0;
+}
+
+#stadium-zone h3 {
+    font-size: 12px;
+    opacity: 0.95;
+}
+
+#stadium-card {
+    width: 82px;
+    height: 110px;
+}
+
+/* Slightly wider hand region and log balance for desktop */
+#game-log {
+    width: 300px;
+}
+
+#hand-zone {
+    max-height: 205px;
+}
+
+/* Use extra width for bench cards by preventing oversized deck/discard piles */
+.deck-pile,
+.discard-pile {
+    width: 70px;
+    height: 92px;
+}
+
+.pile-count {
+    font-size: 20px;
+}
+
+/* Mobile/tablet: revert to simpler stacking for robustness */
+@media (max-width: 1200px) {
+    .board-section {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .deck-discard-zone {
+        width: 100%;
+        justify-content: center;
+    }
+
+    .active-zone {
+        width: 100%;
+    }
+
+    #stadium-zone {
+        align-self: stretch;
+        width: auto;
+        max-width: none;
+    }
+}
+
+@media (max-width: 900px) {
+    #turn-info {
+        min-width: 0;
+    }
+
+    .deck-discard-zone {
+        gap: 6px;
+    }
+
+    .deck-pile,
+    .discard-pile {
+        width: 62px;
+        height: 82px;
+    }
+
+    #stadium-card {
+        width: 72px;
+        height: 96px;
+    }
+}
+
+/* =========================================================
+   Irregular panels: header under-panels + stadium side pods
+   ========================================================= */
+
+#game-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 320px) minmax(0, 1fr);
+    grid-template-areas:
+        "p1 turn p2"
+        "p1sub turn p2sub";
+    align-items: start;
+    row-gap: 6px;
+}
+
+#player1-info { grid-area: p1; }
+#turn-info { grid-area: turn; }
+#player2-info { grid-area: p2; }
+#player1-header-secondary { grid-area: p1sub; }
+#player2-header-secondary { grid-area: p2sub; }
+
+.player-header-secondary {
+    min-height: 62px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 0;
+    overflow: hidden;
+}
+
+.summary-panel {
+    position: relative;
+    padding: 8px 10px;
+    color: #eaf2ff;
+}
+
+.summary-panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.9;
+}
+
+.summary-panel.player-1::before {
+    background: linear-gradient(120deg, rgba(52, 211, 153, 0.12), rgba(116, 192, 252, 0.06) 45%, transparent 75%);
+}
+
+.summary-panel.player-2::before {
+    background: linear-gradient(240deg, rgba(251, 113, 133, 0.12), rgba(139, 92, 246, 0.06) 45%, transparent 75%);
+}
+
+.summary-panel--header {
+    min-height: 62px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+        "title chips"
+        "primary chips"
+        "note chips";
+    gap: 2px 8px;
+    clip-path: polygon(0 0, 97% 0, 100% 26%, 100% 100%, 3% 100%, 0 74%);
+}
+
+#player1-header-secondary .summary-panel--header {
+    clip-path: polygon(0 0, 96% 0, 100% 24%, 100% 100%, 5% 100%, 0 78%);
+}
+
+#player2-header-secondary .summary-panel--header {
+    clip-path: polygon(4% 0, 100% 0, 100% 78%, 95% 100%, 0 100%, 0 24%);
+}
+
+.summary-panel__title {
+    grid-area: title;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.55px;
+    color: #a9bedf;
+    font-weight: 700;
+}
+
+.summary-panel__primary {
+    grid-area: primary;
+    font-size: 13px;
+    font-weight: 700;
+    color: #f2f7ff;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+.summary-panel__note {
+    grid-area: note;
+    font-size: 10px;
+    color: #b8c8e2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.summary-chip-row {
+    grid-area: chips;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 5px;
+    flex-wrap: wrap;
+    max-width: 170px;
+}
+
+.summary-chip-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+}
+
+.summary-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border-radius: 999px;
+    padding: 3px 7px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    font-size: 10px;
+    line-height: 1.1;
+    white-space: nowrap;
+}
+
+.summary-chip__label {
+    color: #abc0de;
+    font-weight: 700;
+}
+
+.summary-chip__value {
+    color: #f3f7ff;
+    font-weight: 800;
+}
+
+.summary-chip.accent {
+    background: rgba(116, 192, 252, 0.12);
+    border-color: rgba(116, 192, 252, 0.25);
+}
+
+.summary-chip.energy {
+    background: rgba(250, 204, 21, 0.12);
+    border-color: rgba(250, 204, 21, 0.25);
+}
+
+.summary-chip.deck {
+    background: rgba(59, 130, 246, 0.13);
+    border-color: rgba(59, 130, 246, 0.25);
+}
+
+.summary-chip.discard {
+    background: rgba(245, 158, 11, 0.14);
+    border-color: rgba(245, 158, 11, 0.25);
+}
+
+.summary-chip.danger {
+    background: rgba(244, 63, 94, 0.14);
+    border-color: rgba(244, 63, 94, 0.24);
+}
+
+/* Stadium band with side pods */
+#midline-band {
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) auto minmax(180px, 1fr);
+    gap: 10px;
+    align-items: center;
+    margin: 2px 0;
+}
+
+.midline-side-panel {
+    min-height: 84px;
+    position: relative;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+}
+
+#p2-midline-panel {
+    border-radius: 16px 8px 8px 16px;
+    clip-path: polygon(0 0, 94% 0, 100% 18%, 100% 82%, 94% 100%, 0 100%, 4% 50%);
+}
+
+#p1-midline-panel {
+    border-radius: 8px 16px 16px 8px;
+    clip-path: polygon(6% 0, 100% 0, 96% 50%, 100% 100%, 6% 100%, 0 82%, 0 18%);
+}
+
+.summary-panel--midline {
+    min-height: 84px;
+    padding: 8px 10px;
+}
+
+.summary-panel--midline .summary-panel__title {
+    font-size: 11px;
+    margin-bottom: 6px;
+}
+
+.summary-panel--midline .summary-chip {
+    justify-content: space-between;
+    width: 100%;
+    border-radius: 8px;
+    padding: 5px 6px;
+    font-size: 10px;
+}
+
+/* Stadium stays compact in the center of the new band */
+#midline-band #stadium-zone {
+    margin: 0;
+    justify-self: center;
+    min-width: 180px;
+}
+
+/* Multiplayer perspective P2 should flip board stack using the midline wrapper */
+body.multiplayer-perspective-p2 #midline-band {
+    order: 2;
+}
+
+body.multiplayer-perspective-p2 #stadium-zone {
+    order: initial;
+}
+
+/* Responsive fallbacks for new irregular areas */
+@media (max-width: 1200px) {
+    #game-header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+
+    .player-header-secondary {
+        width: 100%;
+        min-height: 0;
+    }
+
+    #midline-band {
+        grid-template-columns: 1fr;
+        gap: 6px;
+    }
+
+    .midline-side-panel {
+        min-height: 0;
+        clip-path: none !important;
+        border-radius: 12px !important;
+    }
+
+    .summary-panel--midline {
+        min-height: 0;
+    }
+
+    .summary-chip-grid {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 900px) {
+    .summary-panel--header {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "title"
+            "primary"
+            "note"
+            "chips";
+        clip-path: none !important;
+        border-radius: 12px;
+    }
+
+    .summary-chip-row {
+        justify-content: flex-start;
+        max-width: none;
+    }
+
+    .summary-chip-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+/* =========================================================
+   Duplicate cleanup + larger primary UI
+   ========================================================= */
+
+/* Move player counts out of the old top stat row (avoid duplicate info) */
+.player-info .stats {
+    display: none !important;
+}
+
+.player-info {
+    min-height: 46px;
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+}
+
+.player-info h2 {
+    margin: 0;
+    font-size: 19px;
+}
+
+/* Make moved count panels prominent and compact */
+.player-header-secondary {
+    min-height: 74px;
+}
+
+.summary-panel--header {
+    min-height: 74px;
+    grid-template-columns: 1fr;
+    grid-template-areas:
+        "title"
+        "chips";
+    gap: 6px;
+    padding: 8px 9px;
+}
+
+.summary-panel--header .summary-panel__primary,
+.summary-panel--header .summary-panel__note {
+    display: none;
+}
+
+.summary-chip-row--full {
+    justify-content: flex-start;
+    max-width: none;
+    gap: 6px;
+}
+
+.summary-chip-row--full .summary-chip {
+    padding: 5px 8px;
+    font-size: 11px;
+}
+
+.summary-chip-row--full .summary-chip__label {
+    color: #c1d1ea;
+}
+
+/* Midline side pods: concise active snapshot only */
+.midline-side-panel {
+    min-height: 98px;
+}
+
+.summary-panel--midline {
+    min-height: 98px;
+    padding: 8px 9px;
+}
+
+.summary-panel--midline .summary-panel__primary {
+    font-size: 14px;
+    margin-bottom: 4px;
+}
+
+.summary-panel--midline .summary-panel__note {
+    margin-bottom: 6px;
+}
+
+.summary-panel--midline .summary-chip-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+}
+
+/* Use recovered space for larger gameplay readability */
+#turn-info h3 {
+    font-size: 22px;
+}
+
+#turn-info {
+    min-width: 310px;
+}
+
+#energy-played,
+#supporter-played,
+#attacked-played {
+    font-size: 13px;
+}
+
+.card-slot {
+    width: 98px;
+    height: 132px;
+}
+
+#hand-cards .card {
+    width: 98px;
+    height: 132px;
+}
+
+#stadium-card {
+    width: 86px;
+    height: 116px;
+}
+
+.card {
+    font-size: 10px;
+}
+
+.card-name {
+    font-size: 11px;
+}
+
+.card-hp {
+    font-size: 10px;
+}
+
+.card-moves {
+    font-size: 9px;
+}
+
+#hand-zone h3,
+.bench-zone h3,
+.active-zone h3,
+#stadium-zone h3 {
+    font-size: 15px;
+}
+
+/* Responsive fallback after enlarging primary UI */
+@media (max-width: 1200px) {
+    .player-info .stats {
+        display: none !important;
+    }
+
+    #turn-info {
+        min-width: 0;
+    }
+
+    .card-slot {
+        width: 82px;
+        height: 110px;
+    }
+
+    #hand-cards .card {
+        width: 82px;
+        height: 110px;
+    }
+}
+
+@media (max-width: 900px) {
+    .player-info h2 {
+        font-size: 16px;
+    }
+
+    .summary-chip-row--full .summary-chip {
+        font-size: 10px;
+        padding: 4px 6px;
+    }
+
+    .midline-side-panel {
+        min-height: 0;
+    }
+
+    .card-slot {
+        width: 76px;
+        height: 102px;
+    }
+
+    #hand-cards .card {
+        width: 76px;
+        height: 102px;
+    }
+}
+
+/* =========================================================
+   Final compact center panel + wider board area
+   ========================================================= */
+
+/* Narrow the log so the board gains horizontal room */
+#game-log {
+    width: 260px;
+}
+
+/* Turn panel as a compact grid with status pills */
+#turn-info {
+    min-width: 272px;
+    padding: 8px 9px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+        "turn turn"
+        "room room"
+        "ident ident"
+        "button button"
+        "energy supporter";
+    align-content: start;
+    gap: 4px 6px;
+}
+
+#current-turn { grid-area: turn; }
+#in-game-room-code { grid-area: room; }
+#in-game-player-identity { grid-area: ident; }
+#end-turn-btn { grid-area: button; }
+#energy-played { grid-area: energy; }
+#supporter-played { grid-area: supporter; }
+
+#turn-info h3 {
+    font-size: 21px;
+    margin-bottom: 0;
+    line-height: 1.1;
+}
+
+.in-game-room-code {
+    margin: 0;
+    font-size: 12px;
+}
+
+.in-game-player-identity {
+    margin: 0 0 2px 0;
+    justify-self: center;
+}
+
+#turn-info #end-turn-btn {
+    width: 100%;
+    margin: 2px 0 1px 0;
+    padding: 7px 10px;
+    font-size: 13px;
+}
+
+#energy-played,
+#supporter-played {
+    margin: 0;
+    min-width: 0;
+    padding: 5px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    color: #dbe7fa;
+    text-align: center;
+    line-height: 1.15;
+    font-size: 11px;
+}
+
+#energy-played {
+    background: rgba(250, 204, 21, 0.08);
+    border-color: rgba(250, 204, 21, 0.18);
+}
+
+#supporter-played {
+    background: rgba(139, 92, 246, 0.08);
+    border-color: rgba(139, 92, 246, 0.18);
+}
+
+#energy-played #energy-status,
+#supporter-played #supporter-status {
+    font-weight: 800;
+    color: #f8fbff;
+}
+
+/* Spend the recovered width on actual gameplay objects */
+.card-slot {
+    width: 102px;
+    height: 138px;
+}
+
+#hand-cards .card {
+    width: 102px;
+    height: 138px;
+}
+
+#stadium-card {
+    width: 90px;
+    height: 122px;
+}
+
+.card-name {
+    font-size: 11px;
+}
+
+.card-hp {
+    font-size: 10px;
+}
+
+.card-moves {
+    font-size: 9px;
+}
+
+/* Keep desktop boards tight despite larger cards */
+.player-board {
+    padding: 6px 7px;
+}
+
+.bench-zone,
+.active-zone,
+.deck-discard-zone {
+    padding: 5px;
+}
+
+/* Responsive overrides */
+@media (max-width: 1200px) {
+    #game-log {
+        width: 100%;
+        max-height: 220px;
+    }
+
+    #turn-info {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+
+    .card-slot {
+        width: 82px;
+        height: 110px;
+    }
+
+    #hand-cards .card {
+        width: 82px;
+        height: 110px;
+    }
+}
+
+@media (max-width: 900px) {
+    #energy-played,
+    #supporter-played {
+        font-size: 10px;
+        padding: 4px 6px;
+    }
+
+    .card-slot {
+        width: 76px;
+        height: 102px;
+    }
+
+    #hand-cards .card {
+        width: 76px;
+        height: 102px;
+    }
+}
+
+/* =========================================================
+   Follow-up: no clipping + less whitespace + active cards closer
+   ========================================================= */
+
+/* Remove clipping masks that cut off text/content */
+.summary-panel--header,
+#player1-header-secondary .summary-panel--header,
+#player2-header-secondary .summary-panel--header,
+#p1-midline-panel,
+#p2-midline-panel {
+    clip-path: none !important;
+}
+
+#p1-midline-panel,
+#p2-midline-panel {
+    border-radius: 12px !important;
+}
+
+/* Tighter labels and panels */
+.summary-panel__title {
+    font-size: 9px;
+    letter-spacing: 0.45px;
+}
+
+.player-header-secondary {
+    min-height: 66px;
+}
+
+.summary-panel--header {
+    min-height: 66px;
+    padding: 7px 8px;
+    gap: 4px;
+}
+
+.summary-chip-row--full {
+    gap: 5px;
+}
+
+.summary-chip-row--full .summary-chip {
+    padding: 4px 7px;
+}
+
+/* Midline band tighter so center info sits closer to active cards */
+#midline-band {
+    gap: 6px;
+    margin: 0;
+    align-items: stretch;
+}
+
+.midline-side-panel {
+    min-height: 86px;
+}
+
+.summary-panel--midline {
+    min-height: 86px;
+    padding: 7px 8px;
+}
+
+.summary-panel--midline .summary-panel__title {
+    margin-bottom: 4px;
+}
+
+.summary-panel--midline .summary-panel__primary {
+    font-size: 13px;
+    margin-bottom: 2px;
+}
+
+.summary-panel--midline .summary-panel__note {
+    margin-bottom: 4px;
+    font-size: 9px;
+}
+
+.summary-panel--midline .summary-chip-grid {
+    gap: 4px;
+}
+
+.summary-panel--midline .summary-chip {
+    padding: 4px 5px;
+    font-size: 9px;
+}
+
+/* Shrink stadium row footprint further */
+#midline-band #stadium-zone {
+    min-width: 154px;
+    padding: 3px 8px;
+    gap: 6px;
+}
+
+#stadium-zone h3 {
+    font-size: 11px;
+}
+
+#stadium-card {
+    width: 82px;
+    height: 110px;
+}
+
+/* Make active zones vertically symmetrical around the stadium band */
+#player2-board .active-zone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+}
+
+#player1-board .active-zone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+}
+
+#player1-board .active-zone h3,
+#player2-board .active-zone h3 {
+    margin: 0;
+    line-height: 1.05;
+    font-size: 12px;
+}
+
+#player1-board .active-zone .active-slot,
+#player2-board .active-zone .active-slot {
+    margin: 0;
+}
+
+/* Reduce extra whitespace around board rows */
+.player-board {
+    padding-top: 5px;
+    padding-bottom: 5px;
+}
+
+.board-section {
+    column-gap: 8px;
+}
+
+.bench-zone,
+.active-zone,
+.deck-discard-zone {
+    padding: 4px;
+}
+
+.bench-zone h3 {
+    margin-bottom: 3px;
+    font-size: 12px;
+}
+
+.bench-slots {
+    gap: 6px;
+}
+
+.deck-discard-zone {
+    gap: 6px;
+}
+
+/* Keep important card sizes while trimming outer whitespace */
+.card-slot {
+    width: 100px;
+    height: 134px;
+}
+
+#hand-cards .card {
+    width: 100px;
+    height: 134px;
+}
+
+@media (max-width: 1200px) {
+    #midline-band {
+        gap: 4px;
+    }
+
+    .midline-side-panel,
+    .summary-panel--midline {
+        min-height: 0;
+    }
+
+    #player1-board .active-zone,
+    #player2-board .active-zone {
+        flex-direction: column;
+    }
+}
+
+/* =========================================================
+   Active card alignment toward active-stat panels
+   ========================================================= */
+
+/* Keep active zones centered for both players */
+#player2-board .active-zone,
+#player1-board .active-zone {
+    justify-self: center;
+    margin-left: 0;
+    margin-right: 0;
+}
+
+/* Ensure Player 1 active label is visible again */
+#player1-board .active-zone h3 {
+    display: block;
+    visibility: visible;
+    opacity: 1;
+}
+
+/* Keep labels readable while cards sit closer to center info */
+#player1-board .active-zone,
+#player2-board .active-zone {
+    overflow: visible;
+}
+
+@media (max-width: 1200px) {
+    #player2-board .active-zone,
+    #player1-board .active-zone {
+        justify-self: center;
+        margin-left: 0;
+        margin-right: 0;
+    }
+}
+
+/* =========================================================
+   Bench spacing + stronger symmetry (desktop)
+   ========================================================= */
+
+/* Let each board zone size to content instead of stretching bench columns */
+#player1-board .board-section,
+#player2-board .board-section {
+    grid-template-columns: auto auto auto;
+    justify-content: space-between;
+    align-items: center;
+}
+
+/* Bench panels should wrap the three slots tightly (less dead space) */
+.bench-zone {
+    width: max-content;
+    max-width: 100%;
+    padding: 5px;
+}
+
+.bench-zone .bench-slots {
+    justify-content: flex-start;
+    width: max-content;
+}
+
+/* Keep mirrored symmetry around the active slot */
+#player2-board .bench-zone {
+    justify-self: start;
+}
+
+#player2-board .active-zone {
+    justify-self: center;
+}
+
+#player2-board .deck-discard-zone {
+    justify-self: end;
+}
+
+#player1-board .deck-discard-zone {
+    justify-self: start;
+}
+
+#player1-board .active-zone {
+    justify-self: center;
+}
+
+#player1-board .bench-zone {
+    justify-self: end;
+}
+
+/* Active panel width fixed so both rows mirror visually */
+.active-zone {
+    width: 118px;
+    min-width: 118px;
+}
+
+/* Keep deck/discard compact and consistent on both sides */
+.deck-discard-zone {
+    min-width: max-content;
+}
+
+@media (max-width: 1200px) {
+    .bench-zone {
+        width: 100%;
+    }
+
+    .bench-zone .bench-slots {
+        width: auto;
+        justify-content: center;
+    }
+
+    .active-zone {
+        width: 100%;
+        min-width: 0;
+    }
+}
+
+/* Final precedence mobile compaction overrides */
+@media (max-width: 480px) {
+    #midline-band .midline-side-panel {
+        display: none !important;
+    }
+
+    #midline-band {
+        gap: 4px !important;
+    }
+
+    #stadium-zone {
+        padding: 4px 6px !important;
+    }
+
+    #stadium-card {
+        width: 70px !important;
+        height: 94px !important;
+    }
+
+    .card-slot {
+        width: 72px !important;
+        height: 98px !important;
+    }
+
+    .active-zone {
+        width: 100% !important;
+        min-width: 0 !important;
+    }
+
+    .bench-zone .bench-slots {
+        gap: 4px !important;
+    }
+
+    #hand-cards .card {
+        width: 88px !important;
+        height: 118px !important;
+    }
+
+    #game-header .player-info .stats {
+        display: none !important;
+    }
+
+    .selection-inspector {
+        padding: 6px 8px;
+    }
+
+    .selection-inspector__body {
+        max-height: 62px;
+        overflow-y: auto;
+    }
+
+    .toolbar-btn {
+        min-height: 34px;
+        font-size: 11px;
+        padding: 5px 8px;
+    }
+}
+
+/* Setup guide layout for dual-player opening selection */
+.setup-guide__columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.setup-guide__column {
+    min-width: 0;
+    padding: 8px;
+    border-radius: 10px;
+    background: rgba(15, 23, 42, 0.28);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.setup-guide__column-title {
+    font-size: 12px;
+    font-weight: 800;
+    color: #f8fafc;
+    margin-bottom: 6px;
+}
+
+.setup-guide__done {
+    font-size: 12px;
+    color: #bbf7d0;
+    font-weight: 700;
+}
+
+/* Final desktop readability + compact fit pass */
+#game-container {
+    gap: 4px;
+    padding: 4px;
+}
+
+#game-header {
+    padding: 6px 10px;
+    margin-bottom: 4px;
+}
+
+.player-info h2 {
+    font-size: 17px;
+    margin-bottom: 2px;
+}
+
+.player-info .stats {
+    gap: 5px;
+    font-size: 12px;
+}
+
+.player-info .stats span {
+    padding: 2px 5px;
+}
+
+#turn-info h3 {
+    font-size: 20px;
+}
+
+#game-log {
+    width: 236px;
+}
+
+#game-log h3 {
+    font-size: 15px;
+}
+
+.log-entry {
+    font-size: 13px;
+    line-height: 1.3;
+}
+
+.player-board {
+    margin-bottom: 4px;
+}
+
+#midline-band {
+    margin-bottom: 4px;
+}
+
+#hand-zone {
+    padding: 8px 10px;
+}
+
+#hand-zone h3 {
+    font-size: 18px;
+    margin-bottom: 6px;
+}
+
+#hand-cards {
+    gap: 8px;
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    overflow-y: hidden;
+    justify-content: flex-start !important;
+    padding-bottom: 2px;
+}
+
+.toolbar-selected-card {
+    font-size: 13px;
+}
+
+.toolbar-btn {
+    font-size: 12px;
+}
+
+/* Height-constrained desktop/laptop mode (targets 100% zoom fit) */
+@media (max-height: 820px) and (min-width: 900px) {
+    #keyboard-shortcuts-hint {
+        display: none !important;
+    }
+
+    .player-header-secondary {
+        display: none !important;
+    }
+
+    #p1-midline-panel,
+    #p2-midline-panel {
+        display: none !important;
+    }
+
+    #midline-band {
+        display: flex;
+        justify-content: center;
+        gap: 4px;
+        margin-bottom: 2px;
+        padding: 2px 0;
+    }
+
+    #stadium-zone {
+        min-width: 120px !important;
+        padding: 2px 6px !important;
+        gap: 4px !important;
+    }
+
+    #stadium-zone h3 {
+        font-size: 10px !important;
+        margin: 0;
+    }
+
+    #stadium-card {
+        width: 64px !important;
+        height: 86px !important;
+    }
+
+    #game-header {
+        padding: 4px 8px;
+        margin-bottom: 3px;
+        align-items: flex-start;
+    }
+
+    #game-header .player-info {
+        min-height: auto !important;
+        height: auto !important;
+        padding: 4px 6px !important;
+    }
+
+    .player-info h2 {
+        font-size: 14px;
+    }
+
+    .player-info .stats {
+        font-size: 11px;
+        gap: 4px;
+    }
+
+    .player-info .stats span {
+        padding: 2px 4px;
+    }
+
+    #turn-info {
+        min-width: 235px !important;
+        padding: 5px 7px !important;
+        gap: 2px 4px !important;
+    }
+
+    #turn-info h3 {
+        font-size: 16px !important;
+    }
+
+    #turn-info #end-turn-btn {
+        padding: 5px 8px !important;
+        font-size: 12px !important;
+    }
+
+    #energy-played,
+    #supporter-played {
+        font-size: 10px !important;
+        padding: 3px 6px !important;
+    }
+
+    .setup-guide {
+        margin: 2px 0 3px;
+        padding: 6px 8px;
+    }
+
+    .setup-guide__title {
+        font-size: 10px;
+        margin-bottom: 2px;
+    }
+
+    .setup-guide__body {
+        font-size: 11px;
+        margin-bottom: 4px;
+    }
+
+    .setup-guide__columns {
+        gap: 6px;
+    }
+
+    .setup-guide__column {
+        padding: 5px 6px;
+    }
+
+    .setup-guide__column-title,
+    .setup-guide__done,
+    .setup-guide__empty {
+        font-size: 11px;
+    }
+
+    .setup-guide__choices {
+        gap: 4px;
+    }
+
+    .setup-guide__choice {
+        padding: 4px 8px;
+        font-size: 11px;
+    }
+
+    .player-board {
+        padding: 3px 5px !important;
+        margin-bottom: 2px;
+        flex: 0 0 auto !important;
+    }
+
+    .board-section {
+        gap: 6px !important;
+        height: auto !important;
+    }
+
+    .bench-zone,
+    .active-zone,
+    .deck-discard-zone {
+        padding: 2px !important;
+    }
+
+    .bench-zone h3,
+    .active-zone h3 {
+        font-size: 10px !important;
+        margin-bottom: 1px !important;
+    }
+
+    .card-slot {
+        width: 72px !important;
+        height: 96px !important;
+    }
+
+    #hand-cards .card {
+        width: 72px !important;
+        height: 96px !important;
+    }
+
+    .deck-pile,
+    .discard-pile {
+        transform: scale(0.94);
+        transform-origin: center;
+    }
+
+    .summary-panel--midline,
+    .summary-panel--header {
+        min-height: 0 !important;
+    }
+
+    #game-toolbar {
+        margin: 1px 0 2px;
+        padding: 5px 8px;
+    }
+
+    .toolbar-selected-card {
+        font-size: 12px;
+    }
+
+    .game-toolbar-actions {
+        gap: 4px;
+    }
+
+    .toolbar-btn {
+        padding: 4px 7px;
+        min-height: 30px;
+        font-size: 11px;
+    }
+
+    .selection-inspector {
+        margin: 0 0 2px;
+        padding: 4px 6px;
+    }
+
+    .selection-inspector__title {
+        font-size: 12px;
+    }
+
+    .selection-inspector__meta,
+    .selection-inspector__line {
+        font-size: 10px;
+        line-height: 1.2;
+    }
+
+    .selection-inspector__body {
+        max-height: 46px;
+        overflow-y: auto;
+    }
+
+    #hand-zone {
+        padding: 3px 6px !important;
+        min-height: 0;
+        flex: 0 0 auto !important;
+    }
+
+    #hand-zone h3 {
+        font-size: 12px;
+        margin-bottom: 2px;
+    }
+
+    #game-log {
+        width: 220px !important;
+    }
+
+    #game-log h3 {
+        font-size: 13px !important;
+        margin-bottom: 4px;
+    }
+
+    #log-content {
+        font-size: 11px;
+    }
+}
+
+@media (max-width: 900px) {
+    .setup-guide__columns {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+}
+
+/* =========================================================
+   Final layout polish pass: swap perspective cleanly, tighten spacing,
+   improve readability, and reduce neon contrast
+   ========================================================= */
+
+:root {
+    --ui-bg-1: #6f7f9e;
+    --ui-bg-2: #4d607c;
+    --ui-panel: rgba(248, 250, 252, 0.96);
+    --ui-accent: #4b6b93;
+    --ui-accent-hover: #3f5a7e;
+    --ui-soft-border: rgba(71, 85, 105, 0.28);
+    --ui-text-strong: #1f2937;
+    --ui-text-muted: #374151;
+}
+
+body {
+    background: linear-gradient(135deg, var(--ui-bg-1) 0%, var(--ui-bg-2) 100%);
+    color: var(--ui-text-strong);
+}
+
+#game-header,
+.player-board,
+#game-log,
+#hand-zone,
+#game-toolbar,
+.selection-inspector,
+#turn-info {
+    background: var(--ui-panel);
+    border: 1px solid var(--ui-soft-border);
+}
+
+.btn {
+    background: var(--ui-accent);
+}
+
+.btn:hover {
+    background: var(--ui-accent-hover);
+}
+
+.player-info h2,
+#turn-info h3,
+#game-log h3,
+.bench-zone h3,
+.active-zone h3,
+#stadium-zone h3 {
+    color: #23344a;
+}
+
+#energy-played,
+#supporter-played,
+#attacked-played,
+.log-entry {
+    color: var(--ui-text-muted);
+}
+
+/* True perspective swap for player 2: swap player positions, not mirrored internals */
+body.multiplayer-perspective-p2 #player2-board {
+    order: 3;
+}
+
+body.multiplayer-perspective-p2 #player1-board {
+    order: 1;
+}
+
+body.multiplayer-perspective-p2 #player2-board .deck-discard-zone {
+    grid-column: 1;
+    justify-self: start;
+}
+
+body.multiplayer-perspective-p2 #player2-board .active-zone {
+    grid-column: 2;
+    justify-self: center;
+}
+
+body.multiplayer-perspective-p2 #player2-board .bench-zone {
+    grid-column: 3;
+    justify-self: end;
+}
+
+body.multiplayer-perspective-p2 #player1-board .bench-zone {
+    grid-column: 1;
+    justify-self: start;
+}
+
+body.multiplayer-perspective-p2 #player1-board .active-zone {
+    grid-column: 2;
+    justify-self: center;
+}
+
+body.multiplayer-perspective-p2 #player1-board .deck-discard-zone {
+    grid-column: 3;
+    justify-self: end;
+}
+
+/* Swap active-stat side panels when local perspective is player 2 */
+body.multiplayer-perspective-p2 #p1-midline-panel {
+    grid-column: 1;
+    grid-row: 1;
+}
+
+body.multiplayer-perspective-p2 #p2-midline-panel {
+    grid-column: 3;
+    grid-row: 1;
+}
+
+body.multiplayer-perspective-p2 #midline-band #stadium-zone {
+    grid-column: 2;
+    grid-row: 1;
+}
+
+/* Midline panel redesign: title+name one line, 3x2 stats grid */
+.summary-panel--midline {
+    min-height: 88px;
+    padding: 7px 8px;
+}
+
+.summary-panel--midline .summary-panel__title--with-name {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 5px;
+    font-size: 11px;
+}
+
+.summary-panel__title-name {
+    font-size: 12px;
+    font-weight: 800;
+    color: #f8fafc;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+    text-align: right;
+}
+
+.summary-panel--midline .summary-chip-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+}
+
+.summary-panel--midline .summary-chip {
+    min-width: 0;
+    align-items: flex-start;
+    gap: 3px;
+    padding: 4px 5px;
+}
+
+.summary-panel--midline .summary-chip__label {
+    font-size: 9px;
+}
+
+.summary-panel--midline .summary-chip__value {
+    display: block;
+    width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+}
+
+/* Bring active slot visually closer to the bench */
+#player1-board .board-section,
+#player2-board .board-section {
+    column-gap: 6px;
+}
+
+#player1-board .active-zone,
+#player2-board .active-zone {
+    width: 110px;
+    min-width: 110px;
+    padding-left: 2px;
+    padding-right: 2px;
+}
+
+.bench-zone .bench-slots {
+    gap: 5px;
+}
+
+/* Keep log clipped to viewport and avoid extending below the hand zone */
+#game-container {
+    height: 100vh;
+    max-height: 100vh;
+    overflow: hidden;
+}
+
+#main-game-area {
+    min-height: 0;
+}
+
+#game-log {
+    align-self: stretch;
+    max-height: calc(100vh - 8px);
+    overflow: hidden;
+}
+
+#log-content {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+@media (max-width: 1200px) {
+    .summary-panel--midline .summary-chip-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .summary-panel__title-name {
+        font-size: 11px;
+    }
+}
+
+/* =========================================================
+   Readability hotfix: stronger contrast + larger text
+   ========================================================= */
+
+body {
+    color: #132235;
+}
+
+#game-header,
+#turn-info,
+.player-info,
+.player-board,
+#game-toolbar,
+#hand-zone,
+#game-log,
+.selection-inspector {
+    color: #132235;
+}
+
+.player-info h2,
+#turn-info h3 {
+    color: #15283d;
+    font-size: 21px;
+    font-weight: 700;
+}
+
+#energy-played,
+#supporter-played,
+#attacked-played {
+    color: #21364d;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.bench-zone h3,
+.active-zone h3,
+#stadium-zone h3,
+#hand-zone h3 {
+    color: #1d3148;
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.card-slot {
+    border-color: rgba(71, 85, 105, 0.5);
+    color: #2d415a;
+}
+
+.card-name {
+    font-size: 12px;
+    color: #111827;
+    font-weight: 700;
+}
+
+.card-hp {
+    font-size: 11px;
+    color: #1f2937;
+    font-weight: 600;
+}
+
+.card-moves {
+    font-size: 10px;
+    color: #1f2937;
+}
+
+.move-cost {
+    color: #284d77;
+}
+
+.pile-label {
+    font-size: 12px;
+    font-weight: 800;
+}
+
+.pile-count {
+    font-size: 24px;
+    color: #0f172a;
+    font-weight: 800;
+}
+
+#game-log h3 {
+    font-size: 16px;
+    color: #15283d;
+    border-bottom-color: rgba(37, 58, 82, 0.35);
+}
+
+#log-content {
+    font-size: 13px;
+    line-height: 1.45;
+    color: #1d3148;
+}
+
+.log-entry {
+    font-size: 13px;
+    line-height: 1.4;
+    color: #1d3148;
+}
+
+.summary-panel {
+    color: #f5f8ff;
+}
+
+.summary-panel__title {
+    color: #d8e5fb;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.summary-panel__primary,
+.summary-panel__note {
+    color: #f5f8ff;
+}
+
+.summary-panel__title-name {
+    color: #ffffff;
+    font-size: 13px;
+}
+
+.summary-panel--midline .summary-chip__label {
+    font-size: 10px;
+    color: #d7e4f9;
+}
+
+.summary-panel--midline .summary-chip__value {
+    font-size: 11px;
+    color: #ffffff;
+    font-weight: 700;
+}
+
+.toolbar-selected-card {
+    font-size: 14px;
+    color: #15283d;
+    font-weight: 600;
+}
+
+.toolbar-btn {
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.setup-guide__title {
+    font-size: 13px;
+    color: #f8fbff;
+    font-weight: 700;
+}
+
+.setup-guide__body,
+.setup-guide__column-title,
+.setup-guide__done,
+.setup-guide__empty,
+.setup-guide__choice {
+    font-size: 13px;
+}
+
+@media (max-width: 900px) {
+    .player-info h2,
+    #turn-info h3 {
+        font-size: 17px;
+    }
+
+    #energy-played,
+    #supporter-played,
+    #attacked-played,
+    .toolbar-btn,
+    #log-content,
+    .log-entry {
+        font-size: 12px;
+    }
+
+    .summary-panel--midline .summary-chip__value {
+        font-size: 10px;
+    }
+}
+
+/* =========================================================
+   Readability fix v2: remove screen blur + force high-contrast text
+   ========================================================= */
+
+.turn-change-overlay {
+    background: transparent !important;
+    backdrop-filter: none !important;
+}
+
+.turn-change-overlay__text {
+    background: rgba(15, 23, 42, 0.96) !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(148, 163, 184, 0.34) !important;
+    font-size: 30px !important;
+    font-weight: 800 !important;
+    padding: 12px 20px !important;
+}
+
+.player-header-secondary,
+.midline-side-panel,
+.summary-panel {
+    background: #314767 !important;
+    color: #f8fbff !important;
+}
+
+.summary-panel::before {
+    display: none !important;
+}
+
+.summary-panel__title {
+    color: #dbeafe !important;
+    font-size: 12px !important;
+}
+
+.summary-panel__title-label,
+.summary-panel__title-name,
+.summary-panel__primary,
+.summary-panel__note {
+    color: #ffffff !important;
+}
+
+.summary-panel__title-name {
+    font-size: 14px !important;
+}
+
+.summary-panel--midline .summary-chip {
+    background: rgba(255, 255, 255, 0.14) !important;
+    border-color: rgba(255, 255, 255, 0.24) !important;
+}
+
+.summary-panel--midline .summary-chip__label {
+    color: #e7f1ff !important;
+    font-size: 11px !important;
+}
+
+.summary-panel--midline .summary-chip__value {
+    color: #ffffff !important;
+    font-size: 12px !important;
+}
+
+#turn-info h3,
+.player-info h2,
+#game-log h3 {
+    color: #0f1f33 !important;
+}
+
+#energy-played,
+#supporter-played,
+#attacked-played {
+    background: #eef4ff !important;
+    border-color: rgba(71, 85, 105, 0.3) !important;
+    color: #10243b !important;
+    font-size: 13px !important;
+}
+
+#log-content,
+.log-entry {
+    color: #10243b !important;
+    font-size: 14px !important;
+    line-height: 1.45 !important;
+}
+
+.card .card-effect {
+    font-size: 11px !important;
+    color: #1f2937 !important;
+}
+
+.card-tools-attached {
+    font-size: 10px !important;
+    color: #1f2937 !important;
+}
+
+/* Targeted readability fixes: Player 2 contrast + turn header clarity */
+#player2-info,
+#player2-header-secondary,
+#player2-board {
+    color: #0f2238 !important;
+}
+
+#player2-info h2,
+#player2-board .bench-zone h3,
+#player2-board .active-zone h3 {
+    color: #0b1f35 !important;
+    font-weight: 800 !important;
+}
+
+#player2-board .card-slot {
+    background: #e8edf4 !important;
+    border-color: rgba(15, 35, 56, 0.34) !important;
+    color: #1f334a !important;
+}
+
+#in-game-room-code {
+    color: #1f3b58 !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+    letter-spacing: 0.1px;
+}
+
+#in-game-player-identity {
+    background: #dbeafe !important;
+    color: #1f3b58 !important;
+    border-color: rgba(30, 64, 175, 0.38) !important;
+    font-size: 13px !important;
+    font-weight: 500 !important;
+}
+
+#turn-info #end-turn-btn {
+    background: #1e3a5f !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(15, 23, 42, 0.28) !important;
+    font-size: 15px !important;
+    font-weight: 600 !important;
+    text-shadow: none !important;
+}
+
+#turn-info #end-turn-btn:hover {
+    background: #18304f !important;
+}
+
+#turn-info #end-turn-btn:disabled {
+    background: #cbd5e1 !important;
+    color: #1e293b !important;
+    border-color: rgba(71, 85, 105, 0.4) !important;
+    opacity: 1 !important;
+}
+
+/* Start screen CTA buttons: keep them visibly interactive (lighter, higher-luminance) */
+#start-screen #start-game-btn,
+#start-screen #open-deck-builder-btn,
+#start-screen #view-cards-btn {
+    background: linear-gradient(180deg, #f8fbff 0%, #dbeafe 100%) !important;
+    color: #0f2a46 !important;
+    border: 1px solid rgba(59, 130, 246, 0.36) !important;
+    box-shadow: 0 10px 20px rgba(15, 42, 70, 0.22) !important;
+    filter: none !important;
+    opacity: 1 !important;
+}
+
+#start-screen #start-game-btn:hover,
+#start-screen #open-deck-builder-btn:hover,
+#start-screen #view-cards-btn:hover {
+    background: linear-gradient(180deg, #ffffff 0%, #e2ecff 100%) !important;
+    box-shadow: 0 14px 24px rgba(15, 42, 70, 0.26) !important;
+}
+
+/* Layout fix: in Player 2 perspective, fully reorder sections as a true player swap */
+body.multiplayer-perspective-p2 #main-game-area > #game-header { order: 1 !important; }
+body.multiplayer-perspective-p2 #main-game-area > #player1-board { order: 2 !important; }
+body.multiplayer-perspective-p2 #main-game-area > #midline-band { order: 3 !important; }
+body.multiplayer-perspective-p2 #main-game-area > #setup-guide { order: 4 !important; }
+body.multiplayer-perspective-p2 #main-game-area > #player2-board { order: 5 !important; }
+body.multiplayer-perspective-p2 #main-game-area > #game-toolbar { order: 6 !important; }
+body.multiplayer-perspective-p2 #main-game-area > #selection-inspector { order: 7 !important; }
+body.multiplayer-perspective-p2 #main-game-area > #hand-zone { order: 8 !important; }
+
+/* Keep per-board internals as a true player swap (no mirror artifacts) */
+body.multiplayer-perspective-p2 #player1-board .bench-zone {
+    grid-column: 1 !important;
+    justify-self: start !important;
+}
+body.multiplayer-perspective-p2 #player1-board .active-zone {
+    grid-column: 2 !important;
+    justify-self: center !important;
+}
+body.multiplayer-perspective-p2 #player1-board .deck-discard-zone {
+    grid-column: 3 !important;
+    justify-self: end !important;
+}
+body.multiplayer-perspective-p2 #player2-board .deck-discard-zone {
+    grid-column: 1 !important;
+    justify-self: start !important;
+}
+body.multiplayer-perspective-p2 #player2-board .active-zone {
+    grid-column: 2 !important;
+    justify-self: center !important;
+}
+body.multiplayer-perspective-p2 #player2-board .bench-zone {
+    grid-column: 3 !important;
+    justify-self: end !important;
+}
+
+/* Fit tweak: slightly smaller board/hand cards so both players remain visible */
+.card-slot {
+    width: 94px !important;
+    height: 126px !important;
+}
+
+#hand-cards .card {
+    width: 94px !important;
+    height: 126px !important;
+}
+
+#player1-board .active-zone,
+#player2-board .active-zone {
+    width: 104px !important;
+    min-width: 104px !important;
+}
+
+#stadium-card {
+    width: 84px !important;
+    height: 114px !important;
+}
+
+@media (max-width: 1200px) {
+    .card-slot,
+    #hand-cards .card {
+        width: 84px !important;
+        height: 112px !important;
+    }
+}
+
+/* Preserve compact laptop-height fit (prevents lower board clipping) */
+@media (max-height: 820px) and (min-width: 900px) {
+    .card-slot,
+    #hand-cards .card {
+        width: 72px !important;
+        height: 96px !important;
+    }
+
+    #player1-board .active-zone,
+    #player2-board .active-zone {
+        width: 82px !important;
+        min-width: 82px !important;
+    }
+
+    #stadium-card {
+        width: 64px !important;
+        height: 86px !important;
+    }
+
+    .player-board {
+        flex: 0 0 auto !important;
+        min-height: 0 !important;
+        height: 150px !important;
+        max-height: 150px !important;
+        overflow: hidden !important;
+    }
+
+    #player1-board .board-section,
+    #player2-board .board-section {
+        height: 100% !important;
+        min-height: 0 !important;
+    }
+}
+
+/* Selection UX: clear button inside selected summary */
+.toolbar-clear-selection {
+    margin-left: 8px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid rgba(71, 85, 105, 0.35);
+    background: #eff6ff;
+    color: #1e3a5f;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.toolbar-clear-selection:hover {
+    background: #e2e8f0;
+}
+
+/* Ensure startup board layout doesn't stretch (fixes giant empty space in p2 setup) */
+#main-game-area .player-board {
+    flex: 0 0 auto !important;
+    min-height: 0 !important;
+    height: clamp(150px, 20vh, 210px) !important;
+    max-height: clamp(150px, 20vh, 210px) !important;
+    overflow: hidden !important;
+}
+
+#main-game-area #player1-board .board-section,
+#main-game-area #player2-board .board-section {
+    height: 100% !important;
+    min-height: 0 !important;
+    align-items: center !important;
+}
+
+/* 2026-02-27 layout refresh: reduce redundancy and place info by zone sketch */
+#game-header {
+    padding: 8px 10px !important;
+}
+
+#game-header .player-info,
+#game-header .player-header-secondary {
+    display: none !important;
+}
+
+#turn-info {
+    width: 100% !important;
+    min-width: 0 !important;
+    display: grid !important;
+    grid-template-columns: minmax(180px, 1fr) auto auto auto auto !important;
+    align-items: center !important;
+    gap: 6px 10px !important;
+    padding: 8px 10px !important;
+}
+
+#turn-info h3 {
+    margin: 0 !important;
+    font-size: 20px !important;
+}
+
+#in-game-room-code,
+#in-game-player-identity,
+#energy-played,
+#supporter-played {
+    margin: 0 !important;
+    white-space: nowrap;
+}
+
+#energy-played,
+#supporter-played {
+    padding: 4px 8px !important;
+    border-radius: 999px !important;
+}
+
+#turn-info #end-turn-btn {
+    margin-left: auto;
+}
+
+#main-game-area .player-board {
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    padding: 8px 10px !important;
+}
+
+#player1-board .board-section,
+#player2-board .board-section {
+    display: grid !important;
+    grid-template-columns: 172px minmax(0, 1fr) !important;
+    grid-template-rows: auto auto !important;
+    grid-template-areas:
+        "piles active"
+        "piles bench" !important;
+    align-items: stretch !important;
+    gap: 8px 14px !important;
+    height: auto !important;
+}
+
+#player1-board .deck-discard-zone,
+#player2-board .deck-discard-zone {
+    grid-area: piles !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 8px !important;
+    align-content: center !important;
+    justify-items: stretch !important;
+}
+
+#player1-board .active-zone,
+#player2-board .active-zone {
+    grid-area: active !important;
+    width: auto !important;
+    min-width: 0 !important;
+    padding: 8px !important;
+}
+
+#player1-board .bench-zone,
+#player2-board .bench-zone {
+    grid-area: bench !important;
+    padding: 8px !important;
+}
+
+#player1-board .active-zone h3,
+#player2-board .active-zone h3,
+#player1-board .bench-zone h3,
+#player2-board .bench-zone h3 {
+    text-align: left !important;
+    margin-bottom: 6px !important;
+}
+
+#player1-board .bench-slots,
+#player2-board .bench-slots {
+    justify-content: flex-start !important;
+}
+
+#midline-band {
+    margin: 0 !important;
+    padding: 6px 10px !important;
+    min-height: 92px !important;
+}
+
+#midline-band #stadium-zone {
+    margin: 0 auto !important;
+    min-width: 126px !important;
+    padding: 6px 8px !important;
+}
+
+#stadium-zone h3 {
+    text-align: center !important;
+    margin-bottom: 4px !important;
+}
+
+#game-toolbar {
+    margin-top: 0 !important;
+    padding: 8px 10px !important;
+}
+
+#toolbar-selected-card {
+    min-height: 0 !important;
+}
+
+#hand-zone {
+    max-height: 168px !important;
+    padding: 8px 10px !important;
+}
+
+@media (max-width: 960px) {
+    #turn-info {
+        grid-template-columns: 1fr auto !important;
+        grid-template-areas:
+            "turn end"
+            "room room"
+            "you you"
+            "energy supporter" !important;
+    }
+
+    #current-turn {
+        grid-area: turn;
+    }
+
+    #turn-info #end-turn-btn {
+        grid-area: end;
+    }
+
+    #in-game-room-code {
+        grid-area: room;
+    }
+
+    #in-game-player-identity {
+        grid-area: you;
+    }
+
+    #energy-played {
+        grid-area: energy;
+    }
+
+    #supporter-played {
+        grid-area: supporter;
+    }
+
+    #player1-board .board-section,
+    #player2-board .board-section {
+        grid-template-columns: 1fr !important;
+        grid-template-rows: auto auto auto !important;
+        grid-template-areas:
+            "active"
+            "bench"
+            "piles" !important;
+    }
+
+    #player1-board .deck-discard-zone,
+    #player2-board .deck-discard-zone {
+        justify-content: center !important;
+    }
+}
+
+#main-game-area > #setup-guide {
+    order: 6 !important;
+    margin: 0 !important;
+    padding: 6px 10px !important;
+}
+
+#setup-guide .setup-guide__title {
+    margin-bottom: 2px !important;
+    font-size: 12px !important;
+    letter-spacing: 0.2px;
+    text-transform: uppercase;
+}
+
+#setup-guide .setup-guide__body {
+    margin-bottom: 6px !important;
+    font-size: 12px !important;
+}
+
+#setup-guide .setup-guide__columns {
+    gap: 6px !important;
+}
+
+#setup-guide .setup-guide__column {
+    padding: 6px !important;
+}
+
+#setup-guide .setup-guide__column-title {
+    margin-bottom: 4px !important;
+    font-size: 12px !important;
+}
+
+#setup-guide .setup-guide__choices {
+    gap: 4px !important;
+}
+
+#setup-guide .setup-guide__choice {
+    padding: 4px 8px !important;
+    font-size: 12px !important;
+}
+
+body.multiplayer-perspective-p2 #main-game-area > #setup-guide {
+    order: 7 !important;
+}
+
+/* =========================================================
+   Canonical Layout (single source of truth)
+   ========================================================= */
+:root {
+    --board-slot-w: clamp(74px, 7vw, 112px);
+    --board-slot-h: calc(var(--board-slot-w) * 1.36);
+    --hand-slot-w: clamp(72px, 6.2vw, 102px);
+    --hand-slot-h: calc(var(--hand-slot-w) * 1.34);
+}
+
+html, body {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+}
+
+body {
+    height: 100vh !important;
+}
+
+#game-container {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    margin: 0 !important;
+    padding: 8px !important;
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) clamp(280px, 20vw, 340px) !important;
+    gap: 8px !important;
+    align-items: stretch !important;
+    overflow: hidden !important;
+}
+
+#main-game-area {
+    min-width: 0 !important;
+    min-height: 0 !important;
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    grid-template-rows: auto auto auto auto auto auto minmax(98px, 1fr) !important;
+    gap: 6px !important;
+    overflow: hidden !important;
+}
+
+#game-header {
+    grid-row: 1 !important;
+    display: block !important;
+    margin: 0 !important;
+    padding: 8px 10px !important;
+}
+
+#main-game-area > #setup-guide {
+    grid-row: 2 !important;
+    order: unset !important;
+    margin: 0 !important;
+    max-height: 120px !important;
+    overflow: auto !important;
+}
+
+#player2-board {
+    grid-row: 3 !important;
+}
+
+#midline-band {
+    grid-row: 4 !important;
+}
+
+#player1-board {
+    grid-row: 5 !important;
+}
+
+#game-toolbar {
+    grid-row: 6 !important;
+}
+
+#hand-zone {
+    grid-row: 7 !important;
+}
+
+#game-header .player-info,
+#game-header .player-header-secondary,
+#p1-midline-panel,
+#p2-midline-panel,
+#midline-band .midline-side-panel {
+    display: none !important;
+}
+
+#turn-info {
+    width: min(760px, 100%) !important;
+    min-width: 0 !important;
+    margin: 0 auto !important;
+    padding: 8px 10px !important;
+    border-radius: 12px !important;
+    display: grid !important;
+    grid-template-columns: auto minmax(130px, 1fr) auto !important;
+    grid-template-areas:
+        "title title title"
+        "room identity end"
+        "energy supporter end" !important;
+    align-items: center !important;
+    justify-items: center !important;
+    gap: 4px 10px !important;
+}
+
+#turn-info h3 {
+    grid-area: title !important;
+    margin: 0 !important;
+    width: 100% !important;
+    text-align: center !important;
+    font-size: 34px !important;
+    line-height: 1 !important;
+}
+
+#in-game-room-code {
+    grid-area: room !important;
+    margin: 0 !important;
+    font-size: 14px !important;
+    justify-self: start !important;
+}
+
+#in-game-player-identity {
+    grid-area: identity !important;
+    margin: 0 !important;
+    font-size: 12px !important;
+    justify-self: start !important;
+}
+
+#energy-played {
+    grid-area: energy !important;
+    margin: 0 !important;
+    justify-self: start !important;
+}
+
+#supporter-played {
+    grid-area: supporter !important;
+    margin: 0 !important;
+    justify-self: start !important;
+}
+
+#energy-played,
+#supporter-played {
+    padding: 4px 8px !important;
+    border-radius: 999px !important;
+    white-space: nowrap !important;
+    font-size: 12px !important;
+}
+
+#turn-info #end-turn-btn {
+    grid-area: end !important;
+    align-self: center !important;
+    justify-self: end !important;
+    min-width: 160px !important;
+    padding: 7px 10px !important;
+    font-size: 15px !important;
+}
+
+#player1-board,
+#player2-board {
+    margin: 0 !important;
+    padding: 8px !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    position: relative !important;
+}
+
+.board-owner-label {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    z-index: 2;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #24405f;
+    background: rgba(255, 255, 255, 0.68);
+    border: 1px solid rgba(112, 135, 163, 0.35);
+    border-radius: 999px;
+    padding: 2px 8px;
+}
+
+#player1-board .board-section,
+#player2-board .board-section {
+    display: grid !important;
+    grid-template-columns: 170px var(--board-slot-w) minmax(0, 1fr) !important;
+    grid-template-rows: auto !important;
+    grid-template-areas: "piles active bench" !important;
+    gap: 8px 12px !important;
+    align-items: end !important;
+    height: auto !important;
+    min-height: var(--board-slot-h) !important;
+    overflow: visible !important;
+}
+
+#player1-board .deck-discard-zone,
+#player2-board .deck-discard-zone {
+    grid-area: piles !important;
+    display: grid !important;
+    grid-template-columns: 1fr 1fr !important;
+    gap: 6px !important;
+    align-content: center !important;
+}
+
+#player1-board .active-zone,
+#player2-board .active-zone {
+    grid-area: active !important;
+    width: var(--board-slot-w) !important;
+    min-width: var(--board-slot-w) !important;
+    padding: 4px !important;
+}
+
+#player1-board .bench-zone,
+#player2-board .bench-zone {
+    grid-area: bench !important;
+    padding: 4px !important;
+    min-width: 0 !important;
+}
+
+#player1-board .active-zone h3,
+#player2-board .active-zone h3,
+#player1-board .bench-zone h3,
+#player2-board .bench-zone h3 {
+    margin-bottom: 2px !important;
+    text-align: left !important;
+    font-size: 12px !important;
+}
+
+#player1-board .bench-slots,
+#player2-board .bench-slots {
+    justify-content: flex-start !important;
+    gap: 8px !important;
+    flex-wrap: nowrap !important;
+}
+
+#player1-board .card-slot,
+#player2-board .card-slot {
+    width: var(--board-slot-w) !important;
+    height: var(--board-slot-h) !important;
+}
+
+#player1-board .deck-pile,
+#player1-board .discard-pile,
+#player2-board .deck-pile,
+#player2-board .discard-pile {
+    min-height: var(--board-slot-h) !important;
+}
+
+#player1-board .card-slot .card,
+#player2-board .card-slot .card,
+#stadium-card .card {
+    width: 100% !important;
+    height: 100% !important;
+    transform: none !important;
+}
+
+#player1-board .card-slot .card:hover,
+#player2-board .card-slot .card:hover,
+#stadium-card .card:hover {
+    transform: none !important;
+}
+
+#midline-band {
+    margin: 0 !important;
+    min-height: 72px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 4px 8px !important;
+}
+
+#midline-band #stadium-zone {
+    margin: 0 !important;
+    min-width: 140px !important;
+    padding: 4px 6px !important;
+}
+
+#stadium-zone h3 {
+    margin-bottom: 2px !important;
+    font-size: 11px !important;
+}
+
+#stadium-card {
+    width: clamp(56px, 4.5vw, 74px) !important;
+    height: clamp(74px, 6vw, 98px) !important;
+}
+
+#game-toolbar {
+    margin: 0 !important;
+    padding: 4px 8px !important;
+    min-height: 0 !important;
+    position: relative !important;
+    z-index: 5 !important;
+    overflow: hidden !important;
+}
+
+#selection-inspector {
+    display: none !important;
+}
+
+#toolbar-selected-card {
+    font-size: 14px !important;
+}
+
+.toolbar-btn {
+    padding: 6px 8px !important;
+    font-size: 12px !important;
+}
+
+#hand-zone {
+    margin: 0 !important;
+    padding: 4px 8px !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: hidden !important;
+}
+
+#hand-zone h3 {
+    margin-bottom: 3px !important;
+}
+
+#hand-cards {
+    display: flex !important;
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    padding: 2px 2px 8px 2px !important;
+}
+
+#hand-cards .hand-card-wrapper {
+    flex: 0 0 auto !important;
+}
+
+#hand-cards .card {
+    width: var(--hand-slot-w) !important;
+    height: var(--hand-slot-h) !important;
+}
+
+/* Prevent card text overflow outside boxes */
+.card {
+    overflow: hidden !important;
+}
+
+.card .card-header {
+    overflow: hidden !important;
+}
+
+.card .card-name {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 2 !important;
+    -webkit-box-orient: vertical !important;
+    word-break: break-word !important;
+    line-height: 1.08 !important;
+    max-height: 2.2em !important;
+}
+
+.card .card-hp {
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+}
+
+.card .card-effect {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    display: -webkit-box !important;
+    -webkit-line-clamp: 4 !important;
+    -webkit-box-orient: vertical !important;
+    line-height: 1.15 !important;
+    max-height: 4.8em !important;
+}
+
+.card .move {
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    white-space: nowrap !important;
+}
+
+.card-tools-attached {
+    overflow: hidden !important;
+    max-height: 2.6em !important;
+    text-overflow: ellipsis !important;
+}
+
+/* Eliminate hover clipping/cutoff artifacts */
+#game-container .card:hover {
+    transform: none !important;
+}
+
+#game-container .hand-card-wrapper:hover .card {
+    transform: none !important;
+}
+
+body.phase-setup #main-game-area > #setup-guide {
+    max-height: none !important;
+}
+
+body.phase-setup #main-game-area {
+    grid-template-rows: auto minmax(96px, auto) auto auto auto auto minmax(90px, 1fr) !important;
+}
+
+/* Perspective: Player 2 should see opponent on top and self on bottom, same layout geometry */
+body.multiplayer-perspective-p2 #player1-board {
+    grid-row: 3 !important;
+}
+
+body.multiplayer-perspective-p2 #player2-board {
+    grid-row: 5 !important;
+}
+
+body.multiplayer-perspective-p2 #player1-board .deck-discard-zone,
+body.multiplayer-perspective-p2 #player2-board .deck-discard-zone {
+    grid-area: piles !important;
+}
+
+body.multiplayer-perspective-p2 #player1-board .active-zone,
+body.multiplayer-perspective-p2 #player2-board .active-zone {
+    grid-area: active !important;
+}
+
+body.multiplayer-perspective-p2 #player1-board .bench-zone,
+body.multiplayer-perspective-p2 #player2-board .bench-zone {
+    grid-area: bench !important;
+}
+
+#game-log {
+    margin: 0 !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    padding: 10px !important;
+    overflow: hidden !important;
+}
+
+#log-content {
+    height: calc(100% - 46px) !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+}
+
+.pool-card-description {
+    line-height: 1.35;
+    color: #263b52;
+}
+
+#deck-builder-modal .pool-card-type,
+#card-browser-modal .pool-card-type {
+    white-space: normal;
+    text-align: right;
+    max-width: 56%;
+    font-size: 10px;
+    line-height: 1.2;
+}
+
+#game-container.game-log-collapsed {
+    grid-template-columns: minmax(0, 1fr) !important;
+}
+
+@media (max-width: 1180px) {
+    #game-container {
+        grid-template-columns: 1fr !important;
+        height: auto !important;
+        max-height: none !important;
+        overflow: auto !important;
+    }
+
+    #main-game-area {
+        grid-template-rows: auto auto auto auto auto auto auto !important;
+        overflow: visible !important;
+    }
+
+    #game-log {
+        min-height: 170px !important;
+        max-height: 240px !important;
+    }
+
+    #turn-info h3 {
+        font-size: 32px !important;
+    }
+
+    #player1-board .board-section,
+    #player2-board .board-section {
+        grid-template-columns: 150px var(--board-slot-w) minmax(0, 1fr) !important;
+    }
+}
+
+@media (max-width: 900px) {
+    #turn-info {
+        grid-template-columns: 1fr !important;
+        grid-template-areas:
+            "title"
+            "room"
+            "identity"
+            "energy"
+            "supporter"
+            "end" !important;
+        justify-items: stretch !important;
+    }
+
+    #turn-info h3 {
+        text-align: left !important;
+        font-size: 28px !important;
+    }
+
+    #turn-info #end-turn-btn {
+        justify-self: stretch !important;
+        min-width: 0 !important;
+    }
+
+    #player1-board .board-section,
+    #player2-board .board-section {
+        grid-template-columns: 1fr !important;
+        grid-template-rows: auto auto auto !important;
+        grid-template-areas:
+            "active"
+            "bench"
+            "piles" !important;
+        align-items: start !important;
+    }
+
+    #player1-board .active-zone,
+    #player2-board .active-zone {
+        width: auto !important;
+        min-width: 0 !important;
+    }
+
+    #player1-board .bench-slots,
+    #player2-board .bench-slots {
+        overflow-x: auto !important;
+    }
+
+    #energy-played,
+    #supporter-played {
+        white-space: normal !important;
+    }
+}
+
+/* =========================================================
+   Final cleanup overrides
+   ========================================================= */
+#main-game-area {
+    grid-template-rows: auto auto auto auto auto minmax(98px, 1fr) !important;
+    overflow: visible !important;
+}
+
+#player2-board {
+    grid-row: 2 !important;
+}
+
+#midline-band {
+    grid-row: 3 !important;
+}
+
+#player1-board {
+    grid-row: 4 !important;
+}
+
+#game-toolbar {
+    grid-row: 5 !important;
+}
+
+#hand-zone {
+    grid-row: 6 !important;
+}
+
+#main-game-area > #setup-guide {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 60 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 16px !important;
+    margin: 0 !important;
+    max-height: none !important;
+    background: rgba(11, 18, 35, 0.42) !important;
+    backdrop-filter: blur(5px) !important;
+    -webkit-backdrop-filter: blur(5px) !important;
+}
+
+#main-game-area > #setup-guide.hidden {
+    display: none !important;
+}
+
+#setup-guide .setup-guide__card {
+    width: min(980px, 94vw) !important;
+    max-height: min(88vh, 760px) !important;
+    overflow: auto !important;
+    padding: 16px !important;
+    border-radius: 14px !important;
+    background: linear-gradient(160deg, #21385d, #172742) !important;
+    border: 1px solid rgba(150, 180, 220, 0.45) !important;
+    box-shadow: 0 22px 50px rgba(0, 0, 0, 0.38) !important;
+}
+
+#setup-guide .setup-guide__waiting {
+    margin: 8px 0 10px 0 !important;
+    padding: 10px 12px !important;
+    border-radius: 10px !important;
+    font-weight: 700 !important;
+    color: #e8f2ff !important;
+    background: rgba(43, 77, 122, 0.65) !important;
+    border: 1px solid rgba(169, 208, 255, 0.45) !important;
+}
+
+#energy-played #energy-status,
+#supporter-played #supporter-status {
+    display: inline-block !important;
+    min-width: 38px !important;
+    text-align: center !important;
+    margin-left: 6px !important;
+    padding: 1px 8px !important;
+    border-radius: 999px !important;
+    color: #f7fbff !important;
+    background: #1f3b60 !important;
+    border: 1px solid rgba(193, 223, 255, 0.5) !important;
+    font-size: 13px !important;
+    font-weight: 900 !important;
+    letter-spacing: 0.02em !important;
+    line-height: 1.25 !important;
+}
+
+.deck-pile .pile-label,
+.deck-pile .pile-count {
+    color: #f5f8ff !important;
+}
+
+.discard-pile.discard-pile-disabled {
+    opacity: 0.7 !important;
+    cursor: default !important;
+    filter: saturate(0.82) !important;
+}
+
+.card .card-hp {
+    font-size: 10px !important;
+    white-space: nowrap !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
+    max-width: none !important;
+    flex: 0 0 auto !important;
+}
+
+.card .card-header {
+    gap: 4px !important;
+}
+
+body.multiplayer-perspective-p2 #player1-board {
+    grid-row: 2 !important;
+}
+
+body.multiplayer-perspective-p2 #player2-board {
+    grid-row: 4 !important;
 }

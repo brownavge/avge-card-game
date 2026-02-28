@@ -1,0 +1,565 @@
+Original prompt: Can you scan through this web game for possible issues and bugs, being as comprehensive as possible, and also propose changes to the UI that would make it look nice and be as easy to use as possible [$develop-web-game](/Users/ryanlee/.codex/skills/develop-web-game/SKILL.md)
+
+2026-02-26
+- Started audit/review pass using develop-web-game skill.
+- Confirmed no existing progress.md.
+- Began static inspection of `index.html`, `styles.css`, `game.js`, and `server/index.js`.
+- Next: run local server and Playwright client, inspect screenshots/console output, then compile findings + UI/UX recommendations.
+- Started server on `http://localhost:3001` (port 3000 already in use locally).
+- Installed local `playwright` dev dependency and Chromium binary to run the skill's Playwright client.
+- Created a symlink from the skill script directory to repo `node_modules` so `web_game_playwright_client.js` can resolve `playwright`.
+- Ran Playwright captures for:
+  - Start -> game board (`output/web-game`)
+  - Deck builder modal (`output/web-game-deckbuilder`)
+  - Start screen with multiplayer toggle on (`output/web-game-multiplayer`)
+  - Attempted "View All Cards" button (`output/web-game-cards`; remains on start page because button opens `cards.md` in new tab)
+- Observations:
+  - No console/page errors in the tested flows.
+  - No `render_game_to_text` outputs were generated (hook appears missing).
+  - In-game screenshot shows initial board state with no active characters on either side while turn controls are already enabled.
+  - Layout is visually improved but dense; hand cards and lower content are clipped at 1280x720.
+- Key code risks identified:
+  - Server trusts client-provided state snapshots (`shared/state.js` + `server/index.js`) -> multiplayer cheating/state forgery risk.
+  - `initGame()` skips setup phase and forces `game.phase = 'main'`.
+  - `loadCustomDecksIntoDropdown()` can crash on malformed `localStorage.customDecks` JSON.
+- Follow-up implementation started:
+  - Added guided opening setup panel in-game (`#setup-guide`) with direct opening-active selection buttons.
+  - Local single-player now auto-places Player 2 opening active and keeps Player 1 in setup until they choose an active.
+  - End turn is disabled during setup; setup completion transitions to `main`.
+  - Added compact in-game action toolbar with quick actions + game log collapse toggle.
+  - Added `window.render_game_to_text` and `window.advanceTime(ms)` hooks for automation snapshots.
+  - Added `try/catch` around custom deck localStorage JSON parsing to prevent startup crash on malformed data.
+  - Added server-side snapshot shape validation + message size cap in multiplayer action handling (hardening, not full authority rewrite).
+- Validation completed:
+  - `node --check game.js`
+  - `node --check server/index.js`
+  - Skill Playwright client run (start -> game) confirms screenshots and `state-*.json` generation under `output/web-game-followup-1`
+  - Skill Playwright client run for deck builder modal regression screenshot (`output/web-game-followup-deckbuilder`)
+  - Custom Playwright smoke script (`output/ui_smoke_test.mjs`) passed:
+    - malformed `localStorage.customDecks` does not crash page
+    - setup guide appears after start
+    - setup choice transitions to main phase and sets active
+    - game log collapse toggle works
+  - WebSocket server validation smoke script (`output/server_snapshot_validation_test.mjs`) passed invalid snapshot rejection
+- Remaining follow-up opportunities:
+  - Replace `View All Cards` raw markdown new-tab flow with in-app searchable modal/browser.
+  - Make multiplayer truly server-authoritative (shared rules engine), not just snapshot validation hardening.
+  - Further refine mobile layout and card readability/zoom interactions.
+- Additional follow-up completed:
+  - Replaced `View All Cards` raw markdown new-tab behavior with an in-app searchable card browser modal (`#card-browser-modal`) including type tabs, search, counts, and preview.
+  - Added global modal close/outside-click listeners on page load; this fixed a start-screen bug where the card browser modal could open but not close before starting a game.
+- Additional validation completed:
+  - Skill Playwright capture for card browser modal (`output/web-game-card-browser/shot-0.png`)
+  - Extended UI smoke test now covers:
+    - card browser modal open/search/close from start screen
+    - setup flow + log toggle flow after game start
+- Mobile/readability follow-up completed:
+  - Added selected-card inspector panel under toolbar for readable card details without relying on tiny card text.
+  - Added stronger mobile layout overrides (stacked toolbar buttons, horizontal hand scroller, compact board sizing, hidden duplicate side summaries on small phones).
+  - Added responsive default: game log starts collapsed on narrow screens (still user-toggleable).
+  - Added extra small-phone compaction overrides (`<=480px`) and reduced keyboard hint overlap.
+- Additional validation completed:
+  - Extended desktop UI smoke test to verify selected-card inspector visibility after hand-card selection.
+  - Added mobile UI smoke test (`output/mobile_ui_smoke_test.mjs`) covering:
+    - start -> setup -> choose active
+    - mobile toolbar visibility
+    - selection inspector visibility
+    - log toggle state change
+  - Re-ran desktop + mobile smoke tests after responsive-default changes; both passed.
+  - Refreshed mobile screenshots (`output/mobile-ui-game.png`, `output/mobile-ui-start.png`) and desktop setup screenshot/state (`output/web-game-followup-2`).
+- Major multiplayer follow-up implemented (host-authoritative step):
+  - Client now includes state snapshots only from Player 1 (host) or explicit `STATE_SNAPSHOT` sync actions.
+  - Host client auto-sends a snapshot sync after applying remote Player 2 state-changing actions.
+  - Server now rejects snapshots from non-host players (`Only host may sync state.`).
+  - Server broadcasts `STATE_UPDATE` only when room state was actually updated, preventing stale snapshot overwrites on guest actions.
+- Additional validation completed:
+  - New WebSocket integration test (`output/host_authority_multiplayer_test.mjs`) passed:
+    - guest snapshot rejected
+    - guest no-snapshot action broadcasts without stale `STATE_UPDATE`
+    - host snapshot accepted and produces `STATE_UPDATE`
+  - Re-ran desktop + mobile UI smoke tests after multiplayer authority changes; both passed.
+  - Refreshed skill Playwright start-flow capture (`output/web-game-followup-3`).
+- Remaining major work (if continuing):
+  - True server-authoritative gameplay execution (shared rules engine runs on server instead of host-client snapshots).
+- User-priority follow-up completed (2026-02-26):
+  - Improved text visibility / reduced whitespace:
+    - Added selected-card inspector panel (readable details).
+    - Reworked setup guide into dual-column compact selector.
+    - Tightened desktop spacing while keeping key labels readable.
+  - Fit-at-100%-zoom requirement:
+    - Added height-constrained desktop layout mode and validated no vertical scroll at 1280x720 and 1366x768.
+  - Starting character selection:
+    - Local setup now lets both Player 1 and Player 2 choose their opening active (no auto-pick).
+    - Multiplayer path updated so `chooseOpeningActive` is off-turn allowed during setup and host-authoritative sync handles guest selections.
+  - Attach Energy UX:
+    - Toolbar/card actions now open an attach-energy target picker modal (active/bench target selection).
+    - Toolbar Attach Energy button disables (grays out) after max energy attachment for the turn.
+  - Attack button clarity:
+    - Attack buttons now explicitly say `Attack (Ends Turn)` and attack menu explains turn ends after attack resolves.
+- Latest validation completed:
+  - Desktop UI smoke test (`output/ui_smoke_test.mjs`) passed with checks for:
+    - dual-player opening setup flow
+    - attach-energy picker + energy button disabled state
+    - active-card action label includes `Attack (Ends Turn)`
+    - selection inspector + log toggle
+  - Mobile UI smoke test (`output/mobile_ui_smoke_test.mjs`) passed after dual-player setup update.
+  - Viewport fit test (`output/viewport_fit_test.mjs`) passed:
+    - 1280x720 no vertical scroll
+    - 1366x768 no vertical scroll
+  - Host-authority multiplayer test (`output/host_authority_multiplayer_test.mjs`) re-run and passed after setup changes.
+- Audio integration completed:
+  - Added background music manager in `game.js` with two tracks:
+    - Menu idle: `assets/audio/menu-idle.mp3`
+    - Battle: `assets/audio/battle.mp3`
+  - Music behavior:
+    - Menu idle track is selected on start screen.
+    - Battle track is selected immediately after pressing `Start Game`.
+    - Includes autoplay-safe unlock retry on first user interaction.
+  - Added debug state hook (`window.__bgmDebugState`) and included BGM info in `render_game_to_text` for automated verification.
+  - Added audio files to project static assets:
+    - `assets/audio/menu-idle.mp3`
+    - `assets/audio/battle.mp3`
+- Audio validation completed:
+  - Desktop UI smoke test now asserts menu->battle BGM track switching; passed.
+  - Skill Playwright run (`output/web-game-audio`) confirms `render_game_to_text` reports:
+    - `currentTrack: "battle"` after start
+    - `menuPaused: true`
+    - `battlePaused: false`
+  - Re-ran viewport fit + mobile smoke + host-authority multiplayer tests after audio changes; all passed on a clean restarted server.
+
+2026-02-27
+- Follow-up UI/layout polish completed for latest user request:
+  - Player 2 perspective now performs a true player swap (zone placement swaps by player identity rather than mirrored oddity):
+    - In P2 perspective, local Player 2 board uses `deck/discard -> active -> bench` (left-to-right).
+    - In P2 perspective, remote Player 1 board uses `bench -> active -> deck/discard` (left-to-right).
+  - Midline active stats panels now:
+    - render title and active name on the same line (`Player X Active` + character name),
+    - use a 3-column x 2-row stat grid (6 chips),
+    - include `Status` as a chip.
+  - Active-card board spacing tightened so active slot sits visually closer to bench.
+  - Turn-change log cleanup:
+    - removed decorative `════════...` separator log entries from `switchPlayer()`.
+  - Game-log clipping refined:
+    - log stays clipped to viewport height with internal scroll in `#log-content`,
+    - avoids extending beyond the game area near the hand zone.
+  - Color/readability tuning:
+    - softened high-neon UI palette and button colors,
+    - preserved contrast while reducing harsh saturation.
+- Additional/updated automated tests:
+  - Updated `output/ui_smoke_test.mjs`:
+    - asserts midline active titles include player label,
+    - asserts 6 active-stat chips including `Status`,
+    - asserts no separator glyphs (`═`) in game log after ending turn.
+  - Added `output/perspective_layout_test.mjs`:
+    - validates default board orientation,
+    - validates player-2 perspective swaps board zone positions correctly,
+    - validates active-stat side panel swap in p2 perspective.
+  - Updated `output/host_authority_multiplayer_test.mjs` to remove flaky dependence on guest `FULL_STATE` timing by using a deterministic plausible snapshot payload.
+- Validation re-run (all passing):
+  - `node --check game.js`
+  - `node --check output/ui_smoke_test.mjs`
+  - `node --check output/perspective_layout_test.mjs`
+  - `node --check output/host_authority_multiplayer_test.mjs`
+  - `node output/ui_smoke_test.mjs`
+  - `node output/perspective_layout_test.mjs`
+  - `node output/mobile_ui_smoke_test.mjs`
+  - `node output/viewport_fit_test.mjs`
+  - `node output/host_authority_multiplayer_test.mjs`
+  - `node output/server_snapshot_validation_test.mjs`
+
+- Readability follow-up (user feedback: text too hard to read):
+  - Added a final readability override block at end of `styles.css`:
+    - increased contrast for headers, logs, status text, zone labels, and toolbar text,
+    - increased base font sizes for card text (`name/hp/moves`), pile labels/counts, log, setup guide, and summary chips,
+    - strengthened muted text colors and panel text clarity without reverting layout compaction.
+  - Test robustness update:
+    - `output/ui_smoke_test.mjs` active-card click switched to `force: true` to avoid intermittent visibility/stability false negatives.
+  - Revalidation completed (sequential; all passing):
+    - `node output/ui_smoke_test.mjs`
+    - `node output/mobile_ui_smoke_test.mjs`
+    - `node output/viewport_fit_test.mjs`
+    - `node output/perspective_layout_test.mjs`
+    - `node output/host_authority_multiplayer_test.mjs`
+    - `node output/server_snapshot_validation_test.mjs`
+
+- Readability follow-up v2 (user still reported hard-to-read text):
+  - Removed page-wide turn-change blur/dim effect:
+    - `styles.css`: `.turn-change-overlay` now transparent with no backdrop blur.
+    - `styles.css`: strengthened overlay pill text contrast/size.
+    - `game.js`: reduced turn-change overlay display duration from 1400ms to 900ms.
+  - Forced high-contrast summary panel text and chips:
+    - solid dark-blue panel backgrounds,
+    - white titles/values, larger chip label/value fonts,
+    - removed summary decorative pseudo overlay.
+  - Increased readability for log/status and card effect/tool attached text:
+    - log content + entries bumped to 14px, darker text color,
+    - energy/supporter status pills stronger contrast,
+    - `.card .card-effect` and `.card-tools-attached` forced larger/darker with `!important`.
+  - Validation re-run (all passing):
+    - `node --check game.js`
+    - `node output/ui_smoke_test.mjs`
+    - `node output/mobile_ui_smoke_test.mjs`
+    - `node output/viewport_fit_test.mjs`
+    - `node output/perspective_layout_test.mjs`
+    - `node output/host_authority_multiplayer_test.mjs`
+    - `node output/server_snapshot_validation_test.mjs`
+
+- Readability follow-up v3 (targeted):
+  - User-reported issues addressed:
+    - Player 2 contrast still too low.
+    - Turn header text (`Room`, `You are Player`, `End Turn`) not clear enough.
+  - Added final overrides in `styles.css` for:
+    - `#player2-info`, `#player2-header-secondary`, `#player2-board` text contrast,
+    - stronger `#player2-board .card-slot` background/border/text contrast,
+    - darker, larger `#in-game-room-code` and `#in-game-player-identity`,
+    - high-contrast `#turn-info #end-turn-btn` (including readable disabled state with full opacity).
+  - Validation re-run (all passing):
+    - `node output/ui_smoke_test.mjs`
+    - `node output/mobile_ui_smoke_test.mjs`
+    - `node output/viewport_fit_test.mjs`
+    - `node output/perspective_layout_test.mjs`
+    - `node output/host_authority_multiplayer_test.mjs`
+    - `node output/server_snapshot_validation_test.mjs`
+
+- Layout correction pass (user report: p2 layout broken + p1 off-screen):
+  - Root cause:
+    - p2 perspective only partially assigned `order`, so un-ordered sections could reorder unexpectedly.
+    - late card-size overrides (`!important`) overrode compact-height mode and made board rows too tall on laptop-height viewports.
+  - Fixes in `styles.css`:
+    - Added full p2 perspective ordering for all main sections:
+      - header -> player1 board -> midline -> setup -> player2 board -> toolbar -> inspector -> hand
+    - Reasserted p2 per-board zone mapping as true swap (no mirror artifacts):
+      - top board (`player1`): bench / active / deck
+      - bottom board (`player2`): deck / active / bench
+    - Slight global card-size reduction for board+hand; restored compact-height overrides.
+    - Added explicit compact-height board sizing guardrails (`150px` each) so both boards remain visible at 100% zoom on laptop-height screens.
+  - Verification:
+    - `node output/viewport_fit_test.mjs` passed (1280x720, 1366x768 no vertical scroll)
+    - `node output/perspective_layout_test.mjs` passed
+    - `node output/ui_smoke_test.mjs` passed
+    - `node output/mobile_ui_smoke_test.mjs` passed
+    - Geometry probe confirms p2 true swap:
+      - top board x-order: bench < active < deck
+      - bottom board x-order: deck < active < bench
+
+- Setup + start-button follow-up:
+  - Opening setup robustness in multiplayer:
+    - `canCurrentClientAct()` now allows local action during setup when local player still needs an opening active.
+    - `shouldPromptOpeningSetupLocally()` now handles `playerNumber` not-yet-resolved by showing setup when either player still pending.
+    - `updateSetupGuidePanel()` now falls back to `[1,2]` when multiplayer player identity is not resolved yet.
+    - `chooseOpeningActive()` now enforces that multiplayer users can only pick for their own player slot (prevents cross-slot accidental actions).
+  - Start-screen CTA button readability:
+    - `Start Game`, `Build Custom Deck`, and `View All Cards` now use a brighter light-blue gradient with stronger contrast and hover state so they clearly look clickable.
+  - Validation re-run (all passing):
+    - `node --check game.js`
+    - `node output/ui_smoke_test.mjs`
+    - `node output/mobile_ui_smoke_test.mjs`
+    - `node output/viewport_fit_test.mjs`
+    - `node output/perspective_layout_test.mjs`
+    - `node output/host_authority_multiplayer_test.mjs`
+    - `node output/server_snapshot_validation_test.mjs`
+
+- Multiplayer start reliability + text-weight follow-up:
+  - Fixed Player 2 opening-active desync root cause:
+    - `chooseOpeningActive()` local-player guard now skips during remote replay (`multiplayer.isApplyingRemote`), so host correctly applies Player 2 setup actions broadcast from guest.
+  - Improved multiplayer startup consistency for guest clients:
+    - both clients now call `initGame(...)` from room config when ready and not already initialized; only host sends `STATE_SNAPSHOT`.
+  - UI text-weight tuning:
+    - reduced thickness/darkness for `#in-game-room-code` and `#in-game-player-identity`,
+    - slightly reduced `End Turn` button font-weight.
+  - Verified with a real 2-client Playwright flow:
+    - Player 2 could choose opening active,
+    - Player 2 active persisted on both guest and host snapshots (`setupPending.p2: false` on both).
+  - Validation:
+    - `node --check game.js`
+    - `node output/ui_smoke_test.mjs`
+    - `node output/mobile_ui_smoke_test.mjs`
+    - `node output/viewport_fit_test.mjs`
+    - `node output/perspective_layout_test.mjs`
+    - `node output/host_authority_multiplayer_test.mjs` (re-run passed)
+    - `node output/server_snapshot_validation_test.mjs`
+
+- Multiplayer Player 2 setup + font-weight tuning follow-up:
+  - Addressed remaining Player 2 setup race:
+    - `sendMultiplayerAction()` now sends explicit `playerNumber` override for `chooseOpeningActive` using the action args (`args[1]`) when present.
+    - This prevents early setup interactions from being dropped due transient local player identity race.
+  - Reduced heavy typography slightly (without lowering readability):
+    - lowered font-weight for turn header (`Player X's Turn`), zone labels, card names/HP, summary labels/values, setup title, room code, identity badge, and End Turn button.
+  - Reproduced with real 2-client multiplayer flow:
+    - before pick: `localPlayer=2`, `setupPending.p2=true`, choices visible.
+    - after pick on guest: `setupPending.p2=false`, `players[1].active=true` on both guest and host snapshots.
+  - Validation:
+    - `node --check game.js`
+    - `node output/ui_smoke_test.mjs`
+    - `node output/mobile_ui_smoke_test.mjs`
+    - `node output/viewport_fit_test.mjs`
+    - `node output/perspective_layout_test.mjs`
+    - `node output/host_authority_multiplayer_test.mjs`
+    - `node output/server_snapshot_validation_test.mjs`
+
+- Selection UX + Player 2 startup whitespace follow-up:
+  - Selection/deselection clarity:
+    - Added explicit `clearSelectedCard()` path and integrated into toolbar selection summary (`Clear` pill).
+    - `selectCard()` now returns early when clicking an already selected card (deselects and closes action modal instead of reopening actions).
+    - Global modal close handlers (`.close-modal` and outside-click) now call `closeModal(modal.id)` so close-X uses the full cleanup path.
+    - `closeModal()` now clears selected card for `action-modal` and `card-modal`, which fixes “still selected after X out”.
+  - Player 2 startup layout parity (eliminate giant empty space):
+    - Added final board no-stretch rule:
+      - `#main-game-area .player-board` fixed to `height: clamp(150px, 20vh, 210px)` and `flex: 0 0 auto`.
+      - board sections forced to `height: 100%` with centered alignment.
+    - Verified at large viewport (`1536x1001`) in live 2-client run:
+      - both boards render around `200px` height (not ~450px stretched),
+      - setup choices are visible without zooming out.
+  - Validation:
+    - `node --check game.js`
+    - `node output/ui_smoke_test.mjs`
+    - `node output/mobile_ui_smoke_test.mjs`
+    - `node output/viewport_fit_test.mjs`
+    - `node output/perspective_layout_test.mjs`
+    - `node output/host_authority_multiplayer_test.mjs`
+    - `node output/server_snapshot_validation_test.mjs`
+
+- Player 2 UI parity follow-up (final grid-row fix):
+  - Root cause of remaining “broken” p2 layout:
+    - in p2 perspective, `#p1-midline-panel`/`#p2-midline-panel` were reassigned to columns but not explicit rows; CSS grid auto-placement could place one element onto row 2, making `#midline-band` very tall and pushing setup/board content down.
+  - Fix:
+    - pinned all p2 midline elements to row 1:
+      - `#p1-midline-panel { grid-column:1; grid-row:1 }`
+      - `#stadium-zone { grid-column:2; grid-row:1 }`
+      - `#p2-midline-panel { grid-column:3; grid-row:1 }`
+  - Result:
+    - p2 stack now matches p1 structure exactly with swapped players:
+      - header -> top board -> midline -> setup -> bottom board -> toolbar -> hand
+    - `#midline-band` height normalized from ~315px back to ~122px in p2.
+  - Reverified in live 2-client multiplayer run:
+    - pre-pick on p2: setup choices visible (`choices=2`)
+    - post-pick on p2: `setupPending.p2=false`, active set
+    - selection clears via modal close (`Selected ...` -> `No card selected`)
+  - Regression validation all passing:
+    - `node output/ui_smoke_test.mjs`
+    - `node output/mobile_ui_smoke_test.mjs`
+    - `node output/viewport_fit_test.mjs`
+    - `node output/perspective_layout_test.mjs`
+    - `node output/host_authority_multiplayer_test.mjs`
+    - `node output/server_snapshot_validation_test.mjs`
+- UI layout redesign follow-up (2026-02-27, sketch-based placement request):
+  - Reworked in-game spatial hierarchy to reduce redundant header content and prioritize board space.
+  - Header now focuses on turn context/actions only (`current turn`, room/player identity, energy/supporter turn counters, `End Turn`).
+  - Reflowed each player board so zones read as requested:
+    - left: `Deck + Discard`
+    - right/top: `Active`
+    - right/bottom: `Bench`
+  - Kept stadium as a compact centered midline element between boards.
+  - Moved opening setup guide later in flow order and compressed its footprint to avoid pushing battlefield out of view.
+  - Tightened board/slot/tool/hand sizing so both player rows + toolbar + hand stay visible in standard desktop view.
+- Validation rerun after redesign (all passing):
+  - `node output/ui_smoke_test.mjs`
+  - `node output/viewport_fit_test.mjs`
+  - `node output/mobile_ui_smoke_test.mjs`
+  - Skill Playwright client capture (start -> game):
+    - `output/web-game-layout-refresh/shot-0.png`
+    - `output/web-game-layout-refresh/state-0.json`
+- UI/data follow-up (2026-02-27, user request: stadium hall clarity + deck-builder descriptions + full layout refactor):
+  - Stadium classification clarity:
+    - Added `isConcertHall` metadata to all stadium cards in `cards.js`.
+    - Updated all stadium `description` fields to include explicit venue type prefix:
+      - `Venue Type: Concert Hall` or `Venue Type: Not a Concert Hall`.
+  - Deck builder card-selection improvements:
+    - Stadium cards now show `STADIUM • Concert Hall` / `STADIUM • Not a Concert Hall` labels in the card grid.
+    - Stadium entries include explicit `Venue Type` line in their visible effect text.
+    - Character cards now show a description line in the deck-builder pool:
+      - Uses `card.description` when available.
+      - Falls back to ability description or first move effect when missing.
+      - Long text is truncated in-card and exposed on hover via tooltip title.
+    - Updated deck-builder pool search to index full card text (`data-search`) instead of only first visible effect line.
+  - Full in-game layout refactor:
+    - Removed aux summary rendering (`Player X Active / HP / Energy / Status`) by making summary panel renderers no-op and clearing those containers.
+    - Hid midline summary side panels in CSS.
+    - Refactored battlefield layout with explicit viewport-fit grid rows to keep toolbar + hand visible.
+    - Header redesigned toward sketch:
+      - centered large turn title (`Your Turn` when local/current player),
+      - compact row with room / energy / supporter + end-turn button,
+      - identity moved to secondary line.
+    - Rebalanced board geometry:
+      - left deck/discard cluster,
+      - right active + bench,
+      - compact centered stadium band,
+      - compact toolbar then hand scroller.
+    - Prevented board-card overflow from intercepting toolbar clicks by constraining in-board card dimensions and z-index layering.
+- Test updates:
+  - `output/ui_smoke_test.mjs` updated to assert midline summary panels are hidden (instead of expecting 6 stat chips).
+  - `output/perspective_layout_test.mjs` updated to match refactored board layout assumptions and no midline summary panel dependency.
+- Validation rerun (all passing):
+  - `node --check game.js`
+  - `node --check cards.js`
+  - `node output/ui_smoke_test.mjs`
+  - `node output/viewport_fit_test.mjs`
+  - `node output/mobile_ui_smoke_test.mjs`
+  - `node output/perspective_layout_test.mjs`
+- Fresh visual captures:
+  - `output/layout-refactor-game.png`
+  - `output/deck-builder-stadium-labels.png`
+  - `output/deck-builder-character-descriptions.png`
+- Canonical layout stabilization pass (2026-02-27, user report: strange mixed rendering + right-side blank next to game log):
+  - Added a final "Canonical Layout" section at end of `styles.css` that force-defines game-shell proportions and placement in one block.
+  - Ensured full browser-fit geometry:
+    - `html/body` and `#game-container` now hard-bound to viewport width/height (`100vw/100vh`).
+    - main area + log are explicit grid columns with no leftover blank strip to the right of log.
+  - Re-sequenced main area rows deterministically:
+    - header, setup, top board, stadium band, bottom board, toolbar, hand.
+    - removes mixed ordering behavior from old accumulated rules.
+  - Header cleanup:
+    - large turn title, compact room/identity/energy/supporter + end turn arrangement.
+  - Board stability:
+    - fixed board-zone geometry, constrained in-board card sizes, and prevented slot-card overflow from causing overlapping hitboxes.
+  - Kept selection inspector but compressed; preserved behavior for tests.
+- Additional validation after canonical pass (all passing):
+  - `node output/ui_smoke_test.mjs`
+  - `node output/viewport_fit_test.mjs`
+  - `node output/mobile_ui_smoke_test.mjs`
+  - `node output/perspective_layout_test.mjs`
+- Fresh screenshot at user-problem scale:
+  - `output/layout-canonical-1618x1022.png`
+- Cleanup + overlap pass (2026-02-27, user feedback after canonical screenshot):
+  - Removed the large redundant pre-canonical layout block from `styles.css` (old compaction/refactor chunk) so only one active layout system remains.
+  - Tuned canonical layout to remove overlap/cutoff artifacts seen in screenshot:
+    - resized/reflowed turn header grid to prevent room/energy/supporter/end-turn collisions,
+    - centered `#turn-info` box with stable width,
+    - increased setup panel room in setup phase using `body.phase-setup` class,
+    - reduced board row pressure in setup mode while preserving bottom toolbar/hand visibility,
+    - kept log column fixed to browser edge with explicit viewport-fit grid.
+  - Re-added deck-builder/card-browser type label wrapping + description style rules after cleanup removal.
+  - Added `body.phase-setup` toggle in `updateUI()`.
+- Validation after cleanup pass (all passing):
+  - `node output/ui_smoke_test.mjs`
+  - `node output/viewport_fit_test.mjs`
+  - `node output/mobile_ui_smoke_test.mjs`
+  - `node output/perspective_layout_test.mjs`
+- Fresh visual references:
+  - `output/layout-cleanup-setup-1618x1022-v2.png`
+  - `output/layout-cleanup-main-1618x1022.png`
+- Final overlap/whitespace pass (2026-02-27, user request: much larger slots, no overlap/cutoff in main phase):
+  - Canonical layout upgraded to responsive slot-size variables:
+    - `--board-slot-w/h` and `--hand-slot-w/h` using `clamp(...)` for larger cards that still fit smaller heights.
+  - Reworked board composition to reduce whitespace and increase card prominence:
+    - per-board row now `deck/discard | active | bench` in one horizontal band (instead of sparse stacked right column).
+  - Reduced overlap risk in header:
+    - resized turn header grid, adjusted title/button sizing, and tightened spacing to avoid metadata/button collisions.
+  - Setup-phase fit improvements:
+    - `body.phase-setup` row template keeps setup chooser fully readable while preserving bottom toolbar/hand.
+  - Confirmed no visual overlap/cutoff in fresh 1618x1022 captures for both setup and main phases.
+- Validation rerun (all passing):
+  - `node output/ui_smoke_test.mjs`
+  - `node output/viewport_fit_test.mjs`
+  - `node output/mobile_ui_smoke_test.mjs`
+  - `node output/perspective_layout_test.mjs`
+- Final screenshots:
+  - `output/layout-final-setup-1618x1022.png`
+  - `output/layout-final-main-1618x1022.png`
+- Follow-up fixes (2026-02-27, user QA pass):
+  - Card text overflow containment:
+    - Added canonical overflow guards for `.card` content (name, hp, effect, moves, tools) using ellipsis/line-clamp behavior.
+    - Disabled in-game card hover transform lift to avoid clipping against panel boundaries.
+  - Opening setup parity with Pokemon-style optional bench:
+    - Added setup bench selection toggles for both players (`toggleOpeningBench`).
+    - Added setup confirmation step (`setOpeningReady`) so active + optional bench can be chosen before main phase starts.
+    - Setup now completes only when both players have active + confirmed ready.
+    - Updated setup guide UI text and controls to show Active/Bench choices and confirm buttons.
+  - Item-click extra box cleanup:
+    - Hid selection-inspector panel in canonical layout to remove the extra layout box when selecting/inspecting items.
+  - Player 2 perspective fixes:
+    - Added canonical P2 row swap in layout (`player1-board` top, `player2-board` bottom when P2 perspective).
+    - Added board owner labels (`You`/`Opponent`) and refresh logic.
+    - Added canonical perspective zone-area overrides to prevent stale old rules from moving cards into non-existent UI slots.
+  - Turn label language:
+    - Turn header now shows `Opponent's Turn` when not your turn.
+  - Header alignment polish:
+    - tightened top-box alignment and button/text placement.
+- Test updates:
+  - Updated smoke tests for setup-confirm workflow:
+    - `output/ui_smoke_test.mjs`
+    - `output/mobile_ui_smoke_test.mjs`
+    - `output/viewport_fit_test.mjs`
+    - `output/perspective_layout_test.mjs`
+  - Updated smoke expectations for hidden selection inspector panel.
+- Validation rerun (all passing):
+  - `node --check game.js`
+  - `node output/ui_smoke_test.mjs`
+  - `node output/viewport_fit_test.mjs`
+  - `node output/mobile_ui_smoke_test.mjs`
+  - `node output/perspective_layout_test.mjs`
+- New screenshots:
+  - `output/layout-pass2-setup-1618x1022.png`
+  - `output/layout-pass2-main-1618x1022.png`
+  - `output/layout-pass2-item-click-1618x1022.png`
+  - `output/layout-pass2-p2-perspective-clean-1618x1022.png`
+- Follow-up polish + setup sync fixes (2026-02-28, latest QA round):
+  - Multiplayer setup completion sync:
+    - Server now allows `setOpeningReady` as off-turn-legal opening setup action, matching `chooseOpeningActive` flow.
+    - File: `server/index.js`.
+  - Opening setup now rendered as a true modal overlay (no layout row impact):
+    - `#setup-guide` converted to fixed, blurred backdrop overlay with centered setup card.
+    - Hidden state fully removes overlay (`display: none`) so board spacing stays symmetric.
+    - Eliminates inline setup panel pushing/cutting board sections.
+    - File: `styles.css` canonical tail overrides.
+  - Board row normalization + P2 perspective correction:
+    - Main grid reduced to 6 stable rows (header, opponent board, stadium band, your board, toolbar, hand).
+    - P2 perspective remapped to same geometry with top/bottom switched (`player1-board` row 2, `player2-board` row 4 for P2 view).
+    - File: `styles.css`.
+  - Discard pile permissions:
+    - Only local player's discard pile is clickable/viewable.
+    - Opponent discard click is ignored and visually de-emphasized.
+    - Added runtime class/title/aria updates each UI render.
+    - Files: `game.js`, `styles.css`.
+  - Readability fixes:
+    - Energy/supporter turn counters (`0/1`, `Yes/No`) now high-contrast pill badges.
+    - Deck pile count color now matches deck label color.
+    - Character HP text no longer ellipsizes; 3-digit HP fits with smaller font.
+    - Files: `styles.css`.
+- Validation rerun (all passing after patch):
+  - `node output/ui_smoke_test.mjs`
+  - `node output/viewport_fit_test.mjs`
+  - `node output/mobile_ui_smoke_test.mjs`
+  - `node output/perspective_layout_test.mjs`
+- Fresh generated artifacts:
+  - `output/ui-smoke-start.png`
+  - `output/ui-smoke-game.png`
+  - `output/viewport-fit-1280x720.png`
+  - `output/viewport-fit-1366x768.png`
+  - `output/mobile-ui-start.png`
+  - `output/mobile-ui-game.png`
+- Multiplayer modal safety + playtest energy update (2026-02-28):
+  - Playtest mode now allows unlimited manual energy attachments per turn to any character.
+    - Added shared helpers:
+      - `getEnergyAttachLimit(playerNum)` (`Infinity` in playtest mode)
+      - `formatEnergyAttachStatus(playerNum)` (`0/∞` formatting)
+    - Applied across toolbar/button disable logic, attach-energy picker, action modal labels, and header counter.
+    - `attachEnergy(...)` now bypasses turn-limit and Fermentation per-turn restrictions in playtest mode while preserving other rule checks.
+  - Opponent-prompt pause visibility/robustness:
+    - Remote prompt lock now records `pendingRemotePromptAction` for clearer waiting text.
+    - Overlay message now includes prompt source (e.g., waiting to resolve specific opponent choice).
+  - Crash-hardening for modal/action handlers:
+    - Added global `executeActionSafely(name, fn, args, source)` wrapper.
+    - Local exported actions now execute through safe wrapper to prevent uncaught runtime crashes.
+    - Remote `ACTION_BROADCAST` replay now uses safe wrapper; on remote prompt failures, lock is cleared safely and turn progression can resume.
+    - `showOpponentDiscardChoice(...)` now stages temp selection state before multiplayer gating.
+    - `confirmOpponentDiscard(...)` now null-safe guards selection arrays/opponent and avoids multiplayer `alert` hard-stops.
+    - `renderGameToText().setupPending` aligned with active-only opening setup completion semantics.
+- Test maintenance:
+  - Updated existing smoke scripts to support setup flow where Confirm buttons may be absent (active-only setup completion).
+  - Added `output/modal_item_regression_test.mjs`:
+    - validates playtest unlimited energy attachment behavior,
+    - runs a broad confirm/toggle/choose/select/cancel handler safety sweep,
+    - fails on uncaught browser `pageerror`.
+  - Added `output/multiplayer_prompt_pause_test.mjs`:
+    - validates opponent-choice modal pauses acting player's flow (waiting overlay + disabled end-turn),
+    - validates lock clears after opponent confirms.
+- Validation rerun (all passing):
+  - `node --check game.js`
+  - `node --check server/index.js`
+  - `node output/modal_item_regression_test.mjs`
+  - `node output/multiplayer_prompt_pause_test.mjs`
+  - `node output/ui_smoke_test.mjs`
+  - `node output/viewport_fit_test.mjs`
+  - `node output/mobile_ui_smoke_test.mjs`
+  - `node output/perspective_layout_test.mjs`

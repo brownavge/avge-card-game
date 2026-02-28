@@ -908,62 +908,72 @@ const STADIUMS = {
     RILEY_HALL: {
         name: 'Riley Hall',
         type: 'stadium',
+        isConcertHall: true,
         effect: 'If this Stadium is active at the beginning of your turn, each of your characters takes 10 nonlethal damage for each empty bench slot you have.',
-        description: 'Attendance Policy: If this Stadium is active at the beginning of your turn, each of your characters takes 10 nonlethal damage for each empty bench slot you have.'
+        description: 'Venue Type: Concert Hall. Attendance Policy: If this Stadium is active at the beginning of your turn, each of your characters takes 10 nonlethal damage for each empty bench slot you have.'
     },
     ALUMNAE_HALL: {
         name: 'Alumnae Hall',
         type: 'stadium',
+        isConcertHall: true,
         effect: 'Upon this Stadium being played, both players discard all items. While active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.',
-        description: 'Return by 4pm: Upon this Stadium being played, both players discard all items. Intense Reverb: While active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.'
+        description: 'Venue Type: Concert Hall. Return by 4pm: Upon this Stadium being played, both players discard all items. Intense Reverb: While active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.'
     },
     MAIN_HALL: {
         name: 'Main Hall',
         type: 'stadium',
+        isConcertHall: true,
         effect: 'Each player may only play up to three cards per turn, starting the turn after this is played.',
-        description: 'Small Ensemble Limit: Each player may only play up to three cards per turn, starting the turn after this is played.'
+        description: 'Venue Type: Concert Hall. Small Ensemble Limit: Each player may only play up to three cards per turn, starting the turn after this is played.'
     },
     SALOMON_DECI: {
         name: 'Salomon DECI',
         type: 'stadium',
+        isConcertHall: true,
         effect: 'For every guitar, piano, choir, or percussion attack, roll a d6. On 3–6: −30 damage.',
-        description: 'Electric Acoustics: For every guitar, piano, choir or percussion attack, roll a d6. On 3–6: −30 damage.'
+        description: 'Venue Type: Concert Hall. Electric Acoustics: For every guitar, piano, choir or percussion attack, roll a d6. On 3–6: −30 damage.'
     },
     RED_ROOM: {
         name: 'Red Room',
         type: 'stadium',
+        isConcertHall: false,
         effect: 'Strings, woodwinds, and brass do −10 damage; choir, guitars, percussion, and pianos do +10 damage.',
-        description: 'Amp Diff: Strings, woodwinds and brass do −10 damage; choir, guitars, percussion, pianos do +10 damage.'
+        description: 'Venue Type: Not a Concert Hall. Amp Diff: Strings, woodwinds and brass do −10 damage; choir, guitars, percussion, pianos do +10 damage.'
     },
     LINDEMANN: {
         name: 'Lindemann Big Practice Room',
         type: 'stadium',
+        isConcertHall: false,
         effect: 'If all of your benched characters share a type with your active character, your attacks take 1 less energy.',
-        description: 'Sectionals: If all of your benched characters share a type with your active character, your attacks take 1 less energy.'
+        description: 'Venue Type: Not a Concert Hall. Sectionals: If all of your benched characters share a type with your active character, your attacks take 1 less energy.'
     },
     PETTERUTI: {
         name: 'Petteruti Lounge',
         type: 'stadium',
+        isConcertHall: false,
         effect: 'Maids do +10 damage and have no retreat cost. Matcha heals +10 additional health.',
-        description: 'Matcha Maid Cafe: Maids do +10 damage and have no retreat cost. Matcha heals +10 additional health.'
+        description: 'Venue Type: Not a Concert Hall. Matcha Maid Cafe: Maids do +10 damage and have no retreat cost. Matcha heals +10 additional health.'
     },
     STEINERT_PRACTICE: {
         name: 'Steinert Practice Room',
         type: 'stadium',
+        isConcertHall: false,
         effect: 'Each player may not have more than 2 benched characters. If a player has 3, they discard one (the player who played this stadium discards first). Each attack costs 1 additional energy.',
-        description: 'Practice Prison: Each player may not have more than 2 benched characters. If a player has 3, they discard one (the player who played this stadium discards first). 15 Minute Walk: Each attack costs 1 additional energy.'
+        description: 'Venue Type: Not a Concert Hall. Practice Prison: Each player may not have more than 2 benched characters. If a player has 3, they discard one (the player who played this stadium discards first). 15 Minute Walk: Each attack costs 1 additional energy.'
     },
     STEINERT_BASEMENT: {
         name: 'Steinert Basement Studio',
         type: 'stadium',
+        isConcertHall: false,
         effect: 'If you have exactly two character cards in play at the start of your turn, draw two cards instead of one. Each attack costs 1 additional energy.',
-        description: 'Duo Queue: If you have exactly two character cards in play at the start of your turn, draw two cards instead of one. 15 Minute Walk: Each attack costs 1 additional energy.'
+        description: 'Venue Type: Not a Concert Hall. Duo Queue: If you have exactly two character cards in play at the start of your turn, draw two cards instead of one. 15 Minute Walk: Each attack costs 1 additional energy.'
     },
     FRIEDMAN: {
         name: 'Friedman Hall',
         type: 'stadium',
+        isConcertHall: false,
         effect: 'Draw two cards per turn. Your opponent chooses one for you to keep; shuffle the other back into your deck.',
-        description: 'Democratic Process: Draw two cards per turn. Your opponent chooses one for you to keep; shuffle the other back into your deck.'
+        description: 'Venue Type: Not a Concert Hall. Democratic Process: Draw two cards per turn. Your opponent chooses one for you to keep; shuffle the other back into your deck.'
     }
 };
 

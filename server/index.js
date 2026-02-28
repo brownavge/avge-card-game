@@ -27,6 +27,43 @@ const server = app.listen(port, () => {
 
 const wss = new WebSocketServer({ server });
 
+function isPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function validateCardArray(arr, maxLen = 80) {
+  if (!Array.isArray(arr) || arr.length > maxLen) return false;
+  return arr.every((card) => !card || isPlainObject(card));
+}
+
+function validateBenchArray(arr) {
+  if (!Array.isArray(arr) || arr.length !== 3) return false;
+  return arr.every((card) => card === null || isPlainObject(card));
+}
+
+function isPlausibleStateSnapshot(snapshot) {
+  if (!isPlainObject(snapshot)) return false;
+  if (![1, 2].includes(Number(snapshot.currentPlayer))) return false;
+  if (!Number.isInteger(snapshot.turn) || snapshot.turn < 1 || snapshot.turn > 5000) return false;
+  if (typeof snapshot.randomState !== 'undefined' && !Number.isFinite(Number(snapshot.randomState))) return false;
+  if (!isPlainObject(snapshot.players)) return false;
+
+  for (const playerNum of [1, 2]) {
+    const player = snapshot.players[playerNum];
+    if (!isPlainObject(player)) return false;
+    if (!validateCardArray(player.hand, 80)) return false;
+    if (!validateCardArray(player.deck, 120)) return false;
+    if (!validateCardArray(player.discard, 200)) return false;
+    if (!validateBenchArray(player.bench)) return false;
+    if (!(player.active === null || isPlainObject(player.active))) return false;
+    if (!Number.isInteger(Number(player.koCount)) || Number(player.koCount) < 0 || Number(player.koCount) > 10) return false;
+  }
+
+  if (!(snapshot.stadium === null || isPlainObject(snapshot.stadium))) return false;
+  if (snapshot.log && !Array.isArray(snapshot.log)) return false;
+  return true;
+}
+
 function normalizeRequestedRoomId(roomId) {
   if (!roomId) return null;
   const cleaned = String(roomId).trim().replace(/\D/g, '');
@@ -42,6 +79,12 @@ wss.on('connection', (ws) => {
   ws.lastClientSeq = 0;
 
   ws.on('message', (raw) => {
+    const rawSize = typeof raw === 'string' ? raw.length : (raw?.length || 0);
+    if (rawSize > 1_000_000) {
+      ws.send(JSON.stringify({ type: SERVER_EVENTS.ERROR, message: 'Message too large' }));
+      return;
+    }
+
     let msg;
     try {
       msg = JSON.parse(raw.toString());
@@ -232,15 +275,17 @@ wss.on('connection', (ws) => {
           'chooseFriedmanCard',
           'shuffleBenchIntoDeck',
           'executeSteinertPracticeDiscard',
+          'STATE_SNAPSHOT',
           'executeGachaGaming',
           'executeGachaGamingStep',
           'finalizeGachaGaming'
         ]);
         const modalInteractionPrefixes = ['show', 'toggle', 'confirm', 'cancel', 'select'];
         const prefixAllowed = modalInteractionPrefixes.some((prefix) => actionName.startsWith(prefix));
-        const canPlaceInitialActive = false;
+        const canPlaceInitialActive = actionName === 'chooseOpeningActive';
+        const canConfirmInitialSetup = actionName === 'setOpeningReady';
         if (effectiveCurrentPlayer && action.playerNumber) {
-          const isOffTurnAllowed = offTurnAllowed.has(actionName) || prefixAllowed || canPlaceInitialActive;
+          const isOffTurnAllowed = offTurnAllowed.has(actionName) || prefixAllowed || canPlaceInitialActive || canConfirmInitialSetup;
           if (!isEndTurnAction && !isOffTurnAllowed && action.playerNumber !== effectiveCurrentPlayer) {
             ws.send(JSON.stringify({ type: SERVER_EVENTS.ACTION_REJECTED, reason: 'Not your turn.' }));
             return;
@@ -250,14 +295,24 @@ wss.on('connection', (ws) => {
 
       const actionName = action && action.type === 'CALL' && action.payload ? action.payload.name : null;
       const isUiOnlyShowAction = typeof actionName === 'string' && actionName.startsWith('show');
+      let stateUpdated = false;
 
       if (!isUiOnlyShowAction && action.payload && action.payload.state) {
+        if (Number(ws.playerNumber) !== 1) {
+          ws.send(JSON.stringify({ type: SERVER_EVENTS.ACTION_REJECTED, reason: 'Only host may sync state.' }));
+          return;
+        }
+        if (!isPlausibleStateSnapshot(action.payload.state)) {
+          ws.send(JSON.stringify({ type: SERVER_EVENTS.ACTION_REJECTED, reason: 'Invalid state snapshot.' }));
+          return;
+        }
         try {
           room.state = applyAction(room.state, {
             type: 'STATE_SNAPSHOT',
             payload: { state: action.payload.state }
           });
           room.hasSyncedState = true;
+          stateUpdated = true;
         } catch (error) {
           ws.send(JSON.stringify({ type: SERVER_EVENTS.ACTION_REJECTED, reason: error.message }));
           return;
@@ -283,7 +338,7 @@ wss.on('connection', (ws) => {
         playerNumber: ws.playerNumber
       }, null);
 
-      if (!isUiOnlyShowAction) {
+      if (!isUiOnlyShowAction && stateUpdated) {
         broadcast(room, {
           type: SERVER_EVENTS.STATE_UPDATE,
           state: room.state,
