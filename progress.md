@@ -563,3 +563,75 @@ Original prompt: Can you scan through this web game for possible issues and bugs
   - `node output/viewport_fit_test.mjs`
   - `node output/mobile_ui_smoke_test.mjs`
   - `node output/perspective_layout_test.mjs`
+
+2026-02-28 (item sync follow-up)
+- Investigated multiplayer desync report for `Please select exactly 2 cards to discard`.
+- Root-cause fix in `game.js`:
+  - `toggleOpponentDiscardCard(cardId)` no longer returns early when modal DOM is absent.
+  - Selection state now updates even on remote replay clients that do not render the chooser modal, preventing confirm-step mismatch.
+- Setup resiliency fix in `game.js`:
+  - `chooseOpeningActive` now falls back to the first character in hand if the requested `cardId` is stale/unavailable (prevents setup deadlock from stale id after remote state refresh).
+- Added multiplayer regression coverage script:
+  - `output/multiplayer_item_sync_test.mjs` to exercise Printed Score / Annotated Score both turns and a direct 2-card `showOpponentDiscardChoice` sync path.
+- Multiplayer test harness cleanup:
+  - `output/multiplayer_prompt_pause_test.mjs` switched to isolated browser contexts + local-player wait helper + more robust setup attempts.
+- Validation run results:
+  - `node --check game.js` ✅
+  - `node --check output/multiplayer_item_sync_test.mjs` ✅
+  - `node --check output/multiplayer_prompt_pause_test.mjs` ✅
+  - `node output/ui_smoke_test.mjs` ✅
+  - `node output/modal_item_regression_test.mjs` ✅
+  - `node output/multiplayer_prompt_pause_test.mjs` ❌ (opening setup confirmation still intermittently fails in automation path)
+  - `node output/multiplayer_item_sync_test.mjs` ❌ (same setup-phase readiness issue prevents reaching main phase in some runs)
+- Next follow-up suggested:
+  - Stabilize automated multiplayer setup bootstrap independently of setup UI clicks (or add deterministic setup API helper) so comprehensive item sync regression can run to completion every run.
+- Deck builder restriction update (2026-02-28):
+  - Added per-card copy limits for custom deck builder flow:
+    - `character/supporter/stadium`: max 1 copy each
+    - `item/tool`: max 2 copies each
+  - Enforced in add-card path (`addCardToDeck`), save path (`saveDeck`), and import path (`processDeckImport`).
+  - Save button now remains disabled when deck violates copy limits.
+  - Loading an older saved deck that violates new limits now shows a warning so user can fix before re-saving.
+  - Validation: `node --check game.js` passed.
+- Multiplayer setup sync fix (2026-02-28, follow-up from user report):
+  - User-reported console clue: `Action rejected: Only host may sync state.` on Player 2 during opening setup.
+  - Root fix:
+    - `game.js` `sendMultiplayerAction(...)` modal-workflow prefixes now include `set` so `setOpeningReady` is treated as stateful modal workflow.
+    - `server/index.js` modal prefix checks also include `set` for both off-turn allowance and non-host modal snapshot acceptance.
+  - Additional race fix kept:
+    - host no longer sends a redundant resync snapshot when replaying a remote action that already carried a snapshot (`incomingHasSnapshot` guard in `ACTION_BROADCAST` handling).
+- Added baseline multiplayer integration test:
+  - `output/basic_multiplayer_game_test.mjs`
+  - Verifies: two isolated clients join same room, both complete opening setup, both reach main phase, and at least one full turn handoff (`end turn`) syncs on both clients.
+- Revalidation (with freshly restarted server on :3001):
+  - `node output/basic_multiplayer_game_test.mjs` ✅
+  - `node output/multiplayer_prompt_pause_test.mjs` ✅
+- Supporter-per-turn fix (2026-02-28):
+  - Root bug fixed for modal supporter flow:
+    - `confirmOpponentDiscard()` now marks `game.supporterPlayedThisTurn = true` when resolving/discarding Michelle.
+  - Enforced supporter limit consistently (including playtest mode):
+    - `playSupporter()` now blocks if `supporterPlayedThisTurn` regardless of playtest mode.
+    - Supporter action button visibility and keyboard quick-play checks now only allow if `!supporterPlayedThisTurn`.
+  - Added regression test:
+    - `output/supporter_limit_regression_test.mjs`
+    - Verifies Michelle flow sets supporter status to Yes and blocks a second supporter in the same turn.
+  - Validation:
+    - `node output/supporter_limit_regression_test.mjs` ✅
+    - `node output/ui_smoke_test.mjs` ✅
+- Comprehensive multiplayer sync/error follow-up (2026-02-28):
+  - Added high-coverage multiplayer interaction stress suite:
+    - `output/multiplayer_sync_stress_test.mjs`
+    - Runs two real clients, completes setup, executes multiple high-risk item/modal interactions across both turns, auto-resolves prompts on either client, asserts state sync after each interaction, and fails on page/console errors.
+    - Covered interactions in stress suite: `Printed Score`, `Annotated Score`, `Dress Rehearsal Roster`, `Concert Program`, `Cast Reserve`.
+  - Fixed Cast Reserve multiplayer sync defects uncovered by stress testing:
+    - `showCastReserveSelectionModal`: initialize `tempSelections.castReserveSelected` before modal gating so remote replay can track selection toggles.
+    - `showCastReserveOpponentChoice`: now serializes and restores owner + selected card payload for remote opponent-choice flow.
+    - `confirmCastReserveOpponentChoice`: added guard for missing selection state to fail gracefully instead of crashing.
+  - Validation run (sequential, all passing):
+    - `node output/multiplayer_sync_stress_test.mjs` ✅
+    - `node output/basic_multiplayer_game_test.mjs` ✅
+    - `node output/multiplayer_prompt_pause_test.mjs` ✅
+    - `node output/supporter_limit_regression_test.mjs` ✅
+    - `node output/ui_smoke_test.mjs` ✅
+  - Note:
+    - Existing `output/host_authority_multiplayer_test.mjs` timed out during this pass (appears harness-level timing mismatch), while gameplay-level multiplayer integration tests above passed.

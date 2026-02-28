@@ -1,4 +1,4 @@
-# Musician Card Game - Complete Card Reference
+# AVGE TCG - Complete Card Reference
 
 ## Characters (23 Total)
 

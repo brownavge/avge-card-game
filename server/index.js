@@ -280,7 +280,7 @@ wss.on('connection', (ws) => {
           'executeGachaGamingStep',
           'finalizeGachaGaming'
         ]);
-        const modalInteractionPrefixes = ['show', 'toggle', 'confirm', 'cancel', 'select'];
+        const modalInteractionPrefixes = ['show', 'toggle', 'confirm', 'cancel', 'select', 'set'];
         const prefixAllowed = modalInteractionPrefixes.some((prefix) => actionName.startsWith(prefix));
         const canPlaceInitialActive = actionName === 'chooseOpeningActive';
         const canConfirmInitialSetup = actionName === 'setOpeningReady';
@@ -295,10 +295,12 @@ wss.on('connection', (ws) => {
 
       const actionName = action && action.type === 'CALL' && action.payload ? action.payload.name : null;
       const isUiOnlyShowAction = typeof actionName === 'string' && actionName.startsWith('show');
+      const modalWorkflowPrefixes = ['show', 'toggle', 'confirm', 'cancel', 'select', 'choose', 'execute', 'place', 'add', 'move', 'finalize', 'complete', 'discard', 'set'];
+      const isModalWorkflowAction = typeof actionName === 'string' && modalWorkflowPrefixes.some((prefix) => actionName.startsWith(prefix));
       let stateUpdated = false;
 
       if (!isUiOnlyShowAction && action.payload && action.payload.state) {
-        if (Number(ws.playerNumber) !== 1) {
+        if (Number(ws.playerNumber) !== 1 && !isModalWorkflowAction) {
           ws.send(JSON.stringify({ type: SERVER_EVENTS.ACTION_REJECTED, reason: 'Only host may sync state.' }));
           return;
         }

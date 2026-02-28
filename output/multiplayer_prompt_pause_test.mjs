@@ -17,20 +17,53 @@ async function waitForMainPhase(page, timeoutMs = 45000) {
   throw new Error('Timed out waiting for main phase.');
 }
 
-async function chooseActiveAndConfirm(page) {
-  await page.locator('#setup-guide .setup-guide__choice', { hasText: 'Active:' }).first().click();
-  await page.waitForTimeout(180);
-  const confirmBtn = page.locator('#setup-guide .setup-guide__choice', { hasText: /Confirm Setup|Ready/ }).first();
-  if (await confirmBtn.count()) {
-    await confirmBtn.click();
+async function waitForLocalPlayer(page, timeoutMs = 20000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const localPlayer = await page.evaluate(() => {
+      if (!window.render_game_to_text) return null;
+      return Number(JSON.parse(window.render_game_to_text()).localPlayer);
+    });
+    if (localPlayer === 1 || localPlayer === 2) return localPlayer;
+    await page.waitForTimeout(150);
   }
+  throw new Error('Timed out waiting for multiplayer local player assignment.');
+}
+
+async function chooseActiveAndConfirm(page) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const state = await page.evaluate(() => JSON.parse(window.render_game_to_text()));
+    const localPlayer = Number(state.localPlayer);
+    const pendingKey = localPlayer === 2 ? 'p2' : 'p1';
+    if (state.setupPending && state.setupPending[pendingKey] === false) return;
+
+    const activeBtn = page.locator('#setup-guide .setup-guide__choice', { hasText: 'Active:' }).first();
+    if (await activeBtn.count()) {
+      await activeBtn.click();
+      await page.waitForTimeout(160);
+    }
+    const confirmBtn = page.locator('#setup-guide .setup-guide__choice', { hasText: /Confirm Setup|Ready/ }).first();
+    if (await confirmBtn.count()) {
+      await confirmBtn.click();
+      await page.waitForTimeout(120);
+    }
+    await page.evaluate(() => {
+      const s = JSON.parse(window.render_game_to_text());
+      const localPlayer = Number(s.localPlayer);
+      if (localPlayer === 1 || localPlayer === 2) window.setOpeningReady(localPlayer);
+    });
+    await page.waitForTimeout(200);
+  }
+
+  throw new Error('Failed to confirm opening setup.');
 }
 
 async function run() {
   const browser = await chromium.launch({ headless: true, args: ['--use-gl=angle', '--use-angle=swiftshader'] });
-  const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 } });
-  const p1 = await ctx.newPage();
-  const p2 = await ctx.newPage();
+  const ctx1 = await browser.newContext({ viewport: { width: 1366, height: 900 } });
+  const ctx2 = await browser.newContext({ viewport: { width: 1366, height: 900 } });
+  const p1 = await ctx1.newPage();
+  const p2 = await ctx2.newPage();
   const room = `9${Math.floor(Math.random() * 900 + 100)}`;
 
   await Promise.all([
@@ -57,14 +90,7 @@ async function run() {
     p1.waitForSelector('#game-container:not(.hidden)'),
     p2.waitForSelector('#game-container:not(.hidden)')
   ]);
-  await p1.waitForFunction(() => {
-    const text = (document.getElementById('in-game-player-identity') || {}).textContent || '';
-    return text.includes('Player 1');
-  });
-  await p2.waitForFunction(() => {
-    const text = (document.getElementById('in-game-player-identity') || {}).textContent || '';
-    return text.includes('Player 2');
-  });
+  await Promise.all([waitForLocalPlayer(p1), waitForLocalPlayer(p2)]);
 
   // Opening setup: each player picks local active.
   await chooseActiveAndConfirm(p1);

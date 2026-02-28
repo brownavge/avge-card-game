@@ -1111,14 +1111,18 @@ function chooseOpeningActive(cardId, playerNumOverride = null) {
         player.active = null;
     }
 
-    const card = player.hand.find((c) => c.id === cardId && c.cardType === 'character');
+    let card = player.hand.find((c) => c.id === cardId && c.cardType === 'character');
+    if (!card) {
+        // Remote snapshots can refresh card ids between render and click; fallback avoids setup deadlocks.
+        card = player.hand.find((c) => c && c.cardType === 'character') || null;
+    }
     if (!card) {
         game.log('Select a character from your hand for your opening active.', 'warning');
         return;
     }
 
     player.active = card;
-    player.hand = player.hand.filter((c) => c.id !== cardId);
+    player.hand = player.hand.filter((c) => c.id !== card.id);
     if (game.setupReady) {
         game.setupReady[playerNum] = false;
     }
@@ -2013,11 +2017,13 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
                 }
                 if (name && typeof window[name] === 'function') {
                     const setupSyncActions = new Set(['chooseOpeningActive', 'toggleOpeningBench', 'setOpeningReady']);
+                    const incomingHasSnapshot = !!(incoming.payload && incoming.payload.state);
                     const shouldHostResyncAfterRemoteAction =
                         isMultiplayerAuthorityClient() &&
                         senderPlayerNumber === 2 &&
                         !!name &&
                         !name.startsWith('show') &&
+                        !incomingHasSnapshot &&
                         name !== 'STATE_SNAPSHOT';
                     const beforeHostSyncState = shouldHostResyncAfterRemoteAction ? JSON.stringify(getStateSnapshot()) : null;
                     let replayArgs = Array.isArray(args) ? [...args] : [];
@@ -2084,7 +2090,9 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
 function sendMultiplayerAction(fn, args) {
     if (!multiplayer.enabled || !multiplayer.socket || multiplayer.isApplyingRemote) return;
     if (multiplayer.socket.readyState !== WebSocket.OPEN) return;
-    const shouldIncludeSnapshot = (fn === 'STATE_SNAPSHOT') || isMultiplayerAuthorityClient();
+    const modalWorkflowPrefixes = ['show', 'toggle', 'confirm', 'cancel', 'select', 'choose', 'execute', 'place', 'add', 'move', 'finalize', 'complete', 'discard', 'set'];
+    const isModalWorkflowAction = typeof fn === 'string' && modalWorkflowPrefixes.some((prefix) => fn.startsWith(prefix));
+    const shouldIncludeSnapshot = (fn === 'STATE_SNAPSHOT') || isMultiplayerAuthorityClient() || isModalWorkflowAction;
     const snapshot = shouldIncludeSnapshot ? getStateSnapshot() : undefined;
     const setupPlayerFns = new Set(['chooseOpeningActive', 'toggleOpeningBench', 'setOpeningReady']);
     let setupPlayerOverride = null;
@@ -3415,7 +3423,7 @@ function showCardActions(card, targetPlayerNum, options = {}) {
         }
     } else if (card.cardType === 'supporter') {
         if (canPlayAnytime) {
-            if (!game.supporterPlayedThisTurn || game.playtestMode) {
+            if (!game.supporterPlayedThisTurn) {
                 html += `<button class="action-btn" onclick="playSupporter('${card.id}')">Play Supporter</button>`;
             } else {
                 html += `<p style="color: red;">Already played a Supporter this turn</p>`;
@@ -4590,8 +4598,11 @@ function cancelPhotographSelection() {
 }
 
 function showSurpriseDeliveryModal(player, target, topThree, attacker, move) {
-    // Only the player who is resolving Surprise Delivery should see the interactive modal.
-    if (!openModalForPlayer(game.currentPlayer, 'showSurpriseDeliveryModal', [game.currentPlayer, target ? target.id : null, Array.isArray(topThree) ? topThree.map(c => c.id) : [], attacker ? attacker.id : null, move ? move.name : null])) return;
+    const shouldRenderModal = openModalForPlayer(
+        game.currentPlayer,
+        'showSurpriseDeliveryModal',
+        [game.currentPlayer, target ? target.id : null, Array.isArray(topThree) ? topThree.map(c => c.id) : [], attacker ? attacker.id : null, move ? move.name : null]
+    );
     if (!game.tempSelections) game.tempSelections = {};
 
     // Reconstruct objects if called remotely (ids passed)
@@ -4629,6 +4640,8 @@ function showSurpriseDeliveryModal(player, target, topThree, attacker, move) {
         confirmSurpriseDelivery();
         return;
     }
+
+    if (!shouldRenderModal) return;
 
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
@@ -4928,7 +4941,7 @@ function showHandRevealModal(opponent, count, playerChooses) {
 }
 
 function showOpponentHandDiscardModal(opponentNum, sourceItemName, chooserNum = game.currentPlayer) {
-    if (!openModalForPlayer(chooserNum, 'showOpponentHandDiscardModal', [opponentNum, sourceItemName, chooserNum])) return;
+    const shouldRenderModal = openModalForPlayer(chooserNum, 'showOpponentHandDiscardModal', [opponentNum, sourceItemName, chooserNum]);
     const opponent = game.players[opponentNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
@@ -4939,6 +4952,8 @@ function showOpponentHandDiscardModal(opponentNum, sourceItemName, chooserNum = 
     game.tempSelections.handSelectMax = 1;
     game.tempSelections.handSelectSelected = [];
     game.tempSelections.handSelectSourceItemName = sourceItemName;
+
+    if (!shouldRenderModal) return;
 
     let html = `<h2>${sourceItemName}</h2>`;
     html += `<p>Choose 1 card from opponent's hand to discard</p>`;
@@ -4957,7 +4972,7 @@ function showOpponentHandDiscardModal(opponentNum, sourceItemName, chooserNum = 
 }
 
 function showOpponentHandShuffleModal(opponentNum, maxSelect, sourceItemName, chooserNum = game.currentPlayer) {
-    if (!openModalForPlayer(chooserNum, 'showOpponentHandShuffleModal', [opponentNum, maxSelect, sourceItemName, chooserNum])) return;
+    const shouldRenderModal = openModalForPlayer(chooserNum, 'showOpponentHandShuffleModal', [opponentNum, maxSelect, sourceItemName, chooserNum]);
     const opponent = game.players[opponentNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
@@ -4968,6 +4983,8 @@ function showOpponentHandShuffleModal(opponentNum, maxSelect, sourceItemName, ch
     game.tempSelections.handSelectMax = maxSelect;
     game.tempSelections.handSelectSelected = [];
     game.tempSelections.handSelectSourceItemName = sourceItemName;
+
+    if (!shouldRenderModal) return;
 
     let html = `<h2>${sourceItemName}</h2>`;
     html += `<p>Choose up to ${maxSelect} card(s) to shuffle back into opponent's deck</p>`;
@@ -5153,7 +5170,12 @@ function confirmConcertProgramSkip() {
 
 function showCastReserveSelectionModal(player) {
     let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
-    if (!openModalForPlayer(playerNum, 'showCastReserveSelectionModal', [playerNum])) return;
+    const shouldRenderModal = openModalForPlayer(playerNum, 'showCastReserveSelectionModal', [playerNum]);
+    if (!game.tempSelections) game.tempSelections = {};
+    if (!Array.isArray(game.tempSelections.castReserveSelected)) {
+        game.tempSelections.castReserveSelected = [];
+    }
+    if (!shouldRenderModal) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -5168,9 +5190,6 @@ function showCastReserveSelectionModal(player) {
         updateUI();
         return;
     }
-
-    if (!game.tempSelections) game.tempSelections = {};
-    game.tempSelections.castReserveSelected = [];
 
     let html = `<h2>Cast Reserve</h2>`;
     html += `<p>Select up to 3 unique items</p>`;
@@ -5240,15 +5259,33 @@ function confirmCastReserveSelection() {
     game.tempSelections.castReserveCards = selectedCards;
     game.tempSelections.castReserveOwner = game.currentPlayer;
 
-    showCastReserveOpponentChoice(selectedCards.map(c => ({ id: c.id, name: c.name })), opponentNum);
+    showCastReserveOpponentChoice(
+        selectedCards.map(c => ({ id: c.id, name: c.name })),
+        opponentNum,
+        game.currentPlayer,
+        selectedCards.map(c => ({ id: c.id, name: c.name }))
+    );
 }
 
-function showCastReserveOpponentChoice(itemData, opponentNum) {
-    if (!openModalForPlayer(opponentNum, 'showCastReserveOpponentChoice', [itemData, opponentNum])) return;
-
+function showCastReserveOpponentChoice(itemData, opponentNum, ownerNumOverride = null, selectedCardsPayload = null) {
     if (!game.tempSelections) game.tempSelections = {};
     game.tempSelections.castReserveItemData = itemData;
     game.tempSelections.castReserveOpponent = opponentNum;
+    const resolvedOwner = Number.isFinite(Number(ownerNumOverride))
+        ? Number(ownerNumOverride)
+        : Number((game.tempSelections && game.tempSelections.castReserveOwner) || game.currentPlayer);
+    game.tempSelections.castReserveOwner = resolvedOwner;
+    if (Array.isArray(selectedCardsPayload) && selectedCardsPayload.length > 0) {
+        game.tempSelections.castReserveCards = selectedCardsPayload
+            .map((card) => card ? { id: card.id, name: card.name } : null)
+            .filter(Boolean);
+    } else if (!Array.isArray(game.tempSelections.castReserveCards)) {
+        game.tempSelections.castReserveCards = Array.isArray(itemData)
+            ? itemData.map((item) => item ? { id: item.id, name: item.name } : null).filter(Boolean)
+            : [];
+    }
+
+    if (!openModalForPlayer(opponentNum, 'showCastReserveOpponentChoice', [itemData, opponentNum, resolvedOwner, game.tempSelections.castReserveCards])) return;
 
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
@@ -5271,6 +5308,12 @@ function confirmCastReserveOpponentChoice(itemId) {
     const ownerNum = game.tempSelections.castReserveOwner;
     const owner = game.players[ownerNum];
     const selectedCards = game.tempSelections.castReserveCards || [];
+    if (!owner || !Array.isArray(selectedCards) || selectedCards.length === 0) {
+        game.log('Cast Reserve selection data is unavailable.', 'warning');
+        closeModal('action-modal');
+        updateUI();
+        return;
+    }
     const chosen = selectedCards.find(c => c.id === itemId);
     const remaining = selectedCards.filter(c => c.id !== itemId);
 
@@ -5440,17 +5483,16 @@ function toggleOpponentDiscardCard(cardId) {
         return;
     }
     const cardElement = document.getElementById(`opp-discard-${cardId}`);
-    if (!cardElement) return;
 
     if (selectedCards.includes(cardId)) {
         // Deselect
         game.tempSelections.opponentDiscardCards = selectedCards.filter(id => id !== cardId);
-        cardElement.classList.remove('selected');
+        if (cardElement) cardElement.classList.remove('selected');
     } else {
         // Select if under limit
         if (selectedCards.length < maxCount) {
             game.tempSelections.opponentDiscardCards.push(cardId);
-            cardElement.classList.add('selected');
+            if (cardElement) cardElement.classList.add('selected');
         } else {
             showLocalAlert(`You can only select ${maxCount} card${maxCount > 1 ? 's' : ''}.`);
         }
@@ -5504,6 +5546,7 @@ function confirmOpponentDiscard() {
     if (michelleCard) {
         player.hand = player.hand.filter(c => c.id !== michelleCard.id);
         player.discard.push(michelleCard);
+        game.supporterPlayedThisTurn = true;
     }
 
     // Call callback if provided
@@ -5529,7 +5572,7 @@ function confirmOpponentDiscard() {
 // Annotated score modal
 function showAnnotatedScoreModal(opponent) {
     const opponentNum = (typeof opponent === 'number') ? opponent : (game.players[1] === opponent ? 1 : 2);
-    if (!openModalForPlayer(game.currentPlayer, 'showAnnotatedScoreModal', [opponentNum])) return;
+    const shouldRenderModal = openModalForPlayer(game.currentPlayer, 'showAnnotatedScoreModal', [opponentNum]);
     const topTwo = game.players[opponentNum].deck.slice(0, 2);
 
     // Initialize tracking for annotated score
@@ -5538,14 +5581,11 @@ function showAnnotatedScoreModal(opponent) {
     game.tempSelections.annotatedOpponent = opponentNum;
     game.tempSelections.annotatedCurrentCard = 0;
 
+    if (!shouldRenderModal) return;
     showAnnotatedCardChoice();
 }
 
 function showAnnotatedCardChoice() {
-    if (!openModalForPlayer(game.currentPlayer, 'showAnnotatedCardChoice', [])) return;
-    const modal = document.getElementById('action-modal');
-    const content = document.getElementById('action-content');
-
     const currentIndex = game.tempSelections.annotatedCurrentCard;
     const cards = game.tempSelections.annotatedCards;
 
@@ -5554,6 +5594,10 @@ function showAnnotatedCardChoice() {
         applyAnnotatedScoreChoices();
         return;
     }
+
+    if (!openModalForPlayer(game.currentPlayer, 'showAnnotatedCardChoice', [])) return;
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
 
     const card = cards[currentIndex].card;
 
@@ -7109,7 +7153,7 @@ function playSupporter(cardId) {
     const player = game.players[game.currentPlayer];
     const card = player.hand.find(c => c.id === cardId);
 
-    if (!card || (game.supporterPlayedThisTurn && !game.playtestMode)) return;
+    if (!card || game.supporterPlayedThisTurn) return;
 
     if (!canPlayCardThisTurn()) {
         game.log('Main Hall: Cannot play more than 3 cards per turn', 'info');
@@ -7128,9 +7172,7 @@ function playSupporter(cardId) {
 
     player.hand = player.hand.filter(c => c.id !== cardId);
     player.discard.push(card);
-    if (!game.playtestMode) {
-        game.supporterPlayedThisTurn = true;
-    }
+    game.supporterPlayedThisTurn = true;
 
     closeModal('action-modal');
     updateUI();
@@ -9180,7 +9222,7 @@ function playSelectedCardHotkey() {
     }
 
     if (card.cardType === 'supporter') {
-        if (!game.supporterPlayedThisTurn || game.playtestMode) {
+        if (!game.supporterPlayedThisTurn) {
             playSupporter(card.id);
         }
         return;
@@ -9451,6 +9493,60 @@ function openHowToPlayModal() {
 
 let currentDeck = [];
 let currentDeckName = '';
+const DECK_BUILDER_CARD_LIMITS = Object.freeze({
+    character: 1,
+    supporter: 1,
+    stadium: 1,
+    item: 2,
+    tool: 2
+});
+
+function getDeckBuilderCardCategory(card, fallbackCategory = null) {
+    if (!card) return fallbackCategory;
+    return card.cardCategory || card.cardType || fallbackCategory;
+}
+
+function getDeckBuilderCardCopyLimit(cardCategory) {
+    return DECK_BUILDER_CARD_LIMITS[cardCategory] || 4;
+}
+
+function getDeckBuilderCardCount(deck, cardName, cardCategory) {
+    return (deck || []).filter((entry) => (
+        entry &&
+        entry.name === cardName &&
+        getDeckBuilderCardCategory(entry, cardCategory) === cardCategory
+    )).length;
+}
+
+function validateDeckBuilderCopyLimits(deck) {
+    const violations = [];
+    const countsByCardKey = new Map();
+
+    (deck || []).forEach((entry) => {
+        if (!entry || !entry.name) return;
+        const category = getDeckBuilderCardCategory(entry, entry.cardCategory);
+        if (!category) return;
+        const key = `${category}::${entry.name}`;
+        countsByCardKey.set(key, (countsByCardKey.get(key) || 0) + 1);
+    });
+
+    countsByCardKey.forEach((count, key) => {
+        const parts = key.split('::');
+        const category = parts[0];
+        const cardName = parts.slice(1).join('::');
+        const limit = getDeckBuilderCardCopyLimit(category);
+        if (count > limit) {
+            violations.push({
+                cardName,
+                cardCategory: category,
+                count,
+                limit
+            });
+        }
+    });
+
+    return violations;
+}
 
 function openDeckBuilder() {
     const howToPlayModal = document.getElementById('how-to-play-modal');
@@ -9770,14 +9866,12 @@ function addCardToDeck(card, cardCategory) {
         return;
     }
 
-    // For energy cards, allow multiple copies
-    // For other cards, typically limit to 4 copies (Pokemon-style rule)
-    if (cardCategory !== 'energy') {
-        const count = currentDeck.filter(c => c.name === card.name).length;
-        if (count >= 4) {
-            showLocalAlert('Maximum 4 copies of the same card (except energy).');
-            return;
-        }
+    const limit = getDeckBuilderCardCopyLimit(cardCategory);
+    const count = getDeckBuilderCardCount(currentDeck, card.name, cardCategory);
+    if (count >= limit) {
+        const copyWord = limit === 1 ? 'copy' : 'copies';
+        showLocalAlert(`Maximum ${limit} ${copyWord} of ${card.name} (${cardCategory}) in a custom deck.`);
+        return;
     }
 
     // Add card to deck with cardCategory property to avoid conflicts with character 'type' property
@@ -9801,8 +9895,9 @@ function updateDeckDisplay() {
 
     deckCount.textContent = currentDeck.length;
 
+    const copyViolations = validateDeckBuilderCopyLimits(currentDeck);
     // Enable save button if deck is valid
-    const isValid = currentDeck.length === 20 && deckNameInput.value.trim().length > 0;
+    const isValid = currentDeck.length === 20 && deckNameInput.value.trim().length > 0 && copyViolations.length === 0;
     saveBtn.disabled = !isValid;
 
     // Group cards by name
@@ -9857,6 +9952,13 @@ function saveDeck() {
 
     if (currentDeck.length !== 20) {
         showLocalAlert('Deck must have exactly 20 cards.');
+        return;
+    }
+
+    const copyViolations = validateDeckBuilderCopyLimits(currentDeck);
+    if (copyViolations.length > 0) {
+        const first = copyViolations[0];
+        showLocalAlert(`Deck violates copy limits: ${first.cardName} (${first.cardCategory}) has ${first.count} copies, max is ${first.limit}.`);
         return;
     }
 
@@ -9923,6 +10025,11 @@ function loadDeck(deckName) {
         currentDeck = [...deck];
         document.getElementById('custom-deck-name').value = deckName;
         updateDeckDisplay();
+        const copyViolations = validateDeckBuilderCopyLimits(currentDeck);
+        if (copyViolations.length > 0) {
+            const first = copyViolations[0];
+            showLocalAlert(`Loaded deck exceeds current copy limits: ${first.cardName} (${first.cardCategory}) has ${first.count}, max ${first.limit}. Please edit before saving.`);
+        }
     }
 }
 
@@ -10053,8 +10160,8 @@ function processDeckImport() {
             throw new Error('Invalid deck format');
         }
 
-        // Clear current deck
-        currentDeck = [];
+        // Reconstruct imported deck first, then validate before replacing current deck.
+        const importedDeck = [];
 
         // Reconstruct cards from card names
         let failedCards = [];
@@ -10064,16 +10171,28 @@ function processDeckImport() {
                 // Create a copy with cardCategory property
                 const cardCopy = {
                     ...card,
-                    cardCategory: cardData.cardCategory
+                    cardCategory: cardData.cardCategory || card.cardType
                 };
                 if (cardData.energyType) {
                     cardCopy.energyType = cardData.energyType;
                 }
-                currentDeck.push(cardCopy);
+                importedDeck.push(cardCopy);
             } else {
                 failedCards.push(`${cardData.name} (${cardData.cardCategory})`);
             }
         });
+
+        if (importedDeck.length > 20) {
+            throw new Error(`Imported deck has ${importedDeck.length} cards. Maximum is 20.`);
+        }
+
+        const copyViolations = validateDeckBuilderCopyLimits(importedDeck);
+        if (copyViolations.length > 0) {
+            const first = copyViolations[0];
+            throw new Error(`Copy limit exceeded: ${first.cardName} (${first.cardCategory}) has ${first.count}, max ${first.limit}.`);
+        }
+
+        currentDeck = importedDeck;
 
         // Set deck name
         if (importData.name) {
@@ -11162,7 +11281,11 @@ function executeAnalysisParalysis(opponentNum, cardIdx) {
 function showWipeoutSelection(player, opponent, attacker) {
     const attackerId = attacker && attacker.id ? attacker.id : attacker;
     const ownerNum = (game.players[1].active && game.players[1].active.id === attackerId) || (game.players[1].bench.some(c=>c&&c.id===attackerId)) ? 1 : 2;
-    if (!openModalForPlayer(ownerNum, 'showWipeoutSelection', [ (typeof player === 'number' ? player : (game.players[1]===player?1:2)), (typeof opponent === 'number' ? opponent : (game.players[1]===opponent?1:2)), attackerId ])) return;
+    const shouldRenderModal = openModalForPlayer(
+        ownerNum,
+        'showWipeoutSelection',
+        [(typeof player === 'number' ? player : (game.players[1]===player?1:2)), (typeof opponent === 'number' ? opponent : (game.players[1]===opponent?1:2)), attackerId]
+    );
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
@@ -11186,12 +11309,14 @@ function showWipeoutSelection(player, opponent, attacker) {
     });
     game.tempSelections.wipeoutAttacker = attackerObj || { id: attackerId };
 
+    if (!shouldRenderModal) return;
+
     let html = `<h2>Wipeout: Select 3 Targets</h2>`;
     html += `<p>You must include yourself. Select 2 other characters:</p>`;
     html += `<div id="wipeout-targets" class="target-selection">`;
 
     allTargets.forEach(char => {
-        const isSelf = char.id === attacker.id;
+        const isSelf = char.id === attackerId;
         const selectedClass = isSelf ? ' selected' : '';
         html += `<div class="target-option${selectedClass}" data-wipeout-id="${char.id}" onclick="addWipeoutTarget('${char.id}')">
             ${char.name}${isSelf ? ' (You)' : ''}
@@ -11287,7 +11412,7 @@ function showArtistAlleySelection(eligibleCards, attacker, target, move) {
     const attackerId = attacker && attacker.id ? attacker.id : attacker;
     const targetId = target && target.id ? target.id : target;
     const moveName = move && move.name ? move.name : move;
-    if (!openModalForPlayer(game.currentPlayer, 'showArtistAlleySelection', [cardIds, attackerId, targetId, moveName])) return;
+    const shouldRenderModal = openModalForPlayer(game.currentPlayer, 'showArtistAlleySelection', [cardIds, attackerId, targetId, moveName]);
     eligibleCards = cardIds.map(id => findCardById(id)).filter(Boolean);
     if (typeof attacker === 'string') attacker = findCardById(attacker);
     if (typeof target === 'string') target = findCardById(target);
@@ -11300,6 +11425,8 @@ function showArtistAlleySelection(eligibleCards, attacker, target, move) {
     game.tempSelections.artistAlleyAttacker = attacker;
     game.tempSelections.artistAlleyTarget = target;
     game.tempSelections.artistAlleyMove = move;
+
+    if (!shouldRenderModal) return;
 
     let html = `<h2>Artist Alley</h2>`;
     html += `<p>Select any number of Concert Programs/Tickets to discard:</p>`;
@@ -11425,7 +11552,7 @@ function showRossAttackTargetSelection(opponentChars, attacker, move) {
     const charIds = Array.isArray(opponentChars) ? opponentChars.map(c => (typeof c === 'string' ? c : (c && c.id ? c.id : c))) : [];
     const attackerId = attacker && attacker.id ? attacker.id : attacker;
     const moveName = move && move.name ? move.name : move;
-    if (!openModalForPlayer(game.currentPlayer, 'showRossAttackTargetSelection', [charIds, attackerId, moveName])) return;
+    const shouldRenderModal = openModalForPlayer(game.currentPlayer, 'showRossAttackTargetSelection', [charIds, attackerId, moveName]);
     opponentChars = charIds.map(id => findCardById(id)).filter(Boolean);
     if (typeof attacker === 'string') attacker = findCardById(attacker);
     if (typeof move === 'string') move = { name: move };
@@ -11434,6 +11561,8 @@ function showRossAttackTargetSelection(opponentChars, attacker, move) {
 
     game.tempSelections = game.tempSelections || {};
     game.tempSelections.rossAttack = { attackerId: attacker.id, moveName: move.name };
+
+    if (!shouldRenderModal) return;
 
     let html = `<h2>Ross Attack! - Choose target</h2>`;
     html += `<div class="target-selection">`;
@@ -11525,7 +11654,7 @@ function showHarmonicsChoice(attacker, opponent, move) {
     const attackerId = attacker && attacker.id ? attacker.id : attacker;
     const opponentNum = (typeof opponent === 'number') ? opponent : (game.players[1] === opponent ? 1 : 2);
     const moveName = move && move.name ? move.name : move;
-    if (!openModalForPlayer(game.currentPlayer, 'showHarmonicsChoice', [attackerId, opponentNum, moveName])) return;
+    const shouldRenderModal = openModalForPlayer(game.currentPlayer, 'showHarmonicsChoice', [attackerId, opponentNum, moveName]);
     if (typeof attacker === 'string') attacker = findCardById(attacker);
     if (typeof opponent === 'number') opponent = game.players[opponent];
     if (typeof move === 'string') move = { name: move };
@@ -11537,6 +11666,8 @@ function showHarmonicsChoice(attacker, opponent, move) {
         attackerId: attacker.id,
         moveName: move.name
     };
+
+    if (!shouldRenderModal) return;
 
     let html = `<h2>Harmonics</h2>`;
     html += `<p>Choose a targeting option:</p>`;
