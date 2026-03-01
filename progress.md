@@ -635,3 +635,24 @@ Original prompt: Can you scan through this web game for possible issues and bugs
     - `node output/ui_smoke_test.mjs` ✅
   - Note:
     - Existing `output/host_authority_multiplayer_test.mjs` timed out during this pass (appears harness-level timing mismatch), while gameplay-level multiplayer integration tests above passed.
+- Supporter bugfix pass completed (2026-03-01):
+  - Fixed Lucas runtime error in `toggleLucasCharacter()` caused by stray token `can` (`ReferenceError: can is not defined`).
+  - Fixed Lucas selection flow so modal refresh does not reset `lucasSelected` every click; selected entries now persist and render with selected styling.
+  - Added supporter-wide Playwright smoke test: `output/supporter_smoke_test.mjs`.
+    - Covers all current supporters (`Johann`, `Richard`, `Michelle`, `Will`, `Lucas`, `Angel`, `Lio`, `Emma`, `Victoria Chen`) and asserts no `Action "..." failed` runtime log entries.
+- Validation run:
+  - `node --check game.js` ✅
+  - `node output/supporter_limit_regression_test.mjs` ✅
+  - `node output/supporter_smoke_test.mjs` ✅
+- Folding Stand / bench-damage fix completed (2026-03-01):
+  - Root cause: `firstAttackBonusUsed` was consumed inside `calculateDamage()` on the first damage instance, so multi-target attacks only gave +10/+20 to the first target.
+  - Added per-attack context (`currentAttackContext`) initialized in `executeAttack()` and consumed once per attack declaration.
+  - `calculateDamage()` now applies first-attack item bonus across all damage instances from that attack (including bench-wide hits like `Domain Expansion`, `Intense Echo`, `Small Ensemble Committee`, etc.) while logging once.
+  - Turn switch now clears attack context.
+- Added regression test: `output/folding_stand_bench_modifier_test.mjs`
+  - Scenario: same bench target hit by `Domain Expansion` on two Player 1 turns (baseline, then with `Folding Stand`), asserts second hit is exactly baseline +10.
+- Validation run:
+  - `node --check game.js` ✅
+  - `node output/folding_stand_bench_modifier_test.mjs` ✅
+  - `node output/supporter_limit_regression_test.mjs` ✅
+  - `node output/supporter_smoke_test.mjs` ✅

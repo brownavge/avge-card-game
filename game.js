@@ -216,6 +216,7 @@ class GameState {
         this.pendingAttackEndTurn = false;
         this.pendingAttackAttackerId = null;
         this.blockAttackEnd = false;
+        this.currentAttackContext = null;
 
         this.players = {
             1: this.createPlayerState(),
@@ -307,6 +308,7 @@ class GameState {
 
         // Clear attack modifiers from previous player's turn
         this.attackModifiers[previousPlayer] = {};
+        this.currentAttackContext = null;
 
         // Clear wasJustBenched flags and other per-turn character flags
         const currentPlayerObj = this.players[this.currentPlayer];
@@ -6674,14 +6676,17 @@ function showLucasSelectionModal(player) {
     }
 
     if (!game.tempSelections) game.tempSelections = {};
-    game.tempSelections.lucasSelected = [];
+    if (!Array.isArray(game.tempSelections.lucasSelected)) {
+        game.tempSelections.lucasSelected = [];
+    }
 
     let html = `<h2>Lucas - Small Ensemble</h2>`;
     html += `<p>Choose up to 2 characters of different types (${game.tempSelections.lucasSelected.length}/2 selected)</p>`;
     html += `<div class="target-selection">`;
 
     eligibleChars.forEach(char => {
-        html += `<div class="target-option" id="lucas-char-${char.id}" onclick="toggleLucasCharacter('${char.id}')">
+        const selectedClass = game.tempSelections.lucasSelected.includes(char.id) ? 'selected' : '';
+        html += `<div class="target-option ${selectedClass}" id="lucas-char-${char.id}" onclick="toggleLucasCharacter('${char.id}')">
             ${char.name} (${char.type.join('/')}) - HP: ${char.hp}
         </div>`;
     });
@@ -6702,7 +6707,8 @@ function toggleLucasCharacter(charId) {
     const element = document.getElementById(`lucas-char-${charId}`);
 
     if (!game.tempSelections.lucasSelected) game.tempSelections.lucasSelected = [];
-can
+    if (!char || !element) return;
+
     const index = game.tempSelections.lucasSelected.findIndex(id => id === charId);
     if (index > -1) {
         // Deselect
@@ -7821,6 +7827,20 @@ function executeAttack(attackerId, moveName, targetId) {
     if (!game.playtestMode && attackerPlayerNum === game.currentPlayer) {
         game.attackedThisTurn = true;
     }
+    const isCurrentActiveAttack = attackerPlayerNum === game.currentPlayer && game.players[game.currentPlayer] && game.players[game.currentPlayer].active === attacker;
+    const firstAttackBonus = Number(game.attackModifiers?.[game.currentPlayer]?.firstAttackBonus || 0);
+    const shouldApplyFirstAttackBonusThisAttack = isCurrentActiveAttack &&
+        firstAttackBonus > 0 &&
+        !game.attackModifiers[game.currentPlayer].firstAttackBonusUsed;
+    game.currentAttackContext = {
+        attackerId: attacker.id,
+        attackerPlayerNum,
+        useFirstAttackBonus: shouldApplyFirstAttackBonusThisAttack,
+        firstAttackBonusLogged: false
+    };
+    if (shouldApplyFirstAttackBonusThisAttack) {
+        game.attackModifiers[game.currentPlayer].firstAttackBonusUsed = true;
+    }
     game.lastAttackSource = attacker;
 
     // Execute specific attack effects by move name
@@ -8033,11 +8053,21 @@ function calculateDamage(attacker, defender, baseDamage, move) {
         game.log(`Item bonus: +${game.attackModifiers[game.currentPlayer].damageBonus} damage`);
     }
 
-    if (game.attackModifiers[game.currentPlayer].firstAttackBonus && !game.attackModifiers[game.currentPlayer].firstAttackBonusUsed) {
-        if (attacker === currentPlayer.active) {
-            damage += game.attackModifiers[game.currentPlayer].firstAttackBonus;
-            game.attackModifiers[game.currentPlayer].firstAttackBonusUsed = true;
-            game.log(`Item bonus: +${game.attackModifiers[game.currentPlayer].firstAttackBonus} damage (first attack)`, 'info');
+    const attackContext = game.currentAttackContext;
+    if (
+        attackContext &&
+        attackContext.useFirstAttackBonus &&
+        attackContext.attackerPlayerNum === attackerPlayerNum &&
+        attackContext.attackerId === attacker.id &&
+        attacker === currentPlayer.active
+    ) {
+        const firstAttackBonus = Number(game.attackModifiers?.[attackerPlayerNum]?.firstAttackBonus || 0);
+        if (firstAttackBonus > 0) {
+            damage += firstAttackBonus;
+            if (!attackContext.firstAttackBonusLogged) {
+                game.log(`Item bonus: +${firstAttackBonus} damage (first attack)`, 'info');
+                attackContext.firstAttackBonusLogged = true;
+            }
         }
     }
 
