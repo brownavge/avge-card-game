@@ -996,8 +996,8 @@ const TOOLS = {
     BUCKET: {
         name: 'Bucket',
         type: 'tool',
-        effect: 'Anything you want to be: Attached character becomes a Percussion type.',
-        addType: TYPES.PERCUSSION
+        effect: 'Anything you want to be: Attached character becomes only a Percussion type.',
+        monoType: TYPES.PERCUSSION
     },
     AVGE_TSHIRT: {
         name: 'AVGE T-Shirt',
@@ -1112,7 +1112,7 @@ const ITEMS = {
     CONCERT_TICKET: {
         name: 'Concert Ticket',
         type: 'item',
-        effect: 'Draw cards until you have 4 cards in hand.'
+        effect: 'Draw cards until you have 3 cards in hand.'
     },
     BAI_EMAIL: {
         name: 'BAI Email',
@@ -1132,7 +1132,7 @@ const ITEMS = {
     VIDEO_CAMERA: {
         name: 'Video Camera',
         type: 'item',
-        effect: 'Put an item card from your discard pile into your hand.'
+        effect: 'Put an item card from your discard pile onto the top of your deck.'
     },
     RAFFLE_TICKET: {
         name: 'Raffle Ticket',

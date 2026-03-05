@@ -4156,10 +4156,10 @@ function executeItemEffect(card) {
         // Draw items
         case 'Concert Ticket':
             // Account for the fact that this card is still in hand when calculating
-            // After this item is discarded, we want player to have 4 cards total
-            const cardsToDraw = Math.max(0, 4 - (player.hand.length - 1));
+            // After this item is discarded, we want player to have 3 cards total
+            const cardsToDraw = Math.max(0, 3 - (player.hand.length - 1));
             game.drawCards(game.currentPlayer, cardsToDraw);
-            game.log(`Drew ${cardsToDraw} cards to reach 4 in hand`, 'info');
+            game.log(`Drew ${cardsToDraw} cards to reach 3 in hand`, 'info');
             break;
 
         case 'Raffle Ticket':
@@ -4293,12 +4293,17 @@ function executeItemEffect(card) {
             break;
 
         case 'Video Camera':
+            game.tempSelections = game.tempSelections || {};
+            game.tempSelections.discardDestination = 'deck_top';
+            game.tempSelections.discardShuffle = false;
             selectMultipleFromDiscard(player, 'item', 1, () => {
                 const videoCameraCard = player.hand.find(c => c.name === 'Video Camera');
                 if (videoCameraCard) {
                     player.hand = player.hand.filter(c => c.id !== videoCameraCard.id);
                     player.discard.push(videoCameraCard);
                 }
+                delete game.tempSelections.discardDestination;
+                delete game.tempSelections.discardShuffle;
                 updateUI();
             });
             return true;
@@ -4767,7 +4772,10 @@ function confirmDiscardSelection() {
             const card = player.discard.find(c => c.id === cardId);
             if (card) {
                 player.discard = player.discard.filter(c => c.id !== cardId);
-                if (destination === 'deck') {
+                if (destination === 'deck_top') {
+                    player.deck.unshift(card);
+                    game.log(`Placed ${card.name} on top of deck`, 'info');
+                } else if (destination === 'deck') {
                     player.deck.push(card);
                     if (shouldShuffle) {
                         game.shuffleDeck(game.currentPlayer);
@@ -4800,6 +4808,8 @@ function cancelDiscardSelection() {
     delete game.tempSelections.discardSelected;
     delete game.tempSelections.discardCallback;
     delete game.tempSelections.discardPlayer;
+    delete game.tempSelections.discardDestination;
+    delete game.tempSelections.discardShuffle;
     game.blockAttackEnd = false;
 
     closeModal('action-modal');
@@ -4886,6 +4896,12 @@ function attachTool(toolId, target) {
             character.type.push(toolCard.addType);
         }
     }
+    if (toolCard.monoType) {
+        if (!Array.isArray(character.originalTypeBeforeMonoTool)) {
+            character.originalTypeBeforeMonoTool = Array.isArray(character.type) ? [...character.type] : [];
+        }
+        character.type = [toolCard.monoType];
+    }
     player.hand = player.hand.filter(c => c.id !== toolId);
     game.log(`Attached ${toolCard.name} to ${character.name}`, 'info');
 
@@ -4912,6 +4928,10 @@ function removeToolEffects(character, tool) {
     // Remove type added by tool
     if (tool.addType && character.type) {
         character.type = character.type.filter(t => t !== tool.addType);
+    }
+    if (tool.monoType && Array.isArray(character.originalTypeBeforeMonoTool)) {
+        character.type = [...character.originalTypeBeforeMonoTool];
+        delete character.originalTypeBeforeMonoTool;
     }
 }
 
@@ -5265,7 +5285,7 @@ function confirmCastReserveSelection() {
         selectedCards.map(c => ({ id: c.id, name: c.name })),
         opponentNum,
         game.currentPlayer,
-        selectedCards.map(c => ({ id: c.id, name: c.name }))
+        selectedCards
     );
 }
 
@@ -5279,7 +5299,7 @@ function showCastReserveOpponentChoice(itemData, opponentNum, ownerNumOverride =
     game.tempSelections.castReserveOwner = resolvedOwner;
     if (Array.isArray(selectedCardsPayload) && selectedCardsPayload.length > 0) {
         game.tempSelections.castReserveCards = selectedCardsPayload
-            .map((card) => card ? { id: card.id, name: card.name } : null)
+            .map((card) => card ? { ...card } : null)
             .filter(Boolean);
     } else if (!Array.isArray(game.tempSelections.castReserveCards)) {
         game.tempSelections.castReserveCards = Array.isArray(itemData)
@@ -5297,7 +5317,9 @@ function showCastReserveOpponentChoice(itemData, opponentNum, ownerNumOverride =
     html += `<div class="target-selection">`;
 
     itemData.forEach(item => {
-        html += `<div class="target-option" onclick="confirmCastReserveOpponentChoice('${item.id}')">${item.name}</div>`;
+        const displayName = (item && item.name) ? item.name : (item && item.id ? item.id : 'Unknown Item');
+        const itemId = (item && item.id) ? item.id : item;
+        html += `<div class="target-option" onclick="confirmCastReserveOpponentChoice('${itemId}')">${displayName}</div>`;
     });
 
     html += `</div>`;

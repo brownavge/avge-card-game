@@ -656,3 +656,24 @@ Original prompt: Can you scan through this web game for possible issues and bugs
   - `node output/folding_stand_bench_modifier_test.mjs` ✅
   - `node output/supporter_limit_regression_test.mjs` ✅
   - `node output/supporter_smoke_test.mjs` ✅
+- Item/tool rules fix pass completed (2026-03-01):
+  - Cast Reserve retained-card metadata fix:
+    - Kept full selected card objects through opponent-choice resolution so pulled items in hand retain full text/effect metadata.
+    - Hardened opponent-choice rendering to show fallback labels when item payloads are partial.
+  - Bucket behavior update:
+    - Bucket now applies a mono-type override (`Percussion` only) while attached.
+    - When Bucket is removed, character types revert to their original pre-bucket type set.
+  - Concert Ticket update:
+    - Draw threshold changed from 4 cards in hand to 3 cards in hand.
+  - Video Camera update:
+    - Now moves one item from discard to the top of deck (not hand).
+    - Added `deck_top` discard-selection destination path and cleanup on confirm/cancel.
+- Added/updated validation:
+  - New regression script: `output/item_rules_regression_test.mjs` (covers Cast Reserve text retention, Bucket mono/revert, Concert Ticket 3-card target log semantics, Video Camera top-deck draw behavior).
+- Validation run (all passing):
+  - `node --check game.js` ✅
+  - `node --check cards.js` ✅
+  - `node output/item_rules_regression_test.mjs` ✅
+  - `node output/folding_stand_bench_modifier_test.mjs` ✅
+  - `node output/ui_smoke_test.mjs` ✅
+  - `node output/supporter_smoke_test.mjs` ✅
