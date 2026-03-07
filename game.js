@@ -322,6 +322,7 @@ class GameState {
             char.usedBAIWranglerThisTurn = false;
             char.usedMusicalCatSummonedThisTurn = false;
             char.usedProgramProductionThisTurn = false;
+            char.usedReverseHeistThisTurn = false;
         });
 
         this.applyStartOfTurnEffects();
@@ -709,13 +710,15 @@ class GameState {
 
         // Check if knocked out
         if (characterCard.damage >= characterCard.hp) {
-            this.knockOut(characterCard);
+            this.knockOut(characterCard, {
+                suppressForcedSwitchPrompt: !!options.suppressForcedSwitchPrompt
+            });
         }
 
         this.render();
     }
 
-    knockOut(characterCard) {
+    knockOut(characterCard, options = {}) {
         const playerNum = this.findPlayerWithCharacter(characterCard);
         const player = this.players[playerNum];
 
@@ -774,7 +777,9 @@ class GameState {
         this.checkNoCharactersLoss(playerNum);
 
         this.render();
-        promptForcedActiveReplacementIfNeeded(playerNum);
+        if (!options.suppressForcedSwitchPrompt) {
+            promptForcedActiveReplacementIfNeeded(playerNum);
+        }
     }
 
     endGame(winner, reason = '') {
@@ -1812,6 +1817,26 @@ function normalizeRoomCodeInput(value) {
     return digits.slice(0, 4);
 }
 
+function getCustomDeckPayload(deckName) {
+    if (!deckName || typeof deckName !== 'string' || !deckName.startsWith('custom:')) return null;
+    const customDeckName = deckName.substring(7);
+    try {
+        const customDecks = JSON.parse(localStorage.getItem('customDecks') || '{}');
+        const deck = customDecks && customDecks[customDeckName];
+        if (!Array.isArray(deck) || deck.length === 0) return null;
+        return deck
+            .map((card) => ({
+                name: card && card.name ? String(card.name) : '',
+                cardCategory: card && (card.cardCategory || card.type) ? String(card.cardCategory || card.type) : ''
+            }))
+            .filter((card) => card.name && card.cardCategory)
+            .slice(0, 80);
+    } catch (error) {
+        console.warn('Failed to serialize custom deck payload for multiplayer', error);
+        return null;
+    }
+}
+
 function connectMultiplayer({ roomId, deckName, playtestMode }) {
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const socket = new WebSocket(`${protocol}://${window.location.host}`);
@@ -1848,10 +1873,12 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
                 sessionToken: multiplayer.sessionToken
             }));
         } else {
+            const customDeckCards = getCustomDeckPayload(deckName);
             socket.send(JSON.stringify({
                 type: 'JOIN',
                 roomId: multiplayer.roomId,
                 deckName,
+                customDeckCards,
                 playtestMode
             }));
         }
@@ -1910,7 +1937,11 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
                     msg.config.deck1Name,
                     msg.config.deck2Name,
                     msg.config.playtestMode,
-                    msg.seed
+                    msg.seed,
+                    {
+                        deck1CustomCards: Array.isArray(msg.config.deck1CustomCards) ? msg.config.deck1CustomCards : null,
+                        deck2CustomCards: Array.isArray(msg.config.deck2CustomCards) ? msg.config.deck2CustomCards : null
+                    }
                 );
                 multiplayer.hasLocalSeededState = true;
                 if (multiplayer.playerNumber === 1) {
@@ -1938,7 +1969,11 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
                     msg.config.deck1Name,
                     msg.config.deck2Name,
                     msg.config.playtestMode,
-                    msg.seed
+                    msg.seed,
+                    {
+                        deck1CustomCards: Array.isArray(msg.config.deck1CustomCards) ? msg.config.deck1CustomCards : null,
+                        deck2CustomCards: Array.isArray(msg.config.deck2CustomCards) ? msg.config.deck2CustomCards : null
+                    }
                 );
                 multiplayer.hasLocalSeededState = true;
                 if (multiplayer.playerNumber === 1) {
@@ -2191,7 +2226,7 @@ function applyStateSnapshot(snapshot) {
 }
 
 // Initialize game
-function initGame(deck1Name = 'strings-aggro', deck2Name = 'piano-control', playtestMode = false, seed = null) {
+function initGame(deck1Name = 'strings-aggro', deck2Name = 'piano-control', playtestMode = false, seed = null, deckOverrides = null) {
     // Reset game state completely
     game = new GameState();
     game.playtestMode = !!playtestMode;
@@ -2200,7 +2235,7 @@ function initGame(deck1Name = 'strings-aggro', deck2Name = 'piano-control', play
     game.randomState = resolvedSeed >>> 0;
 
     // Create sample decks for testing
-    createSampleDecks(deck1Name, deck2Name);
+    createSampleDecks(deck1Name, deck2Name, deckOverrides);
 
     // Guarantee each player starts with at least one musician in hand
     ensureStartingMusician(1);
@@ -2604,21 +2639,26 @@ const DECK_TEMPLATES = {
     }
 };
 
-function createSampleDecks(deck1Name, deck2Name) {
+function createSampleDecks(deck1Name, deck2Name, deckOverrides = null) {
     // Create decks based on templates or custom decks
-    game.players[1].deck = buildDeckFromName(deck1Name);
-    game.players[2].deck = buildDeckFromName(deck2Name);
+    const overrideDeck1 = deckOverrides && Array.isArray(deckOverrides.deck1CustomCards) ? deckOverrides.deck1CustomCards : null;
+    const overrideDeck2 = deckOverrides && Array.isArray(deckOverrides.deck2CustomCards) ? deckOverrides.deck2CustomCards : null;
+    game.players[1].deck = buildDeckFromName(deck1Name, overrideDeck1);
+    game.players[2].deck = buildDeckFromName(deck2Name, overrideDeck2);
 
     game.shuffleDeck(1);
     game.shuffleDeck(2);
 }
 
-function buildDeckFromName(deckName) {
+function buildDeckFromName(deckName, customDeckOverride = null) {
     // Check if it's a custom deck
     if (deckName.startsWith('custom:')) {
         const customDeckName = deckName.substring(7); // Remove 'custom:' prefix
-        const customDecks = JSON.parse(localStorage.getItem('customDecks') || '{}');
-        const customDeck = customDecks[customDeckName];
+        let customDeck = Array.isArray(customDeckOverride) ? customDeckOverride : null;
+        if (!customDeck) {
+            const customDecks = JSON.parse(localStorage.getItem('customDecks') || '{}');
+            customDeck = customDecks[customDeckName];
+        }
 
         if (!customDeck) {
             console.error('Custom deck not found:', customDeckName);
@@ -2802,6 +2842,15 @@ function updateUI() {
     if (phaseInfo) {
         phaseInfo.textContent = game.phase === 'gameover' ? 'Game Over' : '';
         phaseInfo.style.display = 'none';
+    }
+    const opponentHandCountEl = document.getElementById('opponent-hand-count');
+    if (opponentHandCountEl) {
+        const localPlayerNum = (multiplayer.enabled && Number.isFinite(Number(multiplayer.playerNumber)))
+            ? Number(multiplayer.playerNumber)
+            : Number(game.currentPlayer);
+        const opponentPlayerNum = localPlayerNum === 1 ? 2 : 1;
+        const opponentHandCount = game.players[opponentPlayerNum] ? game.players[opponentPlayerNum].hand.length : 0;
+        opponentHandCountEl.textContent = String(opponentHandCount);
     }
 
     // Show energy attached count (normal is 1, Eugenia allows 3)
@@ -3176,13 +3225,14 @@ function selectCard(card) {
     const localPlayerNum = multiplayer.enabled ? (multiplayer.playerNumber || game.currentPlayer) : game.currentPlayer;
     const localPlayer = localPlayerNum ? game.players[localPlayerNum] : null;
     const isLocalInPlayCard = !!(localPlayer && card && [localPlayer.active, ...localPlayer.bench].some(c => c && c.id === card.id));
+    const isLocalHandCard = !!(localPlayer && card && Array.isArray(localPlayer.hand) && localPlayer.hand.some(c => c && c.id === card.id));
     const isInspectableCard = isBoardInspectableCard(card);
     const cardOwnerNum = (card && card.cardType === 'character' && typeof game.findPlayerWithCharacter === 'function')
         ? game.findPlayerWithCharacter(card)
         : null;
     const isOpponentCharacterInspection = !!(cardOwnerNum && Number(cardOwnerNum) !== Number(localPlayerNum));
 
-    if (!canCurrentClientAct() && !isLocalInPlayCard && !isInspectableCard) {
+    if (!canCurrentClientAct() && !isLocalInPlayCard && !isLocalHandCard && !isInspectableCard) {
         game.log('Not your turn.', 'warning');
         return;
     }
@@ -4484,7 +4534,7 @@ function showDiscardSelectionModal(player, cards, cardType, maxSelect, callback)
     if (!game.tempSelections) game.tempSelections = {};
     game.tempSelections.discardSelected = [];
     game.tempSelections.discardCallback = callback;
-    game.tempSelections.discardPlayer = game.players[playerNum];
+    game.tempSelections.discardPlayerNum = playerNum;
 
     let html = `<h2>Select from Discard Pile</h2>`;
     html += `<p>Select up to ${maxSelect} ${cardType} card(s)</p>`;
@@ -4763,7 +4813,8 @@ function toggleDiscardCard(cardId, maxSelect) {
 }
 
 function confirmDiscardSelection() {
-    const player = game.tempSelections.discardPlayer || game.players[game.currentPlayer];
+    const playerNum = Number(game.tempSelections.discardPlayerNum || game.currentPlayer);
+    const player = game.players[playerNum] || game.players[game.currentPlayer];
     const destination = game.tempSelections.discardDestination || 'hand';
     const shouldShuffle = !!game.tempSelections.discardShuffle;
 
@@ -4778,7 +4829,7 @@ function confirmDiscardSelection() {
                 } else if (destination === 'deck') {
                     player.deck.push(card);
                     if (shouldShuffle) {
-                        game.shuffleDeck(game.currentPlayer);
+                        game.shuffleDeck(playerNum);
                     }
                     game.log(`Shuffled ${card.name} into deck`, 'info');
                 } else {
@@ -4792,7 +4843,7 @@ function confirmDiscardSelection() {
     const callback = game.tempSelections.discardCallback;
     delete game.tempSelections.discardSelected;
     delete game.tempSelections.discardCallback;
-    delete game.tempSelections.discardPlayer;
+    delete game.tempSelections.discardPlayerNum;
     delete game.tempSelections.discardDestination;
     delete game.tempSelections.discardShuffle;
     game.blockAttackEnd = false;
@@ -4807,7 +4858,7 @@ function cancelDiscardSelection() {
     const callback = game.tempSelections.discardCallback;
     delete game.tempSelections.discardSelected;
     delete game.tempSelections.discardCallback;
-    delete game.tempSelections.discardPlayer;
+    delete game.tempSelections.discardPlayerNum;
     delete game.tempSelections.discardDestination;
     delete game.tempSelections.discardShuffle;
     game.blockAttackEnd = false;
@@ -5213,8 +5264,12 @@ function showCastReserveSelectionModal(player) {
         return;
     }
 
+    const uniqueItemNameCount = new Set(items.map((c) => c.name)).size;
+    const requiredCount = Math.min(3, uniqueItemNameCount);
+    game.tempSelections.castReserveRequiredCount = requiredCount;
+
     let html = `<h2>Cast Reserve</h2>`;
-    html += `<p>Select up to 3 unique items</p>`;
+    html += `<p>Select ${requiredCount} unique item${requiredCount === 1 ? '' : 's'} from your deck to reveal.</p>`;
     html += `<div class="target-selection">`;
 
     items.forEach(card => {
@@ -5266,9 +5321,10 @@ function confirmCastReserveSelection() {
     const player = game.players[game.currentPlayer];
     const opponentNum = game.currentPlayer === 1 ? 2 : 1;
     const selectedIds = game.tempSelections.castReserveSelected || [];
+    const requiredCount = Number(game.tempSelections.castReserveRequiredCount || 3);
 
-    if (selectedIds.length === 0) {
-        game.log('Cast Reserve: No items selected', 'info');
+    if (selectedIds.length !== requiredCount) {
+        game.log(`Cast Reserve: Select exactly ${requiredCount} unique item${requiredCount === 1 ? '' : 's'}.`, 'warning');
         return;
     }
 
@@ -5306,46 +5362,81 @@ function showCastReserveOpponentChoice(itemData, opponentNum, ownerNumOverride =
             ? itemData.map((item) => item ? { id: item.id, name: item.name } : null).filter(Boolean)
             : [];
     }
+    if (!Array.isArray(game.tempSelections.castReserveOpponentDiscardIds)) {
+        game.tempSelections.castReserveOpponentDiscardIds = [];
+    }
 
     if (!openModalForPlayer(opponentNum, 'showCastReserveOpponentChoice', [itemData, opponentNum, resolvedOwner, game.tempSelections.castReserveCards])) return;
 
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
+    const selectedDiscardIds = game.tempSelections.castReserveOpponentDiscardIds || [];
+    const discardRequired = Math.min(2, Array.isArray(itemData) ? itemData.length : 0);
 
     let html = `<h2>Cast Reserve</h2>`;
-    html += `<p>Your opponent revealed these items. Choose one to discard.</p>`;
+    html += `<p>Your opponent revealed these items. Choose ${discardRequired} to discard (${selectedDiscardIds.length}/${discardRequired}).</p>`;
     html += `<div class="target-selection">`;
 
     itemData.forEach(item => {
         const displayName = (item && item.name) ? item.name : (item && item.id ? item.id : 'Unknown Item');
         const itemId = (item && item.id) ? item.id : item;
-        html += `<div class="target-option" onclick="confirmCastReserveOpponentChoice('${itemId}')">${displayName}</div>`;
+        const selectedClass = selectedDiscardIds.includes(itemId) ? ' selected' : '';
+        html += `<div class="target-option${selectedClass}" onclick="toggleCastReserveOpponentChoice('${itemId}')">${displayName}</div>`;
     });
 
+    html += `</div>`;
+    html += `<div class="action-buttons">`;
+    html += `<button class="action-btn" onclick="confirmCastReserveOpponentChoice()">Confirm Discard</button>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
     html += `</div>`;
 
     content.innerHTML = html;
     modal.classList.remove('hidden');
 }
 
-function confirmCastReserveOpponentChoice(itemId) {
+function toggleCastReserveOpponentChoice(itemId) {
+    if (!game.tempSelections || !Array.isArray(game.tempSelections.castReserveCards)) return;
+    const selected = Array.isArray(game.tempSelections.castReserveOpponentDiscardIds)
+        ? game.tempSelections.castReserveOpponentDiscardIds
+        : [];
+    const discardRequired = Math.min(2, game.tempSelections.castReserveCards.length || 0);
+    const idx = selected.indexOf(itemId);
+    if (idx >= 0) {
+        selected.splice(idx, 1);
+    } else if (selected.length < discardRequired) {
+        selected.push(itemId);
+    }
+    game.tempSelections.castReserveOpponentDiscardIds = selected;
+    showCastReserveOpponentChoice(
+        game.tempSelections.castReserveItemData || [],
+        game.tempSelections.castReserveOpponent,
+        game.tempSelections.castReserveOwner,
+        game.tempSelections.castReserveCards
+    );
+}
+
+function confirmCastReserveOpponentChoice() {
     const ownerNum = game.tempSelections.castReserveOwner;
     const owner = game.players[ownerNum];
     const selectedCards = game.tempSelections.castReserveCards || [];
+    const selectedDiscardIds = game.tempSelections.castReserveOpponentDiscardIds || [];
+    const discardRequired = Math.min(2, selectedCards.length);
     if (!owner || !Array.isArray(selectedCards) || selectedCards.length === 0) {
         game.log('Cast Reserve selection data is unavailable.', 'warning');
         closeModal('action-modal');
         updateUI();
         return;
     }
-    const chosen = selectedCards.find(c => c.id === itemId);
-    const remaining = selectedCards.filter(c => c.id !== itemId);
-
-    if (chosen) {
+    if (selectedDiscardIds.length !== discardRequired) {
+        game.log(`Cast Reserve: Select exactly ${discardRequired} card${discardRequired === 1 ? '' : 's'} to discard.`, 'warning');
+        return;
+    }
+    const toDiscard = selectedCards.filter(c => selectedDiscardIds.includes(c.id));
+    const remaining = selectedCards.filter(c => !selectedDiscardIds.includes(c.id));
+    toDiscard.forEach((chosen) => {
         owner.discard.push(chosen);
         game.log(`Cast Reserve: Discarded ${chosen.name}`, 'info');
-    }
-
+    });
     remaining.forEach(card => owner.hand.push(card));
 
     const castCard = owner.hand.find(c => c.name === 'Cast Reserve');
@@ -5359,6 +5450,8 @@ function confirmCastReserveOpponentChoice(itemId) {
     delete game.tempSelections.castReserveOwner;
     delete game.tempSelections.castReserveItemData;
     delete game.tempSelections.castReserveOpponent;
+    delete game.tempSelections.castReserveRequiredCount;
+    delete game.tempSelections.castReserveOpponentDiscardIds;
 
     closeModal('action-modal');
     updateUI();
@@ -5589,6 +5682,9 @@ function confirmOpponentDiscard() {
     updateUI();
 
     if (shouldEndTurn) {
+        if (multiplayer.enabled && multiplayer.isApplyingRemote) {
+            return;
+        }
         endTurn();
     }
 }
@@ -5777,6 +5873,84 @@ function forceOpponentSwitch(opponentNum, benchIndex) {
         player.discard.push(iceSkatesCard);
     }
 
+    closeModal('action-modal');
+    updateUI();
+}
+
+function showEmmaSwitchModal(chooserPlayerNum, opponentNum, supporterCardId = null) {
+    const resolvedChooser = Number.isFinite(Number(chooserPlayerNum)) ? Number(chooserPlayerNum) : Number(game.currentPlayer);
+    const resolvedOpponent = Number.isFinite(Number(opponentNum)) ? Number(opponentNum) : (resolvedChooser === 1 ? 2 : 1);
+    if (!openModalForPlayer(resolvedChooser, 'showEmmaSwitchModal', [resolvedChooser, resolvedOpponent, supporterCardId])) return;
+
+    const opponent = game.players[resolvedOpponent];
+    if (!opponent) return;
+    const benchedChars = (opponent.bench || []).filter(Boolean);
+    if (benchedChars.length === 0) {
+        game.log('Emma: Opponent has no benched characters', 'info');
+        closeModal('action-modal');
+        updateUI();
+        return;
+    }
+
+    game.tempSelections = game.tempSelections || {};
+    if (supporterCardId) {
+        game.tempSelections.emmaSupporterCardId = supporterCardId;
+    }
+
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+
+    let html = '<h2>Emma - Musical Chairs</h2>';
+    html += '<p>Choose which opposing benched character becomes active.</p>';
+    html += '<div class="target-selection">';
+    opponent.bench.forEach((char, idx) => {
+        if (!char) return;
+        html += `<div class="target-option" onclick="executeEmmaSwitch(${resolvedChooser}, ${resolvedOpponent}, ${idx})">${char.name}</div>`;
+    });
+    html += '</div>';
+    html += '<button class="action-btn" onclick="closeModal(\'action-modal\')">Cancel</button>';
+
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function executeEmmaSwitch(chooserPlayerNum, opponentNum, benchIndex) {
+    const resolvedChooser = Number.isFinite(Number(chooserPlayerNum)) ? Number(chooserPlayerNum) : Number(game.currentPlayer);
+    const resolvedOpponent = Number.isFinite(Number(opponentNum)) ? Number(opponentNum) : (resolvedChooser === 1 ? 2 : 1);
+    const opponent = game.players[resolvedOpponent];
+    if (!opponent || !opponent.active) return;
+
+    const numericBenchIndex = Number(benchIndex);
+    const benchChar = Number.isFinite(numericBenchIndex) ? opponent.bench[numericBenchIndex] : null;
+    if (!benchChar) {
+        game.log('Emma: Invalid bench target selected', 'warning');
+        return;
+    }
+
+    opponent.bench[numericBenchIndex] = opponent.active;
+    opponent.active = benchChar;
+    game.nextTurnEffects[resolvedOpponent].cannotRetreat = true;
+    game.log(`Emma: Switched opponent's active to ${benchChar.name}. They cannot retreat next turn.`, 'info');
+
+    const supporterId = game.tempSelections && game.tempSelections.emmaSupporterCardId
+        ? game.tempSelections.emmaSupporterCardId
+        : null;
+    const chooser = game.players[resolvedChooser];
+    if (chooser) {
+        let emmaCard = supporterId ? chooser.hand.find(c => c.id === supporterId) : null;
+        if (!emmaCard) {
+            emmaCard = chooser.hand.find(c => c.name === 'Emma');
+        }
+        if (emmaCard) {
+            chooser.hand = chooser.hand.filter(c => c.id !== emmaCard.id);
+            chooser.discard.push(emmaCard);
+            game.supporterPlayedThisTurn = true;
+        }
+    }
+
+    if (game.tempSelections) {
+        delete game.tempSelections.emmaSupporterCardId;
+    }
     closeModal('action-modal');
     updateUI();
 }
@@ -7309,24 +7483,15 @@ function executeSupporterEffect(card) {
             break;
 
         case 'Emma':
-            // Switch opponent's active with one of their benched characters
-            if (opponent.bench.some(slot => slot !== null)) {
-                const benchedChars = opponent.bench.filter(c => c);
-                const targetName = prompt(`Choose which of opponent's benched characters to switch with their active:\n${benchedChars.map(c => c.name).join(', ')}`);
-                const target = benchedChars.find(c => c.name === targetName);
-                if (target) {
-                    const benchIndex = opponent.bench.indexOf(target);
-                    const temp = opponent.active;
-                    opponent.active = opponent.bench[benchIndex];
-                    opponent.bench[benchIndex] = temp;
-                    game.log(`Emma: Switched opponent's ${opponent.active.name} to active`, 'info');
-                    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
-                    game.nextTurnEffects[opponentNum].cannotRetreat = true;
-                }
-            } else {
+            // User of Emma chooses an opponent bench target to switch in.
+            if (!opponent.bench.some(slot => slot !== null)) {
                 game.log('Emma: Opponent has no benched characters', 'info');
+                break;
             }
-            break;
+            game.tempSelections = game.tempSelections || {};
+            game.tempSelections.emmaSupporterCardId = card.id;
+            showEmmaSwitchModal(game.currentPlayer, game.currentPlayer === 1 ? 2 : 1, card.id);
+            return true; // Wait for modal
 
         case 'Victoria Chen':
             // Search for up to 3 characters of chosen type
@@ -8548,25 +8713,29 @@ function useActivatedAbility(cardId, abilitySlot) {
 
         case 'Reverse Heist':
             // David Man: Shuffle discard, randomly choose 3, put items/tools on top of deck
+            if (card.usedReverseHeistThisTurn) {
+                showLocalAlert('Reverse Heist can only be used once per turn!');
+                closeModal('action-modal');
+                break;
+            }
             if (player.discard.length < 3) {
                 showLocalAlert('Need at least 3 cards in discard pile!');
                 closeModal('action-modal');
                 break;
             }
 
-            // Shuffle discard
-            const shuffledDiscard = [...player.discard];
-            for (let i = shuffledDiscard.length - 1; i > 0; i--) {
+            // Shuffle discard indices to pick 3 without mutating/discard reference pitfalls.
+            const shuffledIndices = player.discard.map((_, index) => index);
+            for (let i = shuffledIndices.length - 1; i > 0; i--) {
                 const j = randInt(i + 1);
-                [shuffledDiscard[i], shuffledDiscard[j]] = [shuffledDiscard[j], shuffledDiscard[i]];
+                [shuffledIndices[i], shuffledIndices[j]] = [shuffledIndices[j], shuffledIndices[i]];
             }
-            // Pick random 3
-            const randomThree = shuffledDiscard.slice(0, 3);
-            // Remove these 3 from discard
-            randomThree.forEach(card => {
-                const idx = player.discard.indexOf(card);
-                if (idx > -1) player.discard.splice(idx, 1);
-            });
+
+            const pickedIndices = shuffledIndices.slice(0, 3);
+            const pickedIndexSet = new Set(pickedIndices);
+            const randomThree = pickedIndices.map(index => player.discard[index]).filter(Boolean);
+            player.discard = player.discard.filter((_, index) => !pickedIndexSet.has(index));
+
             // Filter for items/tools
             const itemsAndTools = randomThree.filter(c => c.cardType === 'item' || c.cardType === 'tool');
             // Non-items/tools return to discard
@@ -8574,6 +8743,7 @@ function useActivatedAbility(cardId, abilitySlot) {
             if (nonItems.length > 0) {
                 player.discard.push(...nonItems);
             }
+            card.usedReverseHeistThisTurn = true;
 
             if (itemsAndTools.length > 0) {
                 // Put items/tools on top of deck in order
@@ -10391,6 +10561,26 @@ function applyCherryHeal(charId, healAmount) {
         const actualHeal = Math.min(healAmount, char.damage);
         char.damage -= actualHeal;
         game.log(`Cherry Flavored Valve Oil: ${char.name} healed ${actualHeal} HP!`, 'heal');
+    }
+
+    const deferredForcedSwitchPlayer = Number(game.tempSelections && game.tempSelections.cherryDeferredForcedSwitchPlayer);
+    if (game.tempSelections) {
+        delete game.tempSelections.cherryDeferredForcedSwitchPlayer;
+    }
+
+    if (Number.isFinite(deferredForcedSwitchPlayer)) {
+        const shouldResumeAttackEnd = !!game.pendingAttackEndTurn;
+        if (shouldResumeAttackEnd) {
+            game.pendingAttackEndTurn = false;
+        }
+        closeModal('action-modal');
+        updateUI();
+        if (shouldResumeAttackEnd) {
+            game.pendingAttackEndTurn = true;
+        }
+        promptForcedActiveReplacementIfNeeded(deferredForcedSwitchPlayer);
+        tryResumePendingAttackEndTurn();
+        return;
     }
 
     closeModal('action-modal');
@@ -12593,12 +12783,16 @@ function performMoveEffect(attacker, target, move) {
         // ===== GUITAR MOVES =====
         case 'Domain Expansion':
             // Discard all energy, 50 damage to all opponents
+            const domainOwnerNum = game.findPlayerWithCharacter(attacker) || game.currentPlayer;
+            const domainOwner = game.players[domainOwnerNum] || player;
+            const domainOpponentNum = domainOwnerNum === 1 ? 2 : 1;
+            const domainOpponent = game.players[domainOpponentNum] || opponent;
             const guitarEnergyCount = attacker.attachedEnergy.length;
-            attacker.attachedEnergy.forEach(e => player.discard.push(e));
+            attacker.attachedEnergy.forEach(e => domainOwner.discard.push(e));
             attacker.attachedEnergy = [];
             game.log(`Domain Expansion: Discarded ${guitarEnergyCount} energy`);
 
-            [opponent.active, ...opponent.bench].filter(c => c).forEach(oppChar => {
+            [domainOpponent.active, ...domainOpponent.bench].filter(c => c).forEach(oppChar => {
                 const domainDamage = calculateDamage(attacker, oppChar, 50, move);
                 game.dealDamage(oppChar, domainDamage);
                 game.log(`Domain Expansion: ${oppChar.name} takes ${domainDamage} damage!`, 'damage');
@@ -13247,7 +13441,11 @@ function performMoveEffect(attacker, target, move) {
             const cherryDamage = calculateDamage(attacker, target, 40, move);
             const targetDamageBefore = target ? (target.damage || 0) : 0;
             const targetHpBefore = target ? (target.hp - targetDamageBefore) : 0;
-            game.dealDamage(target, cherryDamage, attacker);
+            const targetOwnerNum = target ? game.findPlayerWithCharacter(target) : null;
+            const willKnockOutTarget = !!(target && (targetDamageBefore + cherryDamage) >= (target.hp || 0));
+            game.dealDamage(target, cherryDamage, attacker, {
+                suppressForcedSwitchPrompt: willKnockOutTarget
+            });
             const currentTarget = target ? [opponent.active, ...opponent.bench].find(c => c && c.id === target.id) : null;
             const targetDamageAfter = currentTarget ? (currentTarget.damage || 0) : targetDamageBefore;
             const actualDealt = currentTarget
@@ -13257,10 +13455,17 @@ function performMoveEffect(attacker, target, move) {
 
             const benchedForCherry = player.bench.filter(c => c);
             if (benchedForCherry.length > 0 && actualDealt > 0) {
+                if (willKnockOutTarget && Number.isFinite(Number(targetOwnerNum))) {
+                    game.tempSelections = game.tempSelections || {};
+                    game.tempSelections.cherryDeferredForcedSwitchPlayer = Number(targetOwnerNum);
+                }
                 showCherryHealSelection(player, benchedForCherry, actualDealt);
                 return true;
             } else if (benchedForCherry.length === 0) {
                 game.log('Cherry Flavored Valve Oil: No benched characters to heal', 'info');
+            }
+            if (willKnockOutTarget && Number.isFinite(Number(targetOwnerNum))) {
+                promptForcedActiveReplacementIfNeeded(Number(targetOwnerNum));
             }
             break;
 
@@ -13371,6 +13576,7 @@ const EXPORTED_ACTIONS = {
     toggleCastReserveItem,
     confirmCastReserveSelection,
     showCastReserveOpponentChoice,
+    toggleCastReserveOpponentChoice,
     confirmCastReserveOpponentChoice,
     selectStadiumSearch,
     showSteinertPracticeDiscardModal,
@@ -13388,6 +13594,8 @@ const EXPORTED_ACTIONS = {
     confirmFoldingStand,
     selectBUOStandCard,
     switchWithBench,
+    showEmmaSwitchModal,
+    executeEmmaSwitch,
     showForcedActiveSwitchModal,
     confirmForcedActiveSwitch,
     selectConcertRosterCharacter,

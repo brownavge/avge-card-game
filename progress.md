@@ -677,3 +677,84 @@ Original prompt: Can you scan through this web game for possible issues and bugs
   - `node output/folding_stand_bench_modifier_test.mjs` ✅
   - `node output/ui_smoke_test.mjs` ✅
   - `node output/supporter_smoke_test.mjs` ✅
+
+2026-03-06 (follow-up bugfix pass)
+- User-reported gameplay fixes implemented:
+  - Off-turn card clicking: local hand cards are now inspectable even when it is not your turn (view-only modal behavior preserved).
+  - David Man `Reverse Heist`:
+    - fixed discard selection/removal logic to remove picked cards by index set (avoids identity/reference mismatch issues that could duplicate cards),
+    - added once-per-turn enforcement (`usedReverseHeistThisTurn`) and turn reset wiring.
+  - Emma supporter (`Toxic Sabotage`):
+    - replaced unsynced local `prompt(...)` flow with multiplayer-safe modal flow,
+    - chooser is now explicitly the Emma user (card owner), not the opponent,
+    - added synced handlers `showEmmaSwitchModal` and `executeEmmaSwitch` and proper supporter discard/turn-state updates.
+  - Cherry Flavored Valve Oil (KO case):
+    - added deferred forced-active replacement handling so KO forced-switch prompt does not clobber Cherry heal flow,
+    - ensured forced replacement prompt resumes correctly after Cherry heal selection.
+  - Domain Expansion:
+    - now resolves targets using attacker owner (not `game.currentPlayer` assumptions), preventing self-side damage in copied/borrowed context edge cases.
+- UI update requested by user:
+  - made KO count display more prominent in header (`KOs: X/3`) for both players via `.ko-stat` markup + high-contrast styling.
+
+Validation completed:
+- Syntax checks:
+  - `node --check game.js`
+  - `node --check output/offturn_reverseheist_regression_test_v2.mjs`
+  - `node --check output/emma_domain_regression_test.mjs`
+  - `node --check output/cherry_ko_regression_test.mjs`
+- Regression runs (all passed):
+  - `node output/offturn_reverseheist_regression_test_v2.mjs`
+  - `node output/emma_domain_regression_test.mjs`
+  - `node output/cherry_ko_regression_test.mjs`
+  - `node output/ui_smoke_test.mjs`
+- Skill Playwright client run completed against `http://localhost:3001` after fixes.
+
+Notes:
+- A first draft script (`output/offturn_reverse_heist_regression_test.mjs`) remains in `output/`; `output/offturn_reverseheist_regression_test_v2.mjs` is the validated one.
+- Cast Reserve rules update (2026-03-06, follow-up):
+  - Updated item text to: reveal 3 unique items, opponent chooses 2 to discard, owner gets 1 to hand.
+  - Gameplay flow now enforces exact selection count (up to available unique count if fewer than 3), then opponent multi-select discard (exactly 2 when 3 revealed).
+  - Added `toggleCastReserveOpponentChoice` handler and synced modal state fields for discard selection.
+  - Updated `output/item_rules_regression_test.mjs` to verify the new 2-discard behavior.
+- Validation:
+  - `node --check game.js`
+  - `node --check cards.js`
+  - `node --check output/item_rules_regression_test.mjs`
+  - `node output/item_rules_regression_test.mjs` (passed)
+  - `node output/multiplayer_item_sync_test.mjs` hit an existing visibility timeout in Annotated Score section (`#action-modal .target-option` click), not in Cast Reserve path.
+- Multiplayer custom deck fix + opponent hand counter (2026-03-06 follow-up):
+  - Root cause: custom deck names were shared in multiplayer, but custom deck card lists were local-only (`localStorage`), so host could not construct the other player's custom deck and could fall back to template decks.
+  - Implemented custom deck payload serialization on JOIN (`customDeckCards`) for `custom:*` selections.
+  - Server now validates/stores per-player custom deck card payloads in room config (`deck1CustomCards`, `deck2CustomCards`) and propagates them to both clients.
+  - Client `initGame` now accepts deck overrides and `buildDeckFromName` uses server-provided custom deck cards when present.
+  - Added explicit turn-info UI row: `Opponent hand: N` (`#opponent-hand-count`) and wired it in `updateUI`.
+- Alice Wang + Kiki's Headband desync hardening/check:
+  - Added guard in `confirmOpponentDiscard` to avoid calling `endTurn()` during remote replay (`multiplayer.isApplyingRemote`), preventing occasional double-advance/desync race in end-turn discard flows.
+  - Added focused multiplayer regression for scenario: both Alice active, attach Kiki's Headband, end-turn discard prompt path, verify current-player sync and next-player action availability.
+- Validation:
+  - `node --check game.js`
+  - `node --check server/index.js`
+  - `node --check server/roomManager.js`
+  - `node output/custom_deck_multiplayer_regression_test.mjs` (passed)
+  - `node output/opponent_hand_counter_test.mjs` (passed)
+  - `node output/alice_kiki_endturn_sync_test.mjs` (passed)
+
+2026-03-06 (discard pile stale UI fix)
+- User report: removing an item from discard could leave it visually present in discard UI.
+- Root cause identified in `game.js` discard chooser state:
+  - `showDiscardSelectionModal(...)` stored `game.tempSelections.discardPlayer` as an object reference (`game.players[playerNum]`).
+  - In multiplayer/state-refresh flows, `game` can be replaced, making that stored object stale.
+  - `confirmDiscardSelection()` then mutated stale player object, so live UI/state still showed the card in discard.
+- Fix implemented:
+  - Store `game.tempSelections.discardPlayerNum` (primitive) instead of player object ref.
+  - Resolve fresh player object in `confirmDiscardSelection()` from `game.players[playerNum]`.
+  - Use `game.shuffleDeck(playerNum)` for deck destination to avoid stale owner assumptions.
+  - Updated cleanup paths in `confirmDiscardSelection()` and `cancelDiscardSelection()` to clear `discardPlayerNum`.
+- Validation run:
+  - `node --check game.js` ✅
+  - `node output/alice_kiki_endturn_sync_test.mjs` ✅
+  - `node output/custom_deck_multiplayer_regression_test.mjs` ✅
+  - `node output/opponent_hand_counter_test.mjs` ✅
+  - `node output/item_rules_regression_test.mjs` ⚠️ existing modal interception timeout in Cast Reserve step (`#action-modal` intercept)
+  - `node output/multiplayer_item_sync_test.mjs` ⚠️ existing Annotated Score visibility timeout in harness
+- Server process used for validation (`:3001`) was stopped after tests.

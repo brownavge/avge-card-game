@@ -41,6 +41,20 @@ function validateBenchArray(arr) {
   return arr.every((card) => card === null || isPlainObject(card));
 }
 
+function validateCustomDeckCards(cards) {
+  if (cards == null) return true;
+  if (!Array.isArray(cards) || cards.length === 0 || cards.length > 80) return false;
+  return cards.every((card) => (
+    isPlainObject(card) &&
+    typeof card.name === 'string' &&
+    card.name.length > 0 &&
+    card.name.length <= 120 &&
+    typeof card.cardCategory === 'string' &&
+    card.cardCategory.length > 0 &&
+    card.cardCategory.length <= 40
+  ));
+}
+
 function isPlausibleStateSnapshot(snapshot) {
   if (!isPlainObject(snapshot)) return false;
   if (![1, 2].includes(Number(snapshot.currentPlayer))) return false;
@@ -97,8 +111,13 @@ wss.on('connection', (ws) => {
       const {
         roomId: requestedRoomId,
         deckName = 'strings-aggro',
+        customDeckCards = null,
         playtestMode = false
       } = msg;
+      if (!validateCustomDeckCards(customDeckCards)) {
+        ws.send(JSON.stringify({ type: SERVER_EVENTS.ERROR, message: 'Invalid custom deck payload.' }));
+        return;
+      }
 
       const normalizedRequestedRoomId = normalizeRequestedRoomId(requestedRoomId);
       let roomId = normalizedRequestedRoomId;
@@ -120,7 +139,7 @@ wss.on('connection', (ws) => {
       ws.playerNumber = session.playerNumber;
       ws.sessionToken = session.sessionToken;
 
-      registerDeckForSession(room, session.sessionToken, deckName);
+      registerDeckForSession(room, session.sessionToken, deckName, customDeckCards);
 
       if (roomReady(room) && !room.state) {
         room.state = createGameState({

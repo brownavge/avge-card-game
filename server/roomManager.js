@@ -25,9 +25,9 @@ export function generateRoomId() {
   return String(Math.floor(1000 + Math.random() * 9000));
 }
 
-export function createRoom(roomId, { deck1Name = null, deck2Name = null, playtestMode = false } = {}) {
+export function createRoom(roomId, { deck1Name = null, deck2Name = null, deck1CustomCards = null, deck2CustomCards = null, playtestMode = false } = {}) {
   const seed = Math.floor(Math.random() * 1_000_000_000);
-  const config = { deck1Name, deck2Name, playtestMode, seed };
+  const config = { deck1Name, deck2Name, deck1CustomCards, deck2CustomCards, playtestMode, seed };
   const state = (deck1Name && deck2Name)
     ? createGameState({ deck1Name, deck2Name, playtestMode, seed })
     : null;
@@ -118,7 +118,7 @@ export function assignPlayer(room, requestedSessionToken = null) {
   return session;
 }
 
-export function registerDeckForSession(room, sessionToken, deckName) {
+export function registerDeckForSession(room, sessionToken, deckName, customDeckCards = null) {
   if (!room || !sessionToken || !deckName || !room.sessions.has(sessionToken)) return;
   const session = room.sessions.get(sessionToken);
   if (!session || !session.playerNumber) return;
@@ -129,11 +129,13 @@ export function registerDeckForSession(room, sessionToken, deckName) {
   }
   room.players[playerNumber].deckName = deckName;
 
-  if (playerNumber === 1 && !room.config.deck1Name) {
+  if (playerNumber === 1) {
     room.config.deck1Name = deckName;
+    room.config.deck1CustomCards = Array.isArray(customDeckCards) ? customDeckCards : null;
   }
-  if (playerNumber === 2 && !room.config.deck2Name) {
+  if (playerNumber === 2) {
     room.config.deck2Name = deckName;
+    room.config.deck2CustomCards = Array.isArray(customDeckCards) ? customDeckCards : null;
   }
 
   if (isRoomReady(room) && !room.state) {

@@ -103,11 +103,13 @@ async function run() {
 
   const opponentRevealOptions = page.locator('#action-modal .target-option');
   const revealTexts = await opponentRevealOptions.allInnerTexts();
-  assert(revealTexts.length >= 1, 'Expected Cast Reserve reveal choices for opponent.');
+  assert(revealTexts.length >= 3, 'Expected 3 Cast Reserve reveal choices for opponent.');
   assert(revealTexts.every((t) => t.trim().length > 0), `Expected non-empty Cast Reserve option labels, got: ${JSON.stringify(revealTexts)}`);
 
-  const keptName = revealTexts.length > 1 ? revealTexts[1].trim() : revealTexts[0].trim();
+  const keptName = revealTexts[2].trim();
   await opponentRevealOptions.first().click();
+  await opponentRevealOptions.nth(1).click();
+  await page.locator('#action-modal .action-btn', { hasText: 'Confirm Discard' }).first().click();
   await page.waitForTimeout(200);
 
   await page.locator('#hand-cards .card', { hasText: keptName }).first().click();

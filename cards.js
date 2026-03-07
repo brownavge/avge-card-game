@@ -1075,7 +1075,7 @@ const ITEMS = {
     CAST_RESERVE: {
         name: 'Cast Reserve',
         type: 'item',
-        effect: 'Search for three unique items from your deck and reveal them. Your opponent chooses one to discard. Put the others in your hand.'
+        effect: 'Search for three unique items from your deck and reveal them. Your opponent chooses two to discard. Put one of the others in your hand.'
     },
     FOLDING_STAND: {
         name: 'Folding Stand',

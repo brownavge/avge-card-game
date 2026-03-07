@@ -6020,3 +6020,29 @@ body.multiplayer-perspective-p2 #player2-board .board-section {
         justify-self: stretch !important;
     }
 }
+
+/* Keep KO progress visible in both player headers. */
+#game-header .player-info .stats .ko-stat {
+    font-weight: 800;
+    color: #071a49 !important;
+    background: rgba(255, 224, 138, 0.9);
+    border: 1px solid rgba(152, 111, 0, 0.5);
+    border-radius: 8px;
+    padding: 3px 8px;
+}
+
+#p1-ko-count,
+#p2-ko-count {
+    font-size: 1.08em;
+    color: #7a1900 !important;
+}
+
+#opponent-hand-info {
+    font-weight: 700;
+    color: #0a2f6f;
+}
+
+#opponent-hand-count {
+    font-weight: 800;
+    color: #7a1900;
+}
