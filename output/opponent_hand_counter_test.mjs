@@ -24,8 +24,12 @@ async function run() {
 
   const opponentLabel = await page.locator('#opponent-hand-info').innerText();
   const opponentCount = await page.locator('#opponent-hand-count').innerText();
+  const opponentKoLabel = await page.locator('#opponent-ko-info').innerText();
+  const opponentKoCount = await page.locator('#opponent-ko-count').innerText();
   assert(/Opponent hand:/i.test(opponentLabel), `Opponent hand label missing: ${opponentLabel}`);
   assert(/^\d+$/.test(opponentCount), `Opponent hand count should be numeric, got: ${opponentCount}`);
+  assert(/Opponent KOs:/i.test(opponentKoLabel), `Opponent KO label missing: ${opponentKoLabel}`);
+  assert(/^\d+$/.test(opponentKoCount), `Opponent KO count should be numeric, got: ${opponentKoCount}`);
 
   assert(pageErrors.length === 0, `Page errors found:\n${pageErrors.join('\n')}`);
   await browser.close();

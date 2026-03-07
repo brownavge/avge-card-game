@@ -178,10 +178,19 @@ wss.on('connection', (ws) => {
     }
 
     if (msg.type === ACTION_TYPES.RESUME) {
-      const { roomId, sessionToken } = msg;
+      const {
+        roomId,
+        sessionToken,
+        deckName = null,
+        customDeckCards = null
+      } = msg;
       const room = getRoom(roomId);
       if (!room || !sessionToken || !room.sessions.has(sessionToken)) {
         ws.send(JSON.stringify({ type: SERVER_EVENTS.ERROR, message: 'Invalid resume token.' }));
+        return;
+      }
+      if (!validateCustomDeckCards(customDeckCards)) {
+        ws.send(JSON.stringify({ type: SERVER_EVENTS.ERROR, message: 'Invalid custom deck payload.' }));
         return;
       }
 
@@ -191,6 +200,9 @@ wss.on('connection', (ws) => {
       const session = room.sessions.get(sessionToken);
       ws.playerNumber = session.playerNumber;
       touchSession(room, sessionToken);
+      if (deckName) {
+        registerDeckForSession(room, sessionToken, deckName, customDeckCards);
+      }
 
       if (roomReady(room) && !room.state) {
         room.state = createGameState({

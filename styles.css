@@ -6042,7 +6042,17 @@ body.multiplayer-perspective-p2 #player2-board .board-section {
     color: #0a2f6f;
 }
 
+#opponent-ko-info {
+    font-weight: 700;
+    color: #0a2f6f;
+}
+
 #opponent-hand-count {
+    font-weight: 800;
+    color: #7a1900;
+}
+
+#opponent-ko-count {
     font-weight: 800;
     color: #7a1900;
 }

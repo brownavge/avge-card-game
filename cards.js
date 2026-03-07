@@ -79,7 +79,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Intense Echo', cost: 3, damage: 30, effect: 'Your opponent\'s benched characters take 10 damage.' }
+            { name: 'Intense Echo', cost: 3, damage: 50, effect: 'Your opponent\'s benched characters take 10 damage.' }
         ],
         retreatCost: 1
     },
@@ -434,7 +434,7 @@ const CHARACTERS = {
         type: [TYPES.PIANO],
         hp: 110,
         moves: [
-            { name: 'Small Ensemble Committee', cost: 2, damage: 0, effect: 'If another small ensemble committee member is in play, this does 20 damage to each opposing character. If at least two of them are in play, it does 40 damage to each opposing character.' },
+            { name: 'Small Ensemble Committee', cost: 2, damage: 0, effect: 'Committee members: Evelyn Wu, Luke Xu, David Man, Roberto Gonzales, Bokai Bi, Jennie Wang. If another committee member is in play, this does 20 damage to each opposing character. If at least two other committee members are in play, it does 40 damage to each opposing character.' },
             { name: 'Grand Piano', cost: 3, damage: 60, effect: '+20 damage if the stadium in play is a performance hall.' }
         ],
         retreatCost: 2

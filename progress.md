@@ -758,3 +758,82 @@ Notes:
   - `node output/item_rules_regression_test.mjs` ⚠️ existing modal interception timeout in Cast Reserve step (`#action-modal` intercept)
   - `node output/multiplayer_item_sync_test.mjs` ⚠️ existing Annotated Score visibility timeout in harness
 - Server process used for validation (`:3001`) was stopped after tests.
+
+2026-03-06 (Victoria selection null-safe + multiplayer sync hardening)
+- User-reported runtime error fixed:
+  - `Action "confirmVictoriaSelection" failed (local): Cannot read properties of undefined (reading 'victoriaSelected')`
+- Root cause:
+  - Victoria handlers assumed `game.tempSelections` and `victoriaSelected` always exist.
+  - Modal-gated setup state for Victoria selection was initialized after `openModalForPlayer(...)`, which can skip modal rendering on remote replay clients.
+- Fixes in `game.js`:
+  - `showVictoriaCharacterSelectionModal(...)` now initializes Victoria temp-selection state before modal gating.
+  - Store `victoriaPlayerNum` (number) instead of relying on object refs.
+  - `toggleVictoriaCharacter(...)` now initializes `game.tempSelections` if missing and null-checks DOM elements before class toggles.
+  - `confirmVictoriaSelection(...)` now safely reads selection state via guarded locals, handles missing state gracefully, and uses `playerNum`-scoped shuffle.
+  - Added cleanup for `victoriaPlayerNum` on confirm.
+- Validation:
+  - `node --check game.js` ✅
+  - `node output/supporter_smoke_test.mjs` ✅ (includes Victoria Chen)
+
+2026-03-06 (Damper Pedal total-damage fix)
+- User report: Damper Pedal did not reliably reduce opponent attack damage; should reduce total attack output, not just base damage.
+- Root cause in `game.js`:
+  - Damper reduction was applied mid-`calculateDamage()` and consumed immediately.
+  - This could miss later modifiers and only affect the first damage instance in multi-hit/multi-target attacks.
+- Fix implemented:
+  - Attack context now captures whether Damper applies for the attacking player's current attack (`currentAttackContext.applyDamperPedal`) at `executeAttack` start.
+  - Damper flag (`nextTurnEffects[player].damperPedal`) is consumed once when attack context is created.
+  - Damage halving moved to the end of `calculateDamage()` after all standard attack/defense modifiers.
+  - Halving now uses rounded-up semantics (`Math.ceil(damage / 2)`) to match card text.
+  - Damper log is emitted once per attack via `currentAttackContext.damperPedalLogged`.
+- Validation:
+  - `node --check game.js` ✅
+  - `node output/folding_stand_bench_modifier_test.mjs` ✅
+  - `node output/ui_smoke_test.mjs` ✅
+  - `node output/emma_domain_regression_test.mjs` ✅
+
+2026-03-06 (multiplayer custom deck intermittency hardening)
+- User report: multiplayer custom decks still intermittently fail (sometimes falling back to default behavior).
+- Investigation:
+  - Baseline `custom_deck_multiplayer_regression_test.mjs` passed repeatedly (15-run loop), so issue appears data/race-path dependent.
+  - Identified brittle custom payload serialization path:
+    - legacy/custom deck entries without canonical `cardCategory` could serialize invalid categories from `type` (e.g., instrument arrays), causing host reconstruction mismatches.
+  - Identified resume-path gap:
+    - `RESUME` flow did not send/apply current deck selection, so reconnect/resume could preserve stale deck registration.
+- Fixes implemented:
+  - `game.js`:
+    - Added deck category normalization helpers:
+      - `inferDeckCardCategoryFromName(...)`
+      - `normalizeDeckCardCategory(...)`
+    - `getCustomDeckPayload(...)` now serializes robustly from `cardCategory/cardType/type` and infers category by card name when needed.
+    - `buildDeckFromName(...)` now uses normalized category resolution for custom deck entries.
+    - Multiplayer `RESUME` message now includes `deckName`, `customDeckCards`, and `playtestMode` (same payload fidelity as JOIN).
+  - `server/index.js`:
+    - `RESUME` now accepts optional `deckName/customDeckCards`, validates payload, and applies `registerDeckForSession(...)` when provided.
+- New regression coverage:
+  - Added `output/custom_deck_legacy_payload_regression_test.mjs`.
+  - Verifies multiplayer works when a custom deck is stored in legacy format (`type: ['Piano']`, no `cardCategory`) and still resolves to expected character deck remotely.
+- Validation:
+  - `node --check game.js` ✅
+  - `node --check server/index.js` ✅
+  - `node --check output/custom_deck_legacy_payload_regression_test.mjs` ✅
+  - `node output/custom_deck_multiplayer_regression_test.mjs` ✅
+  - `node output/custom_deck_legacy_payload_regression_test.mjs` ✅
+  - Repeated stability loop: `custom_deck_multiplayer_regression_test.mjs` passed 10/10 after patch.
+  - Skill Playwright client run completed against `http://localhost:3001` and artifacts inspected:
+    - screenshot: `output/web-game/shot-0.png`
+    - state: `output/web-game/state-0.json`
+
+2026-03-06 (opponent KO visibility in multiplayer)
+- User report: opponent character KO count still not clearly visible in multiplayer.
+- UI update:
+  - Added explicit turn-panel row: `Opponent KOs: X/3` (`#opponent-ko-info` / `#opponent-ko-count`) in `index.html`.
+  - Wired `updateUI()` to compute opponent by local multiplayer perspective (`localPlayer -> opponentPlayerNum`) and update `#opponent-ko-count` each render.
+  - Added matching styling for opponent KO label/value in `styles.css` to mirror opponent hand counter readability.
+- Regression update:
+  - Extended `output/opponent_hand_counter_test.mjs` to assert opponent KO label exists and opponent KO count is numeric.
+- Validation:
+  - `node --check game.js` ✅
+  - `node --check output/opponent_hand_counter_test.mjs` ✅
+  - `node output/opponent_hand_counter_test.mjs` ✅
+  - `node output/custom_deck_multiplayer_regression_test.mjs` ✅

@@ -1817,6 +1817,27 @@ function normalizeRoomCodeInput(value) {
     return digits.slice(0, 4);
 }
 
+const VALID_DECK_CARD_CATEGORIES = new Set(['character', 'item', 'tool', 'supporter', 'stadium']);
+
+function inferDeckCardCategoryFromName(cardName) {
+    const name = String(cardName || '');
+    if (!name) return null;
+    if (Object.values(CHARACTERS).some((c) => c && c.name === name)) return 'character';
+    if (Object.values(ITEMS).some((i) => i && i.name === name)) return 'item';
+    if (Object.values(TOOLS).some((t) => t && t.name === name)) return 'tool';
+    if (Object.values(SUPPORTERS).some((s) => s && s.name === name)) return 'supporter';
+    if (Object.values(STADIUMS).some((s) => s && s.name === name)) return 'stadium';
+    return null;
+}
+
+function normalizeDeckCardCategory(category, cardName = '') {
+    if (typeof category === 'string' && category.trim()) {
+        const normalized = category.trim().toLowerCase();
+        if (VALID_DECK_CARD_CATEGORIES.has(normalized)) return normalized;
+    }
+    return inferDeckCardCategoryFromName(cardName);
+}
+
 function getCustomDeckPayload(deckName) {
     if (!deckName || typeof deckName !== 'string' || !deckName.startsWith('custom:')) return null;
     const customDeckName = deckName.substring(7);
@@ -1825,10 +1846,17 @@ function getCustomDeckPayload(deckName) {
         const deck = customDecks && customDecks[customDeckName];
         if (!Array.isArray(deck) || deck.length === 0) return null;
         return deck
-            .map((card) => ({
-                name: card && card.name ? String(card.name) : '',
-                cardCategory: card && (card.cardCategory || card.type) ? String(card.cardCategory || card.type) : ''
-            }))
+            .map((card) => {
+                const cardName = card && card.name ? String(card.name) : '';
+                const inferredCategory = normalizeDeckCardCategory(
+                    card && (card.cardCategory || card.cardType || card.type),
+                    cardName
+                );
+                return {
+                    name: cardName,
+                    cardCategory: inferredCategory || ''
+                };
+            })
             .filter((card) => card.name && card.cardCategory)
             .slice(0, 80);
     } catch (error) {
@@ -1866,14 +1894,17 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
 
     socket.addEventListener('open', () => {
         setMultiplayerLobbyStatus('Connected. Joining room...', 'warning');
+        const customDeckCards = getCustomDeckPayload(deckName);
         if (multiplayer.sessionToken) {
             socket.send(JSON.stringify({
                 type: 'RESUME',
                 roomId: multiplayer.roomId,
-                sessionToken: multiplayer.sessionToken
+                sessionToken: multiplayer.sessionToken,
+                deckName,
+                customDeckCards,
+                playtestMode
             }));
         } else {
-            const customDeckCards = getCustomDeckPayload(deckName);
             socket.send(JSON.stringify({
                 type: 'JOIN',
                 roomId: multiplayer.roomId,
@@ -1901,8 +1932,12 @@ function connectMultiplayer({ roomId, deckName, playtestMode }) {
         const incomingSeq = Number(msg && msg.serverSeq);
         const hasIncomingSeq = Number.isFinite(incomingSeq) && incomingSeq > 0;
         const currentSeq = Number(multiplayer.serverSeq || 0);
-        const isOutOfOrderSeq = hasIncomingSeq && currentSeq > 0 && incomingSeq <= currentSeq;
-        if ((msg.type === 'ACTION_BROADCAST' || msg.type === 'STATE_UPDATE') && isOutOfOrderSeq) {
+        const isOutOfOrderActionSeq = hasIncomingSeq && currentSeq > 0 && incomingSeq <= currentSeq;
+        const isOutOfOrderStateSeq = hasIncomingSeq && currentSeq > 0 && incomingSeq < currentSeq;
+        if (msg.type === 'ACTION_BROADCAST' && isOutOfOrderActionSeq) {
+            return;
+        }
+        if (msg.type === 'STATE_UPDATE' && isOutOfOrderStateSeq) {
             return;
         }
 
@@ -2670,7 +2705,10 @@ function buildDeckFromName(deckName, customDeckOverride = null) {
         // Convert saved deck data to game cards
         const cards = customDeck.map(card => {
             // Support both old 'type' property and new 'cardCategory' property for backwards compatibility
-            const category = card.cardCategory || card.type;
+            const category = normalizeDeckCardCategory(
+                card && (card.cardCategory || card.cardType || card.type),
+                card && card.name ? card.name : ''
+            );
 
             console.log('Processing card:', card.name, 'Category:', category);
 
@@ -2844,6 +2882,7 @@ function updateUI() {
         phaseInfo.style.display = 'none';
     }
     const opponentHandCountEl = document.getElementById('opponent-hand-count');
+    const opponentKoCountEl = document.getElementById('opponent-ko-count');
     if (opponentHandCountEl) {
         const localPlayerNum = (multiplayer.enabled && Number.isFinite(Number(multiplayer.playerNumber)))
             ? Number(multiplayer.playerNumber)
@@ -2851,6 +2890,12 @@ function updateUI() {
         const opponentPlayerNum = localPlayerNum === 1 ? 2 : 1;
         const opponentHandCount = game.players[opponentPlayerNum] ? game.players[opponentPlayerNum].hand.length : 0;
         opponentHandCountEl.textContent = String(opponentHandCount);
+        if (opponentKoCountEl) {
+            const opponentKoCount = game.players[opponentPlayerNum] ? Number(game.players[opponentPlayerNum].koCount || 0) : 0;
+            opponentKoCountEl.textContent = String(opponentKoCount);
+        }
+    } else if (opponentKoCountEl) {
+        opponentKoCountEl.textContent = '0';
     }
 
     // Show energy attached count (normal is 1, Eugenia allows 3)
@@ -6740,16 +6785,17 @@ function selectVictoriaType(chosenType) {
 function showVictoriaCharacterSelectionModal(player, characters, type) {
     let playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
     const charIds = Array.isArray(characters) ? characters.map(c => (typeof c === 'string' ? c : (c && c.id ? c.id : c))) : [];
-    if (!openModalForPlayer(playerNum, 'showVictoriaCharacterSelectionModal', [playerNum, charIds, type])) return;
     player = game.players[playerNum];
     characters = charIds.map(id => player.deck.find(c => c.id === id)).filter(Boolean);
-    const modal = document.getElementById('action-modal');
-    const content = document.getElementById('action-content');
 
-    // Store selected characters
+    // Initialize selection state before modal gating so remote replay stays in sync.
     if (!game.tempSelections) game.tempSelections = {};
     game.tempSelections.victoriaSelected = [];
-    game.tempSelections.victoriaPlayer = player;
+    game.tempSelections.victoriaPlayerNum = playerNum;
+
+    if (!openModalForPlayer(playerNum, 'showVictoriaCharacterSelectionModal', [playerNum, charIds, type])) return;
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
 
     let html = `<h2>Victoria Chen - Select Characters</h2>`;
     html += `<p>Select any number of ${type} characters to place on bench</p>`;
@@ -6774,23 +6820,27 @@ function showVictoriaCharacterSelectionModal(player, characters, type) {
 function toggleVictoriaCharacter(charId) {
     const element = document.getElementById(`victoria-char-${charId}`);
 
+    if (!game.tempSelections) game.tempSelections = {};
     if (!game.tempSelections.victoriaSelected) game.tempSelections.victoriaSelected = [];
 
     const index = game.tempSelections.victoriaSelected.indexOf(charId);
     if (index > -1) {
         // Deselect
         game.tempSelections.victoriaSelected.splice(index, 1);
-        element.classList.remove('selected');
+        if (element) element.classList.remove('selected');
     } else {
         game.tempSelections.victoriaSelected.push(charId);
-        element.classList.add('selected');
+        if (element) element.classList.add('selected');
     }
 }
 
 function confirmVictoriaSelection() {
-    const player = game.players[game.currentPlayer];
+    const selectionState = game.tempSelections || {};
+    const selected = Array.isArray(selectionState.victoriaSelected) ? selectionState.victoriaSelected : [];
+    const playerNum = Number(selectionState.victoriaPlayerNum || game.currentPlayer);
+    const player = game.players[playerNum] || game.players[game.currentPlayer];
 
-    if (!game.tempSelections.victoriaSelected || game.tempSelections.victoriaSelected.length === 0) {
+    if (selected.length === 0) {
         game.log('No characters selected', 'info');
         closeModal('action-modal');
         updateUI();
@@ -6798,7 +6848,7 @@ function confirmVictoriaSelection() {
     }
 
     // Place selected characters on bench
-    game.tempSelections.victoriaSelected.forEach(charId => {
+    selected.forEach(charId => {
         const char = player.deck.find(c => c.id === charId);
         if (char) {
             if (!canAddToBench(player)) {
@@ -6816,11 +6866,12 @@ function confirmVictoriaSelection() {
         }
     });
 
-    game.shuffleDeck(game.currentPlayer);
-    game.log(`Victoria Chen: Selected ${game.tempSelections.victoriaSelected.length} characters`, 'info');
+    game.shuffleDeck(playerNum);
+    game.log(`Victoria Chen: Selected ${selected.length} characters`, 'info');
 
     // Clean up
     delete game.tempSelections.victoriaSelected;
+    delete game.tempSelections.victoriaPlayerNum;
 
     // Discard the Victoria Chen supporter card
     const victoriaCard = player.hand.find(c => c.name === 'Victoria Chen');
@@ -8023,8 +8074,13 @@ function executeAttack(attackerId, moveName, targetId) {
         attackerId: attacker.id,
         attackerPlayerNum,
         useFirstAttackBonus: shouldApplyFirstAttackBonusThisAttack,
-        firstAttackBonusLogged: false
+        firstAttackBonusLogged: false,
+        applyDamperPedal: !!game.nextTurnEffects[attackerPlayerNum]?.damperPedal,
+        damperPedalLogged: false
     };
+    if (game.currentAttackContext.applyDamperPedal) {
+        game.nextTurnEffects[attackerPlayerNum].damperPedal = false;
+    }
     if (shouldApplyFirstAttackBonusThisAttack) {
         game.attackModifiers[game.currentPlayer].firstAttackBonusUsed = true;
     }
@@ -8287,13 +8343,6 @@ function calculateDamage(attacker, defender, baseDamage, move) {
             }
         }
 
-    // Damper Pedal effect
-    if (game.nextTurnEffects[game.currentPlayer].damperPedal) {
-        damage = Math.floor(damage / 2);
-        game.log('Damper Pedal: Attack halved!');
-        game.nextTurnEffects[game.currentPlayer].damperPedal = false;
-    }
-
     // Felix Chen's Synesthesia - If all characters in play are different types, -10 damage
     const defenderSide = game.players[defenderPlayerNum];
     const felixInPlay = [defenderSide.active, ...defenderSide.bench].some(c => c && c.name === 'Felix Chen');
@@ -8341,6 +8390,21 @@ function calculateDamage(attacker, defender, baseDamage, move) {
     if (defenderAbilitiesAllowed && defender && defender.name === 'Kana Takizawa') {
         damage = Math.max(0, damage - 10);
         game.log('Kana\'s Immense Aura reduces damage by 10');
+    }
+
+    const attackContextForDamper = game.currentAttackContext;
+    if (
+        attackContextForDamper &&
+        attackContextForDamper.applyDamperPedal &&
+        attackContextForDamper.attackerPlayerNum === attackerPlayerNum &&
+        attackContextForDamper.attackerId === attacker.id
+    ) {
+        // Damper Pedal halves final attack output after all attack/defense modifiers.
+        damage = Math.ceil(damage / 2);
+        if (!attackContextForDamper.damperPedalLogged) {
+            game.log('Damper Pedal: Attack damage halved!', 'info');
+            attackContextForDamper.damperPedalLogged = true;
+        }
     }
 
     game.lastSuperEffectiveApplied = superEffectiveApplied;
