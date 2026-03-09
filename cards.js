@@ -923,8 +923,8 @@ const STADIUMS = {
         name: 'Main Hall',
         type: 'stadium',
         isConcertHall: true,
-        effect: 'Each player may only play up to three cards per turn, starting the turn after this is played.',
-        description: 'Venue Type: Concert Hall. Small Ensemble Limit: Each player may only play up to three cards per turn, starting the turn after this is played.'
+        effect: 'Each player may only play up to three cards per turn, starting the turn after this is played. May not be played on the first turn.',
+        description: 'Venue Type: Concert Hall. Small Ensemble Limit: Each player may only play up to three cards per turn, starting the turn after this is played. May not be played on the first turn.'
     },
     SALOMON_DECI: {
         name: 'Salomon DECI',
@@ -1052,13 +1052,13 @@ const ITEMS = {
         name: 'Printed Score',
         type: 'item',
         subtype: 'sheet_music',
-        effect: 'Opponent reveals their entire hand. Choose one to discard.'
+        effect: 'Opponent reveals their entire hand. Choose one to discard. Cannot be played on the first turn.'
     },
     ANNOTATED_SCORE: {
         name: 'Annotated Score',
         type: 'item',
         subtype: 'sheet_music',
-        effect: 'Opponent reveals their entire hand. Choose up to two cards to shuffle back into their deck.'
+        effect: 'Opponent reveals their entire hand. Choose up to two cards to shuffle back into their deck. Cannot be played on the first turn.'
     },
     MUSESCORE_FILE: {
         name: 'Standard Musescore File',
@@ -1156,7 +1156,7 @@ const SUPPORTERS = {
     MICHELLE: {
         name: 'Michelle',
         type: 'supporter',
-        effect: 'Discord Announcement: Opponent discards down to 1 card in hand.'
+        effect: 'Discord Announcement: Opponent discards down to 1 card in hand. Cannot be played on the first turn.'
     },
     WILL: {
         name: 'Will',

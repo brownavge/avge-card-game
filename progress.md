@@ -837,3 +837,67 @@ Notes:
   - `node --check output/opponent_hand_counter_test.mjs` ✅
   - `node output/opponent_hand_counter_test.mjs` ✅
   - `node output/custom_deck_multiplayer_regression_test.mjs` ✅
+
+2026-03-06 (Ominous Chimes multiplayer sync fix)
+- User report: in multiplayer, Ominous Chimes effects were not reliably visible to the opponent (attack not seen / Pascal not removed).
+- Root cause identified in client seq handling:
+  - Server emits `ACTION_BROADCAST` and `STATE_UPDATE` with the same `serverSeq`.
+  - Client previously dropped both action/state messages when `incomingSeq <= currentSeq`.
+  - After processing `ACTION_BROADCAST`, equal-seq `STATE_UPDATE` was discarded, so clients could miss authoritative post-action state when remote replay was partial.
+- Fix in `game.js`:
+  - Split out-of-order checks by message type:
+    - `ACTION_BROADCAST`: ignore when `incomingSeq <= currentSeq` (unchanged intent)
+    - `STATE_UPDATE`: ignore only when `incomingSeq < currentSeq` (allow equal-seq authoritative state updates)
+- Added focused regression:
+  - `output/ominous_chimes_multiplayer_regression_test.mjs`
+  - Verifies in real 2-client multiplayer that after `Ominous Chimes` from Pascal:
+    - opponent client sees Pascal removed from attacker active slot,
+    - opponent client sees Ominous Chimes log text synced.
+- Validation:
+  - `node --check game.js` ✅
+  - `node --check output/ominous_chimes_multiplayer_regression_test.mjs` ✅
+  - `node output/ominous_chimes_multiplayer_regression_test.mjs` ✅
+  - `node output/basic_multiplayer_game_test.mjs` ✅
+- Note:
+  - `custom_deck_multiplayer_regression_test.mjs` timed out in this pass (setup/main-phase harness flake), while targeted Ominous + baseline multiplayer flow passed.
+
+2026-03-08 (rules + description update pass)
+- Implemented requested core rules updates:
+  1. Empty deck no longer causes deck-out loss on draw; draw attempts now stop with a warning.
+  2. Starting hand size reduced to 4 cards total (guaranteed character + 3 draws).
+  3. Added first-turn restrictions for Player 1's first turn via centralized gate:
+     - Main Hall
+     - Otamatone
+     - Miku Otamatone
+     - Printed Score
+     - Annotated Score
+     - Michelle
+  4. Added type matchup text for character cards in UI:
+     - `Strong vs: ... • Weak to: ...`
+     - shown on in-game card render and in card browser character entries.
+- Card text updates in `cards.js`:
+  - Main Hall now includes first-turn play restriction in effect/description.
+  - Printed Score and Annotated Score now include first-turn play restriction in effect text.
+  - Michelle now includes first-turn play restriction in effect text.
+- Gameplay/UI wiring in `game.js`:
+  - Added helpers: `isPlayerOneFirstTurn`, `isFirstTurnRestrictedCard`, `canPlayCardOnCurrentTurn`.
+  - Applied turn-restriction checks to `playItem`, `playSupporter`, `playStadium`.
+  - Selection modal now shows restriction message instead of play button when blocked.
+  - `drawCards` no longer ends the game when deck is empty.
+  - `initGame` start draws changed from 4 to 3 (to total 4 cards after guaranteed character).
+  - Added type-matchup formatting helpers and render hooks.
+- New regression coverage:
+  - Added `output/rules_update_regression_test.mjs` covering:
+    - 4-card starting hand
+    - first-turn restricted card blocking
+    - no game over on empty-deck draw
+    - visible Strong/Weak matchup text on character cards
+- Validation:
+  - `node --check game.js` ✅
+  - `node --check cards.js` ✅
+  - `node --check output/rules_update_regression_test.mjs` ✅
+  - `node output/rules_update_regression_test.mjs` ✅
+  - `node output/basic_multiplayer_game_test.mjs` ✅
+  - `node output/ui_smoke_test.mjs` ✅
+  - `node output/opponent_hand_counter_test.mjs` ✅
+  - `node output/custom_deck_multiplayer_regression_test.mjs` ⚠️ timed out waiting for main phase (existing harness flake seen in prior passes)

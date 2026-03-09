@@ -38,6 +38,32 @@ function abilitiesDisabledFor(playerNum) {
     return (game.abilitiesDisabledThisTurn === playerNum) || (game.nextTurnEffects[playerNum] && game.nextTurnEffects[playerNum].abilitiesDisabled);
 }
 
+function getTypeMatchupInfo(types) {
+    const normalizedTypes = Array.isArray(types) ? types.filter(Boolean) : [];
+    const strongSet = new Set();
+    const weakSet = new Set();
+    normalizedTypes.forEach((type) => {
+        const strongVs = SUPER_EFFECTIVE_CHAIN[type];
+        if (strongVs) strongSet.add(strongVs);
+        Object.keys(SUPER_EFFECTIVE_CHAIN).forEach((attackerType) => {
+            if (SUPER_EFFECTIVE_CHAIN[attackerType] === type) {
+                weakSet.add(attackerType);
+            }
+        });
+    });
+    return {
+        strongTo: Array.from(strongSet),
+        weakTo: Array.from(weakSet)
+    };
+}
+
+function formatTypeMatchupLine(types) {
+    const matchup = getTypeMatchupInfo(types);
+    const strongText = matchup.strongTo.length ? matchup.strongTo.join(', ') : 'None';
+    const weakText = matchup.weakTo.length ? matchup.weakTo.join(', ') : 'None';
+    return `Strong vs: ${strongText} • Weak to: ${weakText}`;
+}
+
 function syncStatusDerivedStatsForCharacter(character) {
     if (!character) return;
     if (!Number.isFinite(character.baseHp)) {
@@ -833,11 +859,7 @@ class GameState {
         for (let i = 0; i < count; i++) {
             if (player.deck.length === 0) {
                 this.log(`Player ${playerNum} has no cards left to draw!`, 'warning');
-                // Deck-out loss condition
-                const winner = playerNum === 1 ? 2 : 1;
-                this.log(`Player ${playerNum} loses: deck is empty!`, 'error');
-                this.endGame(winner, `opponent decked out`);
-                return;
+                break;
             }
             const card = player.deck.shift();
             player.hand.push(card);
@@ -2277,8 +2299,8 @@ function initGame(deck1Name = 'strings-aggro', deck2Name = 'piano-control', play
     ensureStartingMusician(2);
 
     // Draw starting hands (including the guaranteed musician)
-    game.drawCards(1, 4); // Draw 4 more to make 5 total
-    game.drawCards(2, 4);
+    game.drawCards(1, 3); // Draw 3 more to make 4 total
+    game.drawCards(2, 3);
 
     game.phase = 'setup';
     updateUI();
@@ -3111,6 +3133,7 @@ function renderCard(card) {
             <div class="card-type">
                 ${card.type.map(t => `<span class="type-icon type-${t.toLowerCase().replace(' ', '-')}">${getCostSymbol(t)}</span>`).join('')}
             </div>
+            <div class="card-effect" style="font-size: 9px; margin-top: 3px;">${formatTypeMatchupLine(card.type)}</div>
         `;
 
         if (retreatDelta !== 0 || tempEnergyBonus > 0) {
@@ -3514,14 +3537,24 @@ function showCardActions(card, targetPlayerNum, options = {}) {
         html += `<p style="color: gray;">Energy cards are no longer used.</p>`;
     } else if (card.cardType === 'item' || card.cardType === 'tool') {
         if (canPlayAnytime) {
-            html += `<button class="action-btn" onclick="playItem('${card.id}')">Play Item</button>`;
+            const turnRestriction = canPlayCardOnCurrentTurn(card);
+            if (turnRestriction.ok) {
+                html += `<button class="action-btn" onclick="playItem('${card.id}')">Play Item</button>`;
+            } else {
+                html += `<p style="color: red;">${turnRestriction.reason}</p>`;
+            }
         } else {
             html += `<p style="color: red;">Can only play items during Main Phase</p>`;
         }
     } else if (card.cardType === 'supporter') {
         if (canPlayAnytime) {
             if (!game.supporterPlayedThisTurn) {
-                html += `<button class="action-btn" onclick="playSupporter('${card.id}')">Play Supporter</button>`;
+                const turnRestriction = canPlayCardOnCurrentTurn(card);
+                if (turnRestriction.ok) {
+                    html += `<button class="action-btn" onclick="playSupporter('${card.id}')">Play Supporter</button>`;
+                } else {
+                    html += `<p style="color: red;">${turnRestriction.reason}</p>`;
+                }
             } else {
                 html += `<p style="color: red;">Already played a Supporter this turn</p>`;
             }
@@ -3534,7 +3567,12 @@ function showCardActions(card, targetPlayerNum, options = {}) {
                 html += `<p style="color: red;">Cannot play stadiums this turn (BAI Email)</p>`;
             }
         } else if (canPlayAnytime) {
-            html += `<button class="action-btn" onclick="playStadium('${card.id}')">Play Stadium</button>`;
+            const turnRestriction = canPlayCardOnCurrentTurn(card);
+            if (turnRestriction.ok) {
+                html += `<button class="action-btn" onclick="playStadium('${card.id}')">Play Stadium</button>`;
+            } else {
+                html += `<p style="color: red;">${turnRestriction.reason}</p>`;
+            }
         } else {
             html += `<p style="color: red;">Can only play stadiums during Main Phase</p>`;
         }
@@ -3645,6 +3683,7 @@ function renderCardBrowser() {
 
             if (cardBrowserCurrentType === 'character') {
                 html += `<div class="pool-card-effect">HP: ${card.hp || 0}${card.type ? ` • Type: ${card.type.join(', ')}` : ''}</div>`;
+                html += `<div class="pool-card-effect">${formatTypeMatchupLine(card.type)}</div>`;
                 if (Array.isArray(card.moves) && card.moves.length) {
                     card.moves.forEach((move) => {
                         html += `<div class="pool-card-effect"><strong>${move.name}</strong> (${move.cost || 0}): ${move.damage || 0} dmg${move.effect ? ` • ${move.effect}` : ''}</div>`;
@@ -3980,6 +4019,34 @@ function canAddToBench(player) {
     return benchCount < 2;
 }
 
+function isPlayerOneFirstTurn() {
+    return game.isFirstTurn && game.currentPlayer === 1;
+}
+
+const FIRST_TURN_RESTRICTED_CARD_NAMES = new Set([
+    'Main Hall',
+    'Otamatone',
+    'Miku Otamatone',
+    'Printed Score',
+    'Annotated Score',
+    'Michelle'
+]);
+
+function isFirstTurnRestrictedCard(card) {
+    if (!card || !card.name) return false;
+    return isPlayerOneFirstTurn() && FIRST_TURN_RESTRICTED_CARD_NAMES.has(card.name);
+}
+
+function canPlayCardOnCurrentTurn(card) {
+    if (isFirstTurnRestrictedCard(card)) {
+        return {
+            ok: false,
+            reason: `${card.name} cannot be played on Player 1's first turn.`
+        };
+    }
+    return { ok: true, reason: '' };
+}
+
 function logMainHallRemaining() {
     if (!game.stadium || game.stadium.name !== 'Main Hall') return;
     if (game.mainHallActivatedTurn === null) return;
@@ -4079,6 +4146,11 @@ function playItem(cardId) {
     const card = player.hand.find(c => c.id === cardId);
 
     if (!card) return;
+    const turnRestriction = canPlayCardOnCurrentTurn(card);
+    if (!turnRestriction.ok) {
+        game.log(turnRestriction.reason, 'info');
+        return;
+    }
 
     if (!canPlayCardThisTurn()) {
         game.log('Main Hall: Cannot play more than 3 cards per turn', 'info');
@@ -7407,6 +7479,11 @@ function playSupporter(cardId) {
     const card = player.hand.find(c => c.id === cardId);
 
     if (!card || game.supporterPlayedThisTurn) return;
+    const turnRestriction = canPlayCardOnCurrentTurn(card);
+    if (!turnRestriction.ok) {
+        game.log(turnRestriction.reason, 'info');
+        return;
+    }
 
     if (!canPlayCardThisTurn()) {
         game.log('Main Hall: Cannot play more than 3 cards per turn', 'info');
@@ -7561,6 +7638,11 @@ function playStadium(cardId) {
     const card = player.hand.find(c => c.id === cardId);
 
     if (!card) return;
+    const turnRestriction = canPlayCardOnCurrentTurn(card);
+    if (!turnRestriction.ok) {
+        game.log(turnRestriction.reason, 'info');
+        return;
+    }
 
     if (game.stadiumLockUntilTurn && game.turn > game.stadiumLockUntilTurn) {
         game.stadiumLockUntilTurn = null;
