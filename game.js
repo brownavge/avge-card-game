@@ -8119,13 +8119,19 @@ function executeAttack(attackerId, moveName, targetId) {
     }
 
     // Profit Margins - prompt right before attack happens
-    if (shouldOfferProfitMargins(attacker)) {
+    const profitMarginsSource = getProfitMarginsSource(attackerPlayerNum || game.currentPlayer);
+    if (shouldOfferProfitMargins(attackerPlayerNum || game.currentPlayer, profitMarginsSource)) {
         if (!game.tempSelections) game.tempSelections = {};
         const pending = game.tempSelections.profitMarginsPending;
         const bypass = game.tempSelections.profitMarginsBypass === true;
         if (!bypass && !pending) {
-            game.tempSelections.profitMarginsPending = { attackerId, moveName, targetId };
-            showProfitMarginsPreAttack(attacker);
+            game.tempSelections.profitMarginsPending = {
+                attackerId,
+                moveName,
+                targetId,
+                sourceCardId: profitMarginsSource ? profitMarginsSource.id : null
+            };
+            showProfitMarginsPreAttack(profitMarginsSource, attackerPlayerNum || game.currentPlayer);
             return;
         }
         if (bypass) {
@@ -8819,8 +8825,8 @@ function useActivatedAbility(cardId, abilitySlot) {
 
         case 'Profit Margins':
             // Emily: Discard a tool to draw 2 cards
-            if (player.active !== card) {
-                showLocalAlert('Emily must be active to use Profit Margins!');
+            if (card.name !== 'Emily Wang' || ![player.active, ...player.bench].some(c => c && c.id === card.id)) {
+                showLocalAlert('Emily must be in play to use Profit Margins.');
                 break;
             }
             showLocalAlert('Profit Margins triggers automatically right before your attack.');
@@ -9227,20 +9233,26 @@ function showToolSelectionForDiscard(card) {
     modal.classList.remove('hidden');
 }
 
-function showProfitMarginsPreAttack(attacker) {
-    if (!openModalForPlayer(game.currentPlayer, 'showProfitMarginsPreAttack', [attacker && attacker.id ? attacker.id : attacker])) return;
+function showProfitMarginsPreAttack(emilyCard, ownerNum = game.currentPlayer) {
+    if (!openModalForPlayer(ownerNum, 'showProfitMarginsPreAttack', [emilyCard && emilyCard.id ? emilyCard.id : emilyCard])) return;
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
+    const emilyName = emilyCard && emilyCard.name ? emilyCard.name : 'Emily Wang';
+    const tools = Array.isArray(emilyCard && emilyCard.attachedTools) ? emilyCard.attachedTools : [];
 
     let html = `<h2>Profit Margins</h2>`;
-    html += `<p>Discard a tool from ${attacker.name} to draw 2 cards?</p>`;
+    html += `<p>Discard a tool from ${emilyName} to draw 2 cards?</p>`;
     html += `<div class="action-buttons">`;
 
-    attacker.attachedTools.forEach((tool, idx) => {
-        html += `<button class="action-btn" onclick="discardToolForProfitMarginsAndContinue('${attacker.id}', ${idx})">Discard ${tool.name}</button>`;
-    });
+    if (tools.length > 0) {
+        tools.forEach((tool, idx) => {
+            html += `<button class="action-btn" onclick="discardToolForProfitMarginsAndContinue('${emilyCard.id}', ${idx})">Discard ${tool.name}</button>`;
+        });
+    } else {
+        html += `<p>No tools are attached to ${emilyName}.</p>`;
+    }
 
-    html += `<button class="action-btn" onclick="skipProfitMarginsAndContinue()">Skip</button>`;
+    html += `<button class="action-btn" onclick="skipProfitMarginsAndContinue()">${tools.length > 0 ? 'Skip' : 'Continue'}</button>`;
     html += `<button class="action-btn" onclick="cancelProfitMarginsAttack()">Cancel Attack</button>`;
     html += `</div>`;
 
@@ -9248,11 +9260,18 @@ function showProfitMarginsPreAttack(attacker) {
     modal.classList.remove('hidden');
 }
 
-function shouldOfferProfitMargins(attacker) {
-    if (!attacker || attacker.name !== 'Emily Wang') return false;
-    if (abilitiesDisabledFor(game.currentPlayer)) return false;
-    if (game.attackedThisTurn) return false;
-    return Array.isArray(attacker.attachedTools) && attacker.attachedTools.length > 0;
+function getProfitMarginsSource(playerNum = game.currentPlayer) {
+    const player = game.players[playerNum];
+    if (!player) return null;
+    const board = [player.active, ...player.bench].filter(Boolean);
+    return board.find(c => c && c.name === 'Emily Wang') || null;
+}
+
+function shouldOfferProfitMargins(playerNum = game.currentPlayer, sourceCard = null) {
+    const emily = sourceCard || getProfitMarginsSource(playerNum);
+    if (!emily) return false;
+    if (abilitiesDisabledFor(playerNum)) return false;
+    return true;
 }
 
 function discardToolForProfitMargins(cardId, toolIndex) {

@@ -922,3 +922,17 @@ Notes:
   - Visual re-check of `output/ui-smoke-start.png` and `output/ui-smoke-game.png` confirms improved clarity and no white lower-page region.
 - Notes/TODO:
   - `styles.css` still contains multiple historical override blocks; consider a dedicated cleanup/refactor pass to reduce conflicting selectors and improve maintainability.
+- Profit Margins reliability fix (2026-03-13):
+  - Root cause: pre-attack Profit Margins prompt only triggered when the attacking character was Emily Wang, so attacks by other characters skipped the dialog even when Emily was in play.
+  - Updated pre-attack check to source Emily from the attacking player's board (active or bench) and trigger Profit Margins whenever Emily is in play and abilities are not disabled.
+  - `showProfitMarginsPreAttack` now accepts the owner player number for prompt routing and supports Emily with zero attached tools (shows Continue/Cancel path instead of silently skipping prompt).
+  - Updated Profit Margins activated ability message path to require Emily "in play" (not incorrectly "active").
+- Added regression coverage:
+  - New `output/profit_margins_regression_test.mjs` verifies Profit Margins modal appears when a non-Emily active attacks while Emily is benched with a tool.
+- Validation re-run (all passing):
+  - `node --check game.js`
+  - `node --check output/profit_margins_regression_test.mjs`
+  - `node output/profit_margins_regression_test.mjs`
+  - `node output/ui_smoke_test.mjs`
+  - `node output/rules_update_regression_test.mjs`
+  - Skill Playwright client run: `node "$WEB_GAME_CLIENT" --url http://localhost:3001 --actions-file "$WEB_GAME_ACTIONS" --click-selector "#start-game-btn" --iterations 1 --pause-ms 200`
