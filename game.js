@@ -1369,6 +1369,7 @@ function syncResponsiveUiDefaults() {
 
 function updateToolbarState() {
     const selectedLabel = document.getElementById('toolbar-selected-card');
+    const actionHint = document.getElementById('toolbar-action-hint');
     const playBtn = document.getElementById('toolbar-play-btn');
     const energyBtn = document.getElementById('toolbar-energy-btn');
     const attackBtn = document.getElementById('toolbar-attack-btn');
@@ -1403,11 +1404,12 @@ function updateToolbarState() {
     const inSetup = isOpeningSetupPhase();
     const maxEnergy = getEnergyAttachLimit(localPlayerNum);
     const selectedInHand = !!(selected && localPlayer?.hand?.some((c) => c.id === selected.id));
+    const selectedTurnRestriction = selectedInHand ? canPlayCardOnCurrentTurn(selected) : { ok: true, reason: '' };
     const selectedIsCharacter = !!(selected && selected.cardType === 'character');
     const selectedIsLocalCharacterInPlay = !!(selected && selectedIsCharacter && localPlayer && [localPlayer.active, ...(localPlayer.bench || [])].some((c) => c && c.id === selected.id));
 
     if (playBtn) {
-        playBtn.disabled = !canAct || (!selectedInHand && !inSetup);
+        playBtn.disabled = !canAct || inSetup || !selectedInHand || !selectedTurnRestriction.ok;
     }
     if (energyBtn) {
         const maxReached = Number.isFinite(maxEnergy) && game.energyAttachedThisTurn >= maxEnergy;
@@ -1418,6 +1420,22 @@ function updateToolbarState() {
     }
     if (retreatBtn) {
         retreatBtn.disabled = !canAct || inSetup || !selectedIsLocalCharacterInPlay || localPlayer?.active?.id !== selected?.id;
+    }
+
+    if (actionHint) {
+        let hintText = 'Select a card in your hand to play.';
+        if (game.phase === 'gameover') {
+            hintText = 'Game over.';
+        } else if (inSetup) {
+            hintText = 'Complete opening setup before playing hand cards.';
+        } else if (!canAct) {
+            hintText = "It's your opponent's turn.";
+        } else if (selectedInHand && !selectedTurnRestriction.ok) {
+            hintText = selectedTurnRestriction.reason;
+        } else if (selectedInHand) {
+            hintText = `Ready to play: ${selected.name}`;
+        }
+        actionHint.textContent = hintText;
     }
 }
 
@@ -3033,6 +3051,15 @@ function renderHand() {
         const canInteractWithHand = multiplayer.enabled
             ? (Number.isFinite(localPlayerNumber) && Number(handOwner) === localPlayerNumber)
             : Number(handOwner) === currentTurnPlayer;
+        const turnRestriction = canInteractWithHand ? canPlayCardOnCurrentTurn(card) : { ok: true, reason: '' };
+        if (!turnRestriction.ok) {
+            cardElement.classList.add('hand-card-restricted');
+            cardElement.title = turnRestriction.reason;
+            const badge = document.createElement('div');
+            badge.className = 'hand-card-restricted-badge';
+            badge.textContent = 'P1 turn 1: blocked';
+            cardElement.appendChild(badge);
+        }
         // Only allow click if this is the local player's hand
         if (canInteractWithHand) {
             cardElement.onclick = () => selectCard(card);

@@ -901,3 +901,24 @@ Notes:
   - `node output/ui_smoke_test.mjs` ✅
   - `node output/opponent_hand_counter_test.mjs` ✅
   - `node output/custom_deck_multiplayer_regression_test.mjs` ⚠️ timed out waiting for main phase (existing harness flake seen in prior passes)
+
+2026-03-08
+- UI clarity pass completed (player-facing affordances and turn-flow readability):
+  - Added toolbar action hint line under selected-card text to explain why actions are disabled (`setup`, `opponent turn`, `first-turn card restriction`, etc.).
+  - Updated toolbar play-button disable logic to align with game rules and provide clear actionable guidance.
+  - Added first-turn restriction affordance directly on hand cards:
+    - restricted cards now render dimmed,
+    - badge shown (`P1 turn 1: blocked`),
+    - hover title explains the exact restriction.
+  - Turn-change overlay redesigned to be less intrusive:
+    - moved to top-center,
+    - transparent backdrop,
+    - compact pill message so it no longer obscures board state.
+  - Start-screen viewport consistency fix:
+    - added root-page background fallback and stronger start-screen viewport sizing (`100vh/100dvh`) to prevent lower-page white artifact on tall captures.
+- Validation completed:
+  - `node --check game.js` passed.
+  - `node output/ui_smoke_test.mjs` passed.
+  - Visual re-check of `output/ui-smoke-start.png` and `output/ui-smoke-game.png` confirms improved clarity and no white lower-page region.
+- Notes/TODO:
+  - `styles.css` still contains multiple historical override blocks; consider a dedicated cleanup/refactor pass to reduce conflicting selectors and improve maintainability.
