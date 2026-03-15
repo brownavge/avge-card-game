@@ -250,6 +250,7 @@ class GameState {
         };
 
         this.stadium = null;
+        this.stadiumOwner = null;
         this.selectedCard = null;
         this.setupReady = { 1: false, 2: false };
         this.attackModifiers = { 1: {}, 2: {} }; // Temporary attack modifiers and effects
@@ -291,7 +292,8 @@ class GameState {
         const preservedTricksterSelfBonus = this.nextTurnEffects[previousPlayer].tricksterSelfBonus;
         const preservedAvgeBirbPenalty = this.nextTurnEffects[previousPlayer].avgebBirbPenalty;
         const preservedDistortionBonus = this.nextTurnEffects[previousPlayer].distortionBonus;
-        const preservedCannotAttack = this.nextTurnEffects[previousPlayer].cannotAttack;
+        const preservedMeyaCannotAttackActiveId = this.nextTurnEffects[previousPlayer].meyaCannotAttackActiveId;
+        const preservedMeyaCannotAttackTurn = this.nextTurnEffects[previousPlayer].meyaCannotAttackTurn;
         this.nextTurnEffects[previousPlayer] = {};
         if (preservedTricksterSelfBonus) {
             this.nextTurnEffects[previousPlayer].tricksterSelfBonus = preservedTricksterSelfBonus;
@@ -302,8 +304,10 @@ class GameState {
         if (preservedDistortionBonus) {
             this.nextTurnEffects[previousPlayer].distortionBonus = preservedDistortionBonus;
         }
-        if (preservedCannotAttack) {
-            this.nextTurnEffects[previousPlayer].cannotAttack = preservedCannotAttack;
+        // Preserve Meya lock only if it applies on a future turn.
+        if (preservedMeyaCannotAttackActiveId && Number.isFinite(Number(preservedMeyaCannotAttackTurn)) && Number(preservedMeyaCannotAttackTurn) > this.turn) {
+            this.nextTurnEffects[previousPlayer].meyaCannotAttackActiveId = preservedMeyaCannotAttackActiveId;
+            this.nextTurnEffects[previousPlayer].meyaCannotAttackTurn = Number(preservedMeyaCannotAttackTurn);
         }
 
         // After player 1's first turn, set isFirstTurn to false
@@ -698,12 +702,20 @@ class GameState {
             }
         }
 
-        // Meya Gao's I See Your Soul - Both can't attack next turn if damaged
+        // Meya Gao's I See Your Soul - lock each player's currently-active character for their next turn only.
         if (canApplyAbilities && characterCard.name === 'Meya Gao' && finalDamage > 0) {
             const opponentNum = playerNum === 1 ? 2 : 1;
-            game.nextTurnEffects[playerNum].cannotAttack = true;
-            game.nextTurnEffects[opponentNum].cannotAttack = true;
-            this.log('Meya Gao\'s I See Your Soul: Both players cannot attack next turn!');
+            const playerActive = game.players[playerNum]?.active;
+            const opponentActive = game.players[opponentNum]?.active;
+            if (playerActive) {
+                game.nextTurnEffects[playerNum].meyaCannotAttackActiveId = playerActive.id;
+                game.nextTurnEffects[playerNum].meyaCannotAttackTurn = game.turn + 2;
+            }
+            if (opponentActive) {
+                game.nextTurnEffects[opponentNum].meyaCannotAttackActiveId = opponentActive.id;
+                game.nextTurnEffects[opponentNum].meyaCannotAttackTurn = game.turn + 1;
+            }
+            this.log('Meya Gao\'s I See Your Soul: Both currently active characters cannot attack on their next turn.');
         }
 
         characterCard.damage = (characterCard.damage || 0) + finalDamage;
@@ -713,7 +725,7 @@ class GameState {
             const ownerPlayerNum = this.findPlayerWithCharacter(characterCard);
             if (ownerPlayerNum) {
                 const ownerPlayer = this.players[ownerPlayerNum];
-                const itemsInDiscard = ownerPlayer.discard.filter(c => c.cardType === 'item');
+                const itemsInDiscard = ownerPlayer.discard.filter(c => getRuntimeCardCategory(c) === 'item');
                 if (itemsInDiscard.length > 0) {
                     this.log(`${characterCard.name} may shuffle an item from discard into their deck (Arranger status)`);
                     if (!game.tempSelections) game.tempSelections = {};
@@ -1549,6 +1561,7 @@ function renderSelectionInspector() {
 }
 
 function renderGameToText() {
+    normalizeDiscardPiles();
     const payload = {
         note: 'Coordinates use DOM/card zones, not canvas. Origin is top-left in page layout.',
         bgm: getBgmDebugState(),
@@ -1587,7 +1600,11 @@ function renderGameToText() {
                 }) : null)
             };
         }),
-        stadium: game.stadium ? { id: game.stadium.id, name: game.stadium.name } : null,
+        stadium: game.stadium ? {
+            id: game.stadium.id,
+            name: game.stadium.name,
+            owner: resolveActiveStadiumOwnerPlayerNum()
+        } : null,
         lastLog: (game.gameLog || []).slice(-5).map((entry) => entry.message)
     };
     return JSON.stringify(payload);
@@ -1876,6 +1893,11 @@ function normalizeDeckCardCategory(category, cardName = '') {
         if (VALID_DECK_CARD_CATEGORIES.has(normalized)) return normalized;
     }
     return inferDeckCardCategoryFromName(cardName);
+}
+
+function getRuntimeCardCategory(card, fallbackCategory = null) {
+    if (!card || typeof card !== 'object') return fallbackCategory;
+    return normalizeDeckCardCategory(card.cardType || card.cardCategory || card.type, card.name) || fallbackCategory;
 }
 
 function getCustomDeckPayload(deckName) {
@@ -2867,8 +2889,22 @@ function generateCardId() {
     return `card_${cardIdCounter++}`;
 }
 
+function compactDiscardPile(playerNum) {
+    const player = game.players[playerNum];
+    if (!player || !Array.isArray(player.discard)) return 0;
+    const before = player.discard.length;
+    player.discard = player.discard.filter((card) => !!(card && typeof card === 'object' && typeof card.name === 'string' && card.name.trim().length > 0));
+    return before - player.discard.length;
+}
+
+function normalizeDiscardPiles() {
+    compactDiscardPile(1);
+    compactDiscardPile(2);
+}
+
 // UI Rendering
 function updateUI() {
+    normalizeDiscardPiles();
     syncAllStatusDerivedStats();
     if (enforceStatusDerivedKnockouts()) return;
     if (document && document.body) {
@@ -3495,7 +3531,7 @@ function showCardActions(card, targetPlayerNum, options = {}) {
         // If character is in play, show other actions
         if (player.active === card) {
             const cannotAttackFirstTurn = game.isFirstTurn && game.currentPlayer === 1;
-            const cannotAttackEffect = game.nextTurnEffects[game.currentPlayer].cannotAttack;
+            const cannotAttackEffect = isActiveAttackBlockedByMeya(game.currentPlayer);
             const attackDisabled = (game.attackedThisTurn || cannotAttackFirstTurn || cannotAttackEffect) ? 'disabled' : '';
             const attackLabel = game.attackedThisTurn
                 ? ' (Already Used)'
@@ -4419,9 +4455,9 @@ function executeItemEffect(card) {
         // Stadium removal
         case 'BAI Email':
             if (game.stadium) {
-                player.discard.push(game.stadium);
-                game.log(`Discarded stadium: ${game.stadium.name}`, 'info');
-                game.stadium = null;
+                const removedStadiumName = game.stadium.name;
+                discardActiveStadiumToOwner();
+                game.log(`Discarded stadium: ${removedStadiumName}`, 'info');
             } else {
                 game.log('No stadium in play', 'info');
             }
@@ -4579,7 +4615,7 @@ function selectDeckCard(cardId) {
 
 
 function selectFromDiscard(player, cardType, callback) {
-    const eligibleCards = player.discard.filter(c => c.cardType === cardType);
+    const eligibleCards = player.discard.filter(c => getRuntimeCardCategory(c) === cardType);
     if (eligibleCards.length === 0) {
         game.log(`No ${cardType} cards in discard`, 'info');
         if (callback) callback();
@@ -4591,7 +4627,7 @@ function selectFromDiscard(player, cardType, callback) {
 }
 
 function selectMultipleFromDiscard(player, cardType, count, callback) {
-    const eligibleCards = player.discard.filter(c => c.cardType === cardType);
+    const eligibleCards = player.discard.filter(c => getRuntimeCardCategory(c) === cardType);
     if (eligibleCards.length === 0) {
         game.log(`No ${cardType} cards in discard`, 'info');
         if (callback) callback();
@@ -4612,6 +4648,7 @@ function showDiscardPileModal(playerNum) {
         return;
     }
     if (!openModalForPlayer(playerNum, 'showDiscardPileModal', [playerNum])) return;
+    compactDiscardPile(playerNum);
     const player = game.players[playerNum];
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
@@ -7600,7 +7637,7 @@ function executeSupporterEffect(card) {
 
         case 'Will':
             // Shuffle items from discard into deck
-            const items = player.discard.filter(c => c.cardType === 'item');
+            const items = player.discard.filter(c => getRuntimeCardCategory(c) === 'item');
             items.forEach(item => {
                 player.deck.push(item);
                 player.discard = player.discard.filter(c => c.id !== item.id);
@@ -7660,6 +7697,23 @@ function executeSupporterEffect(card) {
     return false; // Don't wait for modal
 }
 
+function resolveActiveStadiumOwnerPlayerNum() {
+    if (!game.stadium) return null;
+    const ownerCandidate = Number(game.stadiumOwner || game.stadium.playedBy || game.stadium.ownerPlayer || 0);
+    if (ownerCandidate === 1 || ownerCandidate === 2) return ownerCandidate;
+    return game.currentPlayer === 1 || game.currentPlayer === 2 ? game.currentPlayer : 1;
+}
+
+function discardActiveStadiumToOwner() {
+    if (!game.stadium) return false;
+    const ownerNum = resolveActiveStadiumOwnerPlayerNum();
+    const owner = game.players[ownerNum] || game.players[game.currentPlayer];
+    owner.discard.push(game.stadium);
+    game.stadium = null;
+    game.stadiumOwner = null;
+    return true;
+}
+
 function playStadium(cardId) {
     const player = game.players[game.currentPlayer];
     const card = player.hand.find(c => c.id === cardId);
@@ -7690,11 +7744,11 @@ function playStadium(cardId) {
     game.cardsPlayedThisTurn++;
 
     // Discard old stadium if exists
-    if (game.stadium) {
-        player.discard.push(game.stadium);
-    }
+    discardActiveStadiumToOwner();
 
     game.stadium = card;
+    game.stadiumOwner = game.currentPlayer;
+    game.stadium.playedBy = game.currentPlayer;
     game.mainHallActivatedTurn = card.name === 'Main Hall' ? game.turn : null;
     player.hand = player.hand.filter(c => c.id !== cardId);
     game.log(`Played stadium: ${card.name}`);
@@ -7831,11 +7885,10 @@ function showAttackMenu(cardId) {
         return;
     }
 
-    // Check for Meya Gao's I See Your Soul - cannot attack
-    if (game.nextTurnEffects[game.currentPlayer].cannotAttack) {
+    // Check for Meya Gao's I See Your Soul active-lock.
+    if (isActiveAttackBlockedByMeya(game.currentPlayer)) {
         showLocalAlert('Cannot attack this turn due to Meya Gao\'s I See Your Soul!');
-        game.log('Cannot attack: Meya Gao\'s I See Your Soul is active', 'warning');
-        game.nextTurnEffects[game.currentPlayer].cannotAttack = false;
+        game.log('Cannot attack: this active character is locked by Meya Gao\'s I See Your Soul.', 'warning');
         closeModal('action-modal');
         return;
     }
@@ -7888,6 +7941,40 @@ function showAttackMenu(cardId) {
 
     content.innerHTML = html;
     modal.classList.remove('hidden');
+}
+
+function isActiveAttackBlockedByMeya(playerNum = game.currentPlayer) {
+    const effects = game.nextTurnEffects && game.nextTurnEffects[playerNum] ? game.nextTurnEffects[playerNum] : null;
+    if (!effects) return false;
+
+    // Cleanup legacy one-bit lock if present from older snapshots/sync.
+    if (effects.cannotAttack) {
+        delete effects.cannotAttack;
+    }
+
+    const lockTurn = Number(effects.meyaCannotAttackTurn || 0);
+    const lockActiveId = effects.meyaCannotAttackActiveId || null;
+    if (!lockTurn || !lockActiveId) return false;
+
+    // Stale lock cleanup.
+    if (game.turn > lockTurn) {
+        delete effects.meyaCannotAttackTurn;
+        delete effects.meyaCannotAttackActiveId;
+        return false;
+    }
+
+    // Not active yet for this player.
+    if (game.turn < lockTurn) {
+        return false;
+    }
+
+    const activeId = game.players[playerNum] && game.players[playerNum].active ? game.players[playerNum].active.id : null;
+    // If player switched out, the lock should not apply to the new active.
+    if (!activeId || activeId !== lockActiveId) {
+        return false;
+    }
+
+    return true;
 }
 
 function getEffectiveRetreatCost(character) {
@@ -8113,6 +8200,14 @@ function executeAttack(attackerId, moveName, targetId) {
 
     if (!game.playtestMode && attackerPlayerNum === game.currentPlayer && game.attackedThisTurn) {
         game.log('You have already attacked this turn!', 'warning');
+        closeModal('action-modal');
+        updateUI();
+        return;
+    }
+
+    // Enforce Meya lock even if attack is triggered outside the normal attack menu path.
+    if (attackerPlayerNum === game.currentPlayer && game.players[attackerPlayerNum] && game.players[attackerPlayerNum].active === attacker && isActiveAttackBlockedByMeya(attackerPlayerNum)) {
+        game.log('Cannot attack: this active character is locked by Meya Gao\'s I See Your Soul.', 'warning');
         closeModal('action-modal');
         updateUI();
         return;
@@ -8834,22 +8929,20 @@ function useActivatedAbility(cardId, abilitySlot) {
 
         case 'Program Production':
             // Rachel: Retrieve concert programs/tickets from discard
-            if (player.active === card) {
-                if (card.usedProgramProductionThisTurn) {
-                    showLocalAlert('Program Production can only be used once per turn!');
-                    closeModal('action-modal');
-                    break;
-                }
-                const programsAndTickets = player.discard.filter(c =>
-                    c.name === 'Concert Program' || c.name === 'Concert Ticket'
-                );
-                if (programsAndTickets.length > 0) {
-                    showProgramProductionModal(player, programsAndTickets);
-                } else {
-                    showLocalAlert('No Concert Programs or Tickets in discard pile!');
-                }
+            if (card.usedProgramProductionThisTurn) {
+                showLocalAlert('Program Production can only be used once per turn!');
+                closeModal('action-modal');
+                break;
+            }
+            const programsAndTickets = player.discard.filter(c =>
+                c.name === 'Concert Program' || c.name === 'Concert Ticket'
+            );
+            if (programsAndTickets.length > 0) {
+                if (!game.tempSelections) game.tempSelections = {};
+                game.tempSelections.programProductionSourceId = card.id;
+                showProgramProductionModal(game.currentPlayer, programsAndTickets);
             } else {
-                showLocalAlert('Rachel must be in the active slot to use this ability!');
+                showLocalAlert('No Concert Programs or Tickets in discard pile!');
             }
             break;
 
@@ -9154,9 +9247,15 @@ function executeProgramProduction(cardIdx) {
     player.hand.push(card);
     game.log(`Program Production: Retrieved ${card.name} from discard`);
 
-    const rachel = player.active && player.active.name === 'Rachel Chen' ? player.active : null;
+    const sourceId = game.tempSelections && game.tempSelections.programProductionSourceId;
+    const rachel = [player.active, ...player.bench].find(c => c && c.name === 'Rachel Chen' && (!sourceId || c.id === sourceId)) ||
+        [player.active, ...player.bench].find(c => c && c.name === 'Rachel Chen') ||
+        null;
     if (rachel) {
         rachel.usedProgramProductionThisTurn = true;
+    }
+    if (game.tempSelections) {
+        delete game.tempSelections.programProductionSourceId;
     }
 
     closeModal('action-modal');

@@ -936,3 +936,53 @@ Notes:
   - `node output/ui_smoke_test.mjs`
   - `node output/rules_update_regression_test.mjs`
   - Skill Playwright client run: `node "$WEB_GAME_CLIENT" --url http://localhost:3001 --actions-file "$WEB_GAME_ACTIONS" --click-selector "#start-game-btn" --iterations 1 --pause-ms 200`
+- Rachel + Meya ability fix pass (2026-03-13):
+  - Rachel `Program Production` now works when Rachel is on bench or active (not active-only).
+    - Ability now stores source Rachel id in `tempSelections.programProductionSourceId` and marks that exact Rachel as used for the turn after retrieval.
+  - Meya `I See Your Soul` lock reworked to be active-character scoped and turn-scoped:
+    - On trigger, stores `meyaCannotAttackActiveId` + `meyaCannotAttackTurn` for each player (opponent next turn, owner following turn).
+    - Attack lock check now blocks only if current active matches the locked id on the locked turn.
+    - Switching out the locked active allows the new active to attack that same turn.
+    - Removed legacy one-bit `cannotAttack` dependence and cleanup stale legacy lock state.
+  - Updated attack disable UI check to use new Meya lock helper.
+- Validation completed:
+  - `node --check game.js`
+  - `node output/ui_smoke_test.mjs`
+  - `node output/rules_update_regression_test.mjs`
+  - `node output/modal_item_regression_test.mjs`
+  - `node output/supporter_smoke_test.mjs`
+- Stadium ownership discard fix (2026-03-13):
+  - Added explicit stadium ownership tracking (`game.stadiumOwner` + `stadium.playedBy` metadata) when a stadium is played.
+  - Added centralized helpers:
+    - `resolveActiveStadiumOwnerPlayerNum()`
+    - `discardActiveStadiumToOwner()`
+  - Updated stadium removal/replacement paths to always send removed stadium to original owner discard:
+    - `playStadium` replacement flow now discards existing stadium to owner, not current player.
+    - `BAI Email` stadium removal now discards existing stadium to owner, not current player.
+  - Added stadium owner to `render_game_to_text` payload for easier debugging in automation.
+- Added regression coverage:
+  - `output/stadium_owner_discard_regression_test.mjs` verifies:
+    - Player 1 plays stadium,
+    - Player 2 removes it with BAI Email,
+    - removed stadium lands in Player 1 discard.
+- Validation completed:
+  - `node --check game.js`
+  - `node --check output/stadium_owner_discard_regression_test.mjs`
+  - `node output/stadium_owner_discard_regression_test.mjs`
+  - `node output/ui_smoke_test.mjs`
+  - `node output/rules_update_regression_test.mjs`
+- Item retrieval from discard robustness fix (2026-03-14):
+  - Root cause: several discard retrieval paths used strict `cardType === 'item'`, which misses legacy/custom/synced cards where item metadata may be in `cardCategory` (or inferred only by name).
+  - Added runtime category resolver `getRuntimeCardCategory(card, fallback)` using existing normalization/inference logic.
+  - Updated discard-item retrieval filters to use normalized category matching:
+    - `selectFromDiscard`
+    - `selectMultipleFromDiscard`
+    - Arranger on-damage item shuffle check
+    - Will supporter item-shuffle-from-discard
+  - Result: Otamatone/Miku Otamatone and other items are now eligible for discard retrieval/shuffle even when type metadata is non-standard.
+- Validation completed:
+  - `node --check game.js`
+  - `node output/supporter_smoke_test.mjs`
+  - `node output/modal_item_regression_test.mjs`
+  - `node output/rules_update_regression_test.mjs`
+  - `node output/ui_smoke_test.mjs`
