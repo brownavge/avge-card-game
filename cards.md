@@ -125,7 +125,7 @@
 
 ### David
 - **Type:** Piano | **HP:** 100 | **Grad Year:** 2027 | **Retreat Cost:** 1
-- **Ability:** Reverse Heist (Activated) - Once per turn, when you use an item card, you may put it back on the top of your deck.
+- **Ability:** Reverse Heist (Activated) - Once per turn, you may randomly choose and look at a card from your discard pile, and put it on either the top or bottom of your deck.
 - **Moves:**
   - Simulation: (K + X) Shuffle your deck, and guess the number of character cards in the top 5 cards. Reveal them. If you are correct, put those cards in your hand. Otherwise, shuffle them back into your deck.
   - Piano Solo: (K + X) 30 damage
@@ -238,7 +238,7 @@
 - If the player attached to this is active at the beginning of your turn, draw 1 extra card.
 
 ### Musescore Subscription
-- While equipped, this character gains Arranger status. Whenever this character is damaged, you may retrieve an item card from your discard pile.
+- While equipped, this character gains Arranger status. Whenever this character is damaged, you may shuffle a random card from your discard pile into your deck. When knocked out, you may additionally search your discard pile for one musescore file and put it in your hand.
 
 ### Extension Cord
 - While equipped, this character gains Poppet status. Pop-Up: Does 20 extra damage if not in a performance space.
@@ -281,7 +281,7 @@
 - Switch your opponent's active character with one of their benched characters.
 
 ### Camera
-- Look at your opponent's hand and choose a card type (character, energy, item, supporter). Your opponent must reveal all cards of that type.
+- Shuffle one Supporter or Stadium from your discard pile into your deck.
 
 ### Video Camera
 - Look at the top 5 cards of your opponent's deck. Choose one and discard it.
@@ -290,10 +290,10 @@
 - Look at the top 3 cards of your deck. Put them back in any order.
 
 ### Rehearsal Roster
-- Search your deck for up to 2 characters with the same type and put them in your hand.
+- Discard any amount of energy from your characters in play. For each, shuffle up to 2 random cards from your discard into your deck.
 
 ### CAST Reserve
-- Draw cards until you have 5 cards in your hand.
+- Search for three unique items from your deck and reveal them. Your opponent chooses two to shuffle back into your deck. Put the other in your hand.
 
 ### AVGE Birb
 - Discard all energy attached to your active character and deal 10 damage to the opponent's active character for each energy discarded.

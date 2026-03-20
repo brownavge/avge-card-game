@@ -421,7 +421,7 @@ const CHARACTERS = {
         hp: 100,
         ability: {
             name: 'Reverse Heist',
-            description: 'While this character is in play, once per turn you may shuffle your discard pile and randomly choose 3 cards. Put all item/tool cards chosen on the top of your deck in any order. (You need at least 3 cards in your discard to do this)',
+            description: 'Once per turn, you may randomly choose and look at a card from your discard pile, and put it on either the top or bottom of your deck.',
             type: 'activated'
         },
         moves: [
@@ -1022,7 +1022,7 @@ const TOOLS = {
 // Maid: This character is immune to all attacks of 10 base damage or less (before debuffs).
 // Conductor: This character gains 30 health, but the retreat cost is doubled. Each music stand used gives +10 additional damage
 // Goon: This character gains 20 health, and each music stand used grants this character +10 damage, but their retreat cost is doubled.
-// Arranger: Whenever damaged, you may shuffle an item card from your discard pile into your deck. When knocked out, you may search your discard pile for one musescore file and put it in your hand.
+// Arranger: Whenever damaged, you may shuffle a random card from your discard pile into your deck. When knocked out, you may search your discard pile for one musescore file and put it in your hand.
 
 // Non-Tool Items
 const ITEMS = {
@@ -1064,18 +1064,18 @@ const ITEMS = {
         name: 'Standard Musescore File',
         type: 'item',
         subtype: 'musescore',
-        effect: 'You can only play this if your active character is an Arranger. Draw two cards from the top of your deck.'
+        effect: 'Look at the top card of your deck. You may keep it or shuffle it back in to draw another.'
     },
     CORRUPTED_FILE: {
         name: 'Corrupted Musescore File',
         type: 'item',
         subtype: 'musescore',
-        effect: 'You can only play this if your active character is an Arranger. Draw two cards from the bottom of your deck.'
+        effect: 'You may look at the top N+1 cards of your deck, where N is the number of arrangers you have in play. Pick one and shuffle the rest back in.'
     },
     CAST_RESERVE: {
         name: 'Cast Reserve',
         type: 'item',
-        effect: 'Search for three unique items from your deck and reveal them. Your opponent chooses two to discard. Put one of the others in your hand.'
+        effect: 'Search for three unique items from your deck and reveal them. Your opponent chooses two to shuffle back into your deck. Put the other in your hand.'
     },
     FOLDING_STAND: {
         name: 'Folding Stand',
@@ -1107,7 +1107,7 @@ const ITEMS = {
         name: 'Dress Rehearsal Roster',
         type: 'item',
         subtype: 'roster',
-        effect: 'Look at top 3 cards of your deck. Keep one and discard the other two.'
+        effect: 'Discard any amount of energy from your characters in play. For each, shuffle up to 2 random cards from your discard into your deck.'
     },
     CONCERT_TICKET: {
         name: 'Concert Ticket',
@@ -1127,7 +1127,7 @@ const ITEMS = {
     CAMERA: {
         name: 'Camera',
         type: 'item',
-        effect: 'Shuffle one Supporter card from your discard pile into your deck.'
+        effect: 'Shuffle one Supporter or Stadium from your discard pile into your deck.'
     },
     VIDEO_CAMERA: {
         name: 'Video Camera',
@@ -1151,12 +1151,12 @@ const SUPPORTERS = {
     RICHARD: {
         name: 'Richard',
         type: 'supporter',
-        effect: 'Break it Down: If both players have at least as many cards in their discard pile as their deck, both players shuffle both their discard pile and their deck, and switch them.'
+        effect: 'Break it Down: Shuffle both your discard pile and your deck, and switch them.'
     },
     MICHELLE: {
         name: 'Michelle',
         type: 'supporter',
-        effect: 'Discord Announcement: Opponent discards down to 1 card in hand. Cannot be played on the first turn.'
+        effect: 'Discord Announcement: Opponent shuffles their hand into their deck, then draws 1 card. Cannot be played on the first turn.'
     },
     WILL: {
         name: 'Will',

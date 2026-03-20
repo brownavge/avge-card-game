@@ -720,28 +720,24 @@ class GameState {
 
         characterCard.damage = (characterCard.damage || 0) + finalDamage;
 
-        // Arranger status: may shuffle an item from discard into deck when damaged
+        // Arranger status: may shuffle a random card from discard into deck when damaged
         if (characterCard.status && characterCard.status.includes('Arranger') && finalDamage > 0) {
             const ownerPlayerNum = this.findPlayerWithCharacter(characterCard);
             if (ownerPlayerNum) {
                 const ownerPlayer = this.players[ownerPlayerNum];
-                const itemsInDiscard = ownerPlayer.discard.filter(c => getRuntimeCardCategory(c) === 'item');
-                if (itemsInDiscard.length > 0) {
-                    this.log(`${characterCard.name} may shuffle an item from discard into their deck (Arranger status)`);
-                    if (!game.tempSelections) game.tempSelections = {};
-                    if (source && game.lastAttackSource && source.id === game.lastAttackSource.id) {
-                        game.pendingAttackEndTurn = true;
-                        game.pendingAttackAttackerId = source.id;
-                        game.blockAttackEnd = true;
+                if (ownerPlayer.discard.length > 0) {
+                    const doShuffle = confirm(`${characterCard.name} (Arranger): Shuffle a random card from discard into your deck?`);
+                    if (doShuffle) {
+                        const chosenIndex = randInt(ownerPlayer.discard.length);
+                        const [chosenCard] = ownerPlayer.discard.splice(chosenIndex, 1);
+                        if (chosenCard) {
+                            ownerPlayer.deck.push(chosenCard);
+                            this.shuffleDeck(ownerPlayerNum);
+                            this.log(`Arranger status: Shuffled random card (${chosenCard.name}) into deck`, 'info');
+                        }
                     }
-                    game.tempSelections.discardDestination = 'deck';
-                    game.tempSelections.discardShuffle = true;
-                    showDiscardSelectionModal(ownerPlayer, itemsInDiscard, 'item', 1, () => {
-                        delete game.tempSelections.discardDestination;
-                        delete game.tempSelections.discardShuffle;
-                    });
                 } else {
-                    this.log('No item cards in discard', 'info');
+                    this.log('Arranger status: No cards in discard', 'info');
                 }
             }
         }
@@ -2738,8 +2734,13 @@ const DECK_TEMPLATES = {
 
 function createSampleDecks(deck1Name, deck2Name, deckOverrides = null) {
     // Create decks based on templates or custom decks
-    const overrideDeck1 = deckOverrides && Array.isArray(deckOverrides.deck1CustomCards) ? deckOverrides.deck1CustomCards : null;
-    const overrideDeck2 = deckOverrides && Array.isArray(deckOverrides.deck2CustomCards) ? deckOverrides.deck2CustomCards : null;
+    const configOverrides = multiplayer && multiplayer.config ? multiplayer.config : null;
+    const overrideDeck1 =
+        (deckOverrides && Array.isArray(deckOverrides.deck1CustomCards) ? deckOverrides.deck1CustomCards : null) ||
+        (configOverrides && Array.isArray(configOverrides.deck1CustomCards) ? configOverrides.deck1CustomCards : null);
+    const overrideDeck2 =
+        (deckOverrides && Array.isArray(deckOverrides.deck2CustomCards) ? deckOverrides.deck2CustomCards : null) ||
+        (configOverrides && Array.isArray(configOverrides.deck2CustomCards) ? configOverrides.deck2CustomCards : null);
     game.players[1].deck = buildDeckFromName(deck1Name, overrideDeck1);
     game.players[2].deck = buildDeckFromName(deck2Name, overrideDeck2);
 
@@ -2752,6 +2753,13 @@ function buildDeckFromName(deckName, customDeckOverride = null) {
     if (deckName.startsWith('custom:')) {
         const customDeckName = deckName.substring(7); // Remove 'custom:' prefix
         let customDeck = Array.isArray(customDeckOverride) ? customDeckOverride : null;
+        if (!customDeck && multiplayer && multiplayer.config) {
+            if (deckName === multiplayer.config.deck1Name && Array.isArray(multiplayer.config.deck1CustomCards)) {
+                customDeck = multiplayer.config.deck1CustomCards;
+            } else if (deckName === multiplayer.config.deck2Name && Array.isArray(multiplayer.config.deck2CustomCards)) {
+                customDeck = multiplayer.config.deck2CustomCards;
+            }
+        }
         if (!customDeck) {
             const customDecks = JSON.parse(localStorage.getItem('customDecks') || '{}');
             customDeck = customDecks[customDeckName];
@@ -4320,8 +4328,8 @@ function executeItemEffect(card) {
             return true;
 
         case 'Dress Rehearsal Roster':
-            showDeckSelection(player, 3, 1);
-            return true; // Wait for modal, will discard after selection
+            executeDressRehearsalRoster(player);
+            break;
 
         case 'Printed Score':
             if (opponent.hand.length > 0) {
@@ -4361,6 +4369,7 @@ function executeItemEffect(card) {
             }
             game.attackModifiers[game.currentPlayer].firstAttackBonus += 10;
             game.attackModifiers[game.currentPlayer].firstAttackBonusUsed = false;
+            applyMusicStandUse(game.currentPlayer);
             game.log('Folding Stand: +10 damage on your first attack this turn', 'info');
             break;
 
@@ -4380,6 +4389,7 @@ function executeItemEffect(card) {
             }
             game.attackModifiers[game.currentPlayer].firstAttackBonus += 20;
             game.attackModifiers[game.currentPlayer].firstAttackBonusUsed = false;
+            applyMusicStandUse(game.currentPlayer);
             game.log('BUO Stand: +20 damage on your first attack this turn', 'info');
             break;
 
@@ -4407,39 +4417,11 @@ function executeItemEffect(card) {
             break;
 
         case 'Standard Musescore File':
-            // Can only play if active character is an Arranger
-            if (player.active && player.active.status && player.active.status.includes('Arranger')) {
-                // Draw 2 cards from top of deck
-                const drawCount = Math.min(2, player.deck.length);
-                for (let i = 0; i < drawCount; i++) {
-                    const card = player.deck.shift();
-                    player.hand.push(card);
-                }
-                game.log(`Standard Musescore File: Drew ${drawCount} cards from top of deck`, 'info');
-            } else {
-                showLocalAlert('Can only play this if your active character has Arranger status!');
-                closeModal('action-modal');
-                updateUI();
-                return true; // Don't discard the card
-            }
+            executeStandardMusescoreFile(player);
             break;
 
         case 'Corrupted Musescore File':
-            // Can only play if active character is an Arranger
-            if (player.active && player.active.status && player.active.status.includes('Arranger')) {
-                // Draw 2 cards from bottom of deck
-                const drawCount = Math.min(2, player.deck.length);
-                for (let i = 0; i < drawCount; i++) {
-                    const card = player.deck.pop(); // Pop from end instead of shift from start
-                    player.hand.push(card);
-                }
-                game.log(`Corrupted Musescore File: Drew ${drawCount} cards from bottom of deck`, 'info');
-            } else {
-                showLocalAlert('Can only play this if your active character has Arranger status!');
-                closeModal('action-modal');
-                updateUI();
-                return true; // Don't discard the card
-            }
+            executeCorruptedMusescoreFile(player);
             break;
 
         // Search items
@@ -4508,18 +4490,21 @@ function executeItemEffect(card) {
 
         // Discard retrieval
         case 'Camera':
-            // Shuffle 1 supporter from discard into deck
-            const supportersInDiscard = player.discard.filter(c => c.cardType === 'supporter');
-            if (supportersInDiscard.length === 0) {
-                game.log('Camera: No supporters in discard pile', 'info');
-            } else if (supportersInDiscard.length === 1) {
-                const supporter = supportersInDiscard[0];
-                player.deck.push(supporter);
-                player.discard = player.discard.filter(c => c.id !== supporter.id);
+            // Shuffle 1 supporter or stadium from discard into deck
+            const eligibleCameraCards = player.discard.filter((c) => {
+                const category = getRuntimeCardCategory(c);
+                return category === 'supporter' || category === 'stadium';
+            });
+            if (eligibleCameraCards.length === 0) {
+                game.log('Camera: No supporters or stadiums in discard pile', 'info');
+            } else if (eligibleCameraCards.length === 1) {
+                const chosenCard = eligibleCameraCards[0];
+                player.deck.push(chosenCard);
+                player.discard = player.discard.filter(c => c.id !== chosenCard.id);
                 game.shuffleDeck(game.currentPlayer);
-                game.log(`Camera: Shuffled ${supporter.name} into deck`, 'info');
+                game.log(`Camera: Shuffled ${chosenCard.name} into deck`, 'info');
             } else {
-                showCameraModal(player, supportersInDiscard);
+                showCameraModal(player, eligibleCameraCards);
                 return true;
             }
             break;
@@ -4555,6 +4540,123 @@ function showTopCards(player, count) {
     const topCards = playerObj.deck.slice(0, Math.min(count, playerObj.deck.length));
     showLocalAlert(`Top ${count} cards: ${topCards.map(c => c.name).join(', ')}`);
     game.log(`Looked at top ${count} cards`, 'info');
+}
+
+function executeDressRehearsalRoster(player) {
+    const inPlayChars = [player.active, ...player.bench].filter(Boolean);
+    const totalAttachedEnergy = inPlayChars.reduce((sum, char) => sum + (Array.isArray(char.attachedEnergy) ? char.attachedEnergy.length : 0), 0);
+
+    if (totalAttachedEnergy <= 0) {
+        game.log('Dress Rehearsal Roster: No attached energy to discard.', 'info');
+        return;
+    }
+
+    const maxDiscard = totalAttachedEnergy;
+    const rawDiscard = prompt(`Dress Rehearsal Roster: Discard how many energy from your characters in play? (0-${maxDiscard})`);
+    let discardCount = Number(rawDiscard);
+    if (!Number.isFinite(discardCount)) discardCount = 0;
+    discardCount = Math.max(0, Math.min(maxDiscard, Math.floor(discardCount)));
+
+    if (discardCount <= 0) {
+        game.log('Dress Rehearsal Roster: No energy discarded.', 'info');
+        return;
+    }
+
+    let remainingToDiscard = discardCount;
+    for (const char of inPlayChars) {
+        while (remainingToDiscard > 0 && Array.isArray(char.attachedEnergy) && char.attachedEnergy.length > 0) {
+            const discardedEnergy = char.attachedEnergy.pop();
+            if (discardedEnergy) {
+                player.discard.push(discardedEnergy);
+                remainingToDiscard -= 1;
+            }
+        }
+        if (remainingToDiscard <= 0) break;
+    }
+
+    const effectiveDiscarded = discardCount - Math.max(0, remainingToDiscard);
+    const maxShuffle = Math.min(effectiveDiscarded * 2, player.discard.length);
+    if (maxShuffle <= 0) {
+        game.log(`Dress Rehearsal Roster: Discarded ${effectiveDiscarded} energy; no discard cards available to shuffle.`, 'info');
+        return;
+    }
+
+    const rawShuffle = prompt(`Dress Rehearsal Roster: Shuffle how many random discard cards into deck? (0-${maxShuffle})`);
+    let shuffleCount = Number(rawShuffle);
+    if (!Number.isFinite(shuffleCount)) shuffleCount = maxShuffle;
+    shuffleCount = Math.max(0, Math.min(maxShuffle, Math.floor(shuffleCount)));
+
+    if (shuffleCount > 0) {
+        const shuffledIndices = player.discard.map((_, index) => index);
+        for (let i = shuffledIndices.length - 1; i > 0; i--) {
+            const j = randInt(i + 1);
+            [shuffledIndices[i], shuffledIndices[j]] = [shuffledIndices[j], shuffledIndices[i]];
+        }
+        const selectedIndices = new Set(shuffledIndices.slice(0, shuffleCount));
+        const selectedCards = [];
+        player.discard = player.discard.filter((card, index) => {
+            if (selectedIndices.has(index)) {
+                selectedCards.push(card);
+                return false;
+            }
+            return true;
+        });
+        player.deck.push(...selectedCards);
+        game.shuffleDeck(game.currentPlayer);
+        game.log(`Dress Rehearsal Roster: Discarded ${effectiveDiscarded} energy and shuffled ${selectedCards.length} random discard card(s) into deck.`, 'info');
+    } else {
+        game.log(`Dress Rehearsal Roster: Discarded ${effectiveDiscarded} energy and shuffled 0 cards.`, 'info');
+    }
+}
+
+function executeStandardMusescoreFile(player) {
+    if (!player.deck.length) {
+        game.log('Standard Musescore File: Deck is empty.', 'info');
+        return;
+    }
+    const topCard = player.deck.shift();
+    const keepTopCard = confirm(`Standard Musescore File: Top card is ${topCard.name}. Keep it?`);
+    if (keepTopCard) {
+        player.hand.push(topCard);
+        game.log(`Standard Musescore File: Kept ${topCard.name}.`, 'info');
+        return;
+    }
+
+    player.deck.push(topCard);
+    game.shuffleDeck(game.currentPlayer);
+    if (!player.deck.length) {
+        game.log('Standard Musescore File: No card to redraw after shuffling.', 'info');
+        return;
+    }
+    const redraw = player.deck.shift();
+    player.hand.push(redraw);
+    game.log(`Standard Musescore File: Shuffled back and drew ${redraw.name}.`, 'info');
+}
+
+function executeCorruptedMusescoreFile(player) {
+    const arrangerCount = [player.active, ...player.bench].filter((c) => c && Array.isArray(c.status) && c.status.includes('Arranger')).length;
+    const viewCount = Math.min(player.deck.length, arrangerCount + 1);
+    if (viewCount <= 0) {
+        game.log('Corrupted Musescore File: Deck is empty.', 'info');
+        return;
+    }
+
+    const topCards = player.deck.splice(0, viewCount);
+    const options = topCards.map((card, idx) => `${idx + 1}) ${card.name}`).join('\n');
+    const rawChoice = prompt(`Corrupted Musescore File: Choose one card to keep:\n${options}`);
+    let choiceIndex = Number(rawChoice) - 1;
+    if (!Number.isFinite(choiceIndex) || choiceIndex < 0 || choiceIndex >= topCards.length) {
+        choiceIndex = 0;
+    }
+
+    const chosenCard = topCards[choiceIndex];
+    const remainingCards = topCards.filter((_, idx) => idx !== choiceIndex);
+    if (chosenCard) {
+        player.hand.push(chosenCard);
+    }
+    player.deck.push(...remainingCards);
+    game.shuffleDeck(game.currentPlayer);
+    game.log(`Corrupted Musescore File: Looked at ${viewCount} card(s), kept ${chosenCard ? chosenCard.name : 'none'}, shuffled the rest back.`, 'info');
 }
 
 function showDeckSelection(player, viewCount, selectCount) {
@@ -5438,10 +5540,10 @@ function showCastReserveSelectionModal(player) {
     const items = game.players[playerNum].deck.filter(c => c.cardType === 'item');
     if (items.length === 0) {
         game.log('Cast Reserve: No items in deck', 'info');
-        const castCard = player.hand.find(c => c.name === 'Cast Reserve');
+        const castCard = game.players[playerNum].hand.find(c => c.name === 'Cast Reserve');
         if (castCard) {
-            player.hand = player.hand.filter(c => c.id !== castCard.id);
-            player.discard.push(castCard);
+            game.players[playerNum].hand = game.players[playerNum].hand.filter(c => c.id !== castCard.id);
+            game.players[playerNum].discard.push(castCard);
         }
         updateUI();
         return;
@@ -5501,8 +5603,9 @@ function toggleCastReserveItem(cardId) {
 }
 
 function confirmCastReserveSelection() {
-    const player = game.players[game.currentPlayer];
-    const opponentNum = game.currentPlayer === 1 ? 2 : 1;
+    const ownerNum = Number(game.tempSelections.castReserveOwner || game.currentPlayer);
+    const player = game.players[ownerNum];
+    const opponentNum = ownerNum === 1 ? 2 : 1;
     const selectedIds = game.tempSelections.castReserveSelected || [];
     const requiredCount = Number(game.tempSelections.castReserveRequiredCount || 3);
 
@@ -5515,15 +5618,15 @@ function confirmCastReserveSelection() {
     selectedIds.forEach(id => {
         player.deck = player.deck.filter(c => c.id !== id);
     });
-    game.shuffleDeck(game.currentPlayer);
+    game.shuffleDeck(ownerNum);
 
     game.tempSelections.castReserveCards = selectedCards;
-    game.tempSelections.castReserveOwner = game.currentPlayer;
+    game.tempSelections.castReserveOwner = ownerNum;
 
     showCastReserveOpponentChoice(
         selectedCards.map(c => ({ id: c.id, name: c.name })),
         opponentNum,
-        game.currentPlayer,
+        ownerNum,
         selectedCards
     );
 }
@@ -5553,23 +5656,23 @@ function showCastReserveOpponentChoice(itemData, opponentNum, ownerNumOverride =
 
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
-    const selectedDiscardIds = game.tempSelections.castReserveOpponentDiscardIds || [];
+    const selectedShuffleBackIds = game.tempSelections.castReserveOpponentDiscardIds || [];
     const discardRequired = Math.min(2, Array.isArray(itemData) ? itemData.length : 0);
 
     let html = `<h2>Cast Reserve</h2>`;
-    html += `<p>Your opponent revealed these items. Choose ${discardRequired} to discard (${selectedDiscardIds.length}/${discardRequired}).</p>`;
+    html += `<p>Your opponent revealed these items. Choose ${discardRequired} to shuffle back into their deck (${selectedShuffleBackIds.length}/${discardRequired}).</p>`;
     html += `<div class="target-selection">`;
 
     itemData.forEach(item => {
         const displayName = (item && item.name) ? item.name : (item && item.id ? item.id : 'Unknown Item');
         const itemId = (item && item.id) ? item.id : item;
-        const selectedClass = selectedDiscardIds.includes(itemId) ? ' selected' : '';
+        const selectedClass = selectedShuffleBackIds.includes(itemId) ? ' selected' : '';
         html += `<div class="target-option${selectedClass}" onclick="toggleCastReserveOpponentChoice('${itemId}')">${displayName}</div>`;
     });
 
     html += `</div>`;
     html += `<div class="action-buttons">`;
-    html += `<button class="action-btn" onclick="confirmCastReserveOpponentChoice()">Confirm Discard</button>`;
+    html += `<button class="action-btn" onclick="confirmCastReserveOpponentChoice()">Confirm</button>`;
     html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
     html += `</div>`;
 
@@ -5611,15 +5714,18 @@ function confirmCastReserveOpponentChoice() {
         return;
     }
     if (selectedDiscardIds.length !== discardRequired) {
-        game.log(`Cast Reserve: Select exactly ${discardRequired} card${discardRequired === 1 ? '' : 's'} to discard.`, 'warning');
+        game.log(`Cast Reserve: Select exactly ${discardRequired} card${discardRequired === 1 ? '' : 's'} to shuffle back.`, 'warning');
         return;
     }
-    const toDiscard = selectedCards.filter(c => selectedDiscardIds.includes(c.id));
+    const toShuffleBack = selectedCards.filter(c => selectedDiscardIds.includes(c.id));
     const remaining = selectedCards.filter(c => !selectedDiscardIds.includes(c.id));
-    toDiscard.forEach((chosen) => {
-        owner.discard.push(chosen);
-        game.log(`Cast Reserve: Discarded ${chosen.name}`, 'info');
+    toShuffleBack.forEach((chosen) => {
+        owner.deck.push(chosen);
+        game.log(`Cast Reserve: Shuffled ${chosen.name} back into deck`, 'info');
     });
+    if (toShuffleBack.length > 0) {
+        game.shuffleDeck(ownerNum);
+    }
     remaining.forEach(card => owner.hand.push(card));
 
     const castCard = owner.hand.find(c => c.name === 'Cast Reserve');
@@ -6346,34 +6452,37 @@ function fullHealCharacter(target) {
     updateUI();
 }
 
-// Camera: Choose up to 2 supporters from discard to shuffle into deck
-function showCameraModal(player, supporters) {
-    // Gate to player and serialize supporters by id for multiplayer
+// Camera: Choose one supporter or stadium from discard to shuffle into deck.
+function showCameraModal(player, cards) {
+    // Gate to player and serialize candidate ids for multiplayer
     const playerNum = (typeof player === 'number') ? player : (game.players[1] === player ? 1 : 2);
-    const supporterIds = Array.isArray(supporters) ? supporters.map(s => s && s.id ? s.id : s) : [];
-    if (!openModalForPlayer(playerNum, 'showCameraModal', [playerNum, supporterIds])) return;
+    const candidateIds = Array.isArray(cards) ? cards.map(s => s && s.id ? s.id : s) : [];
+    if (!openModalForPlayer(playerNum, 'showCameraModal', [playerNum, candidateIds])) return;
 
     if (!game.tempSelections) game.tempSelections = {};
     if (!game.tempSelections.cameraSelections) game.tempSelections.cameraSelections = [];
+    game.tempSelections.cameraPlayerNum = playerNum;
 
-    // Reconstruct supporters list if called remotely
+    // Reconstruct candidate list if called remotely
     const playerObj = game.players[playerNum];
-    const supportersList = Array.isArray(supporterIds) && typeof supporterIds[0] === 'string'
-        ? supporterIds.map(id => playerObj.discard.find(c => c.id === id)).filter(Boolean)
-        : (supporters || []);
+    const candidates = Array.isArray(candidateIds) && typeof candidateIds[0] === 'string'
+        ? candidateIds.map(id => playerObj.discard.find(c => c.id === id)).filter(Boolean)
+        : (cards || []);
 
     const modal = document.getElementById('action-modal');
     const content = document.getElementById('action-content');
 
+    game.tempSelections.cameraCandidateIds = candidates.map((entry) => entry.id);
+
     let html = `<h2>Camera</h2>`;
-    html += `<p>Choose 1 supporter to shuffle into deck (${game.tempSelections.cameraSelections.length}/1 selected)</p>`;
+    html += `<p>Choose 1 supporter or stadium to shuffle into deck (${game.tempSelections.cameraSelections.length}/1 selected)</p>`;
     html += `<div class="target-selection">`;
 
-    supportersList.forEach((supporter, idx) => {
-        const isSelected = game.tempSelections.cameraSelections.includes(supporter.id);
+    candidates.forEach((entry) => {
+        const isSelected = game.tempSelections.cameraSelections.includes(entry.id);
         const selectedClass = isSelected ? 'selected' : '';
-        html += `<div class="target-option ${selectedClass}" onclick="toggleCameraSelection('${supporter.id}')">
-            ${supporter.name} ${isSelected ? '✓' : ''}
+        html += `<div class="target-option ${selectedClass}" onclick="toggleCameraSelection('${entry.id}')">
+            ${entry.name} ${isSelected ? '✓' : ''}
         </div>`;
     });
 
@@ -6398,13 +6507,16 @@ function toggleCameraSelection(supporterId) {
     }
 
     // Refresh modal
-    const player = game.players[game.currentPlayer];
-    const supporters = player.discard.filter(c => c.cardType === 'supporter');
-    showCameraModal(player, supporters);
+    const cameraPlayerNum = Number(game.tempSelections.cameraPlayerNum || game.currentPlayer);
+    const player = game.players[cameraPlayerNum];
+    const candidateIds = Array.isArray(game.tempSelections.cameraCandidateIds) ? game.tempSelections.cameraCandidateIds : [];
+    const candidates = candidateIds.map((id) => player.discard.find((c) => c.id === id)).filter(Boolean);
+    showCameraModal(cameraPlayerNum, candidates);
 }
 
 function confirmCameraSelection() {
-    const player = game.players[game.currentPlayer];
+    const playerNum = Number(game.tempSelections.cameraPlayerNum || game.currentPlayer);
+    const player = game.players[playerNum];
 
     if (game.tempSelections.cameraSelections && game.tempSelections.cameraSelections.length > 0) {
         game.tempSelections.cameraSelections.forEach(supporterId => {
@@ -6414,12 +6526,14 @@ function confirmCameraSelection() {
                 player.discard = player.discard.filter(c => c.id !== supporterId);
             }
         });
-        game.shuffleDeck(game.currentPlayer);
-        game.log(`Camera: Shuffled ${game.tempSelections.cameraSelections.length} supporter(s) into deck`, 'info');
+        game.shuffleDeck(playerNum);
+        game.log(`Camera: Shuffled ${game.tempSelections.cameraSelections.length} card(s) into deck`, 'info');
     }
 
     // Clean up
     game.tempSelections.cameraSelections = [];
+    delete game.tempSelections.cameraCandidateIds;
+    delete game.tempSelections.cameraPlayerNum;
 
     // Discard Camera card
     const cameraCard = player.hand.find(c => c.name === 'Camera');
@@ -7609,13 +7723,7 @@ function executeSupporterEffect(card) {
             return true; // Wait for modal
 
         case 'Richard':
-            // Break it Down: swap shuffled deck/discard if both players have discard >= deck
-            const bothEligible = [player, opponent].every(p => p.discard.length >= p.deck.length);
-            if (!bothEligible) {
-                game.log('Richard: Condition not met (each player must have discard >= deck)', 'info');
-                break;
-            }
-
+            // Break it Down: shuffle your deck/discard, then switch them
             const shuffleArray = (arr) => {
                 for (let i = arr.length - 1; i > 0; i--) {
                     const j = randInt(i + 1);
@@ -7623,27 +7731,24 @@ function executeSupporterEffect(card) {
                 }
                 return arr;
             };
-            [player, opponent].forEach(p => {
-                const deckCopy = shuffleArray([...p.deck]);
-                const discardCopy = shuffleArray([...p.discard]);
-                p.deck = discardCopy;
-                p.discard = deckCopy;
-            });
-            game.log('Richard: Swapped deck and discard piles for both players', 'info');
+            const deckCopy = shuffleArray([...player.deck]);
+            const discardCopy = shuffleArray([...player.discard]);
+            player.deck = discardCopy;
+            player.discard = deckCopy;
+            game.log('Richard: Swapped your deck and discard piles', 'info');
             break;
 
         case 'Michelle':
-            // Discord Announcement: Opponent discards down to 1 card in hand
-            if (opponent.hand.length > 1) {
-                const discardCount = opponent.hand.length - 1;
+            // Discord Announcement: Opponent shuffles hand into deck, then draws 1
+            if (opponent.hand.length > 0) {
+                opponent.deck.push(...opponent.hand);
+                opponent.hand = [];
                 const opponentNum = game.currentPlayer === 1 ? 2 : 1;
-                showOpponentDiscardChoice(opponentNum, discardCount, null, {
-                    logMessage: `Michelle's Discord Announcement: Opponent discarded ${discardCount} card${discardCount > 1 ? 's' : ''}`
-                });
-                return true; // Wait for modal
-            } else {
-                game.log(`Michelle's Discord Announcement: Opponent already has 1 or fewer cards in hand`, 'info');
+                game.shuffleDeck(opponentNum);
+                game.log(`Michelle's Discord Announcement: Opponent shuffled their hand into their deck`, 'info');
             }
+            game.drawCards(game.currentPlayer === 1 ? 2 : 1, 1);
+            game.log(`Michelle's Discord Announcement: Opponent drew 1 card`, 'info');
             break;
 
         case 'Will':
@@ -7677,9 +7782,11 @@ function executeSupporterEffect(card) {
 
         case 'Lio':
             // Shuffle hand into deck, draw 6
-            const handCount = player.hand.length;
-            player.deck.push(...player.hand);
-            player.hand = [];
+            // Exclude the played Lio card itself; playSupporter() will discard it after this effect resolves.
+            const cardsToShuffle = player.hand.filter((handCard) => handCard && handCard.id !== card.id);
+            const handCount = cardsToShuffle.length;
+            player.deck.push(...cardsToShuffle);
+            player.hand = player.hand.filter((handCard) => handCard && handCard.id === card.id);
             game.shuffleDeck(game.currentPlayer);
             game.drawCards(game.currentPlayer, 6);
             game.log(`Shuffled ${handCount} cards into deck, drew 6 cards`, 'info');
@@ -9014,47 +9121,35 @@ function useActivatedAbility(cardId, abilitySlot) {
             break;
 
         case 'Reverse Heist':
-            // David Man: Shuffle discard, randomly choose 3, put items/tools on top of deck
+            // David Man: Randomly choose 1 discard card and place it on top or bottom of deck
             if (card.usedReverseHeistThisTurn) {
                 showLocalAlert('Reverse Heist can only be used once per turn!');
                 closeModal('action-modal');
                 break;
             }
-            if (player.discard.length < 3) {
-                showLocalAlert('Need at least 3 cards in discard pile!');
+            if (player.discard.length === 0) {
+                showLocalAlert('No cards in discard pile!');
                 closeModal('action-modal');
                 break;
             }
 
-            // Shuffle discard indices to pick 3 without mutating/discard reference pitfalls.
-            const shuffledIndices = player.discard.map((_, index) => index);
-            for (let i = shuffledIndices.length - 1; i > 0; i--) {
-                const j = randInt(i + 1);
-                [shuffledIndices[i], shuffledIndices[j]] = [shuffledIndices[j], shuffledIndices[i]];
+            const chosenIndex = randInt(player.discard.length);
+            const [chosenCard] = player.discard.splice(chosenIndex, 1);
+            if (!chosenCard) {
+                closeModal('action-modal');
+                break;
             }
-
-            const pickedIndices = shuffledIndices.slice(0, 3);
-            const pickedIndexSet = new Set(pickedIndices);
-            const randomThree = pickedIndices.map(index => player.discard[index]).filter(Boolean);
-            player.discard = player.discard.filter((_, index) => !pickedIndexSet.has(index));
-
-            // Filter for items/tools
-            const itemsAndTools = randomThree.filter(c => c.cardType === 'item' || c.cardType === 'tool');
-            // Non-items/tools return to discard
-            const nonItems = randomThree.filter(c => c.cardType !== 'item' && c.cardType !== 'tool');
-            if (nonItems.length > 0) {
-                player.discard.push(...nonItems);
+            const placeOnTop = confirm(`Reverse Heist: Randomly selected ${chosenCard.name}. Put it on top of your deck? (Cancel = bottom)`);
+            if (placeOnTop) {
+                player.deck.unshift(chosenCard);
+                game.log(`Reverse Heist: Put ${chosenCard.name} on top of deck`, 'info');
+            } else {
+                player.deck.push(chosenCard);
+                game.log(`Reverse Heist: Put ${chosenCard.name} on bottom of deck`, 'info');
             }
             card.usedReverseHeistThisTurn = true;
-
-            if (itemsAndTools.length > 0) {
-                // Put items/tools on top of deck in order
-                player.deck.unshift(...itemsAndTools);
-                game.log(`Reverse Heist: Found ${itemsAndTools.length} items/tools and placed on top!`);
-            } else {
-                game.log(`Reverse Heist: Drew ${randomThree.map(c => c.name).join(', ')} - no items/tools!`);
-            }
             closeModal('action-modal');
+            updateUI();
             break;
 
         case 'Category Theory':
@@ -10296,6 +10391,7 @@ function showDeckBuilderCardDetails(card, type) {
 
     if (type === 'character') {
         html += `<div class="detail-section"><span class="detail-label">HP:</span> ${card.hp || 0}</div>`;
+        html += `<div class="detail-section"><span class="detail-label">Retreat Cost:</span> ${Number.isFinite(Number(card.retreatCost)) ? Number(card.retreatCost) : 0}</div>`;
         if (Array.isArray(card.type) && card.type.length) {
             html += `<div class="detail-section"><span class="detail-label">Character Type:</span> ${card.type.join(', ')}</div>`;
         }
@@ -10354,7 +10450,8 @@ function createPoolCardElement(card, type) {
     if (type === 'character') {
         const hp = document.createElement('div');
         hp.className = 'pool-card-effect';
-        hp.textContent = `HP: ${card.hp || 0}${card.type ? ` • Type: ${card.type.join(', ')}` : ''}`;
+        const retreatCost = Number.isFinite(Number(card.retreatCost)) ? Number(card.retreatCost) : 0;
+        hp.textContent = `HP: ${card.hp || 0} • Retreat: ${retreatCost}${card.type ? ` • Type: ${card.type.join(', ')}` : ''}`;
         div.appendChild(hp);
 
         const entries = getCharacterDeckBuilderEntries(cardWithType);
@@ -10384,7 +10481,8 @@ function createPoolCardElement(card, type) {
         div.appendChild(effect);
     }
 
-    const searchable = `${card.name} ${card.effect || ''} ${card.description || ''} ${getCharacterDeckBuilderDescription(cardWithType)} ${getStadiumVenueLabel(cardWithType)}`
+    const typeSearch = Array.isArray(card.type) ? card.type.join(' ') : '';
+    const searchable = `${card.name} ${card.effect || ''} ${card.description || ''} ${typeSearch} ${getCharacterDeckBuilderDescription(cardWithType)} ${getStadiumVenueLabel(cardWithType)}`
         .toLowerCase()
         .replace(/"/g, '&quot;');
     div.setAttribute('data-search', searchable);

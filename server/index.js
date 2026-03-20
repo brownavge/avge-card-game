@@ -85,6 +85,28 @@ function normalizeRequestedRoomId(roomId) {
   return cleaned;
 }
 
+function isValidDeckName(deckName) {
+  if (typeof deckName !== 'string') return false;
+  const trimmed = deckName.trim();
+  if (!trimmed) return false;
+  if (trimmed.startsWith('custom:')) return trimmed.length > 7;
+  // Allow template identifiers used by the client.
+  const validTemplates = new Set([
+    'strings-aggro',
+    'piano-control',
+    'percussion-midrange',
+    'choir-healing',
+    'brass-tempo',
+    'woodwinds-control',
+    'tank-control',
+    'piano-choir-control',
+    'strings-woodwinds',
+    'all-types',
+    'high-hp'
+  ]);
+  return validTemplates.has(trimmed);
+}
+
 wss.on('connection', (ws) => {
   ws.rateLimit = {
     windowStart: Date.now(),
@@ -110,10 +132,14 @@ wss.on('connection', (ws) => {
     if (msg.type === ACTION_TYPES.JOIN) {
       const {
         roomId: requestedRoomId,
-        deckName = 'strings-aggro',
+        deckName = null,
         customDeckCards = null,
         playtestMode = false
       } = msg;
+      if (!isValidDeckName(deckName)) {
+        ws.send(JSON.stringify({ type: SERVER_EVENTS.ERROR, message: 'Invalid deck selection.' }));
+        return;
+      }
       if (!validateCustomDeckCards(customDeckCards)) {
         ws.send(JSON.stringify({ type: SERVER_EVENTS.ERROR, message: 'Invalid custom deck payload.' }));
         return;
@@ -201,6 +227,10 @@ wss.on('connection', (ws) => {
       ws.playerNumber = session.playerNumber;
       touchSession(room, sessionToken);
       if (deckName) {
+        if (!isValidDeckName(deckName)) {
+          ws.send(JSON.stringify({ type: SERVER_EVENTS.ERROR, message: 'Invalid deck selection.' }));
+          return;
+        }
         registerDeckForSession(room, sessionToken, deckName, customDeckCards);
       }
 

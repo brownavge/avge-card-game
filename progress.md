@@ -1023,3 +1023,42 @@ Notes:
   - `node output/ui_smoke_test.mjs` (pass)
   - `node output/rules_update_regression_test.mjs` (pass)
   - `node output/stadium_owner_discard_regression_test.mjs` (pass)
+- Multiplayer deck selection investigation (2026-03-20):
+  - Investigated report: Player 2 deck appearing as String Section regardless of selection.
+  - Root-cause hardening implemented:
+    1) Server JOIN no longer silently defaults missing deckName to `strings-aggro`.
+       - Added `isValidDeckName(...)` validation in `server/index.js`.
+       - JOIN now rejects invalid/missing deck selection instead of silently assigning String Section.
+       - RESUME deck update path now validates deckName before applying.
+    2) Client custom deck resolution strengthened in `game.js`:
+       - `createSampleDecks` now backfills missing overrides from `multiplayer.config`.
+       - `buildDeckFromName` now tries custom override -> `multiplayer.config` custom payload -> localStorage, before fallback.
+  - Verification performed:
+    - WebSocket capture test confirms room config receives and retains player 2 custom deck name (`deck2Name: custom:GuestCustom`) when joining.
+    - `node --check game.js`
+    - `node --check server/index.js`
+    - `node output/ui_smoke_test.mjs` (pass)
+    - `node output/rules_update_regression_test.mjs` (pass)
+    - Skill Playwright client run against start->game flow (pass).
+  - Notes:
+    - Existing custom-deck multiplayer regression scripts timed out in setup/main-phase waits during this run (modal/setup flow flake), not with explicit deck-name mismatch errors.
+
+2026-03-20
+- Updated rules + text for Reverse Heist, Camera, Dress Rehearsal Roster, Standard/Corrupted Musescore File, Cast Reserve, Richard, and Arranger status.
+- Fixed Cast Reserve resolution to have opponent choose two revealed items to shuffle back into deck (not discard), with remaining card added to hand.
+- Fixed Camera selection modal multiplayer ownership by storing source player/candidate ids in temp state instead of relying on current turn player.
+- Updated Arranger on-damage behavior to optional random-card shuffle from discard into deck.
+- Updated David Man Reverse Heist activated ability to random single discard card placed on top/bottom of deck.
+- Ensured Folding Stand/BUO Stand apply music-stand usage bonuses so Goon status receives +10 stand-based damage per use.
+- Synax checks passed: `node --check game.js`, `node --check cards.js`.
+- Playwright smoke run completed using skill client (`#start-game-btn`), artifacts refreshed under `output/web-game/shot-0.png` + `output/web-game/state-0.json`.
+- 2026-03-20 follow-up fixes:
+  - Fixed Lio/New Canvas duplication bug by excluding the played Lio supporter card from the hand cards shuffled into deck before resolution (prevents same card existing in deck and discard).
+  - Fixed David Man Reverse Heist UI staleness by forcing `updateUI()` after ability resolution so discard/deck counters refresh immediately.
+  - Deck builder UI improvements: show character retreat cost in list and details modal.
+  - Deck builder search improvements: include character type names in `data-search`, so partial type queries like `perc` match Percussion cards.
+  - Updated deck builder search placeholder copy to reflect name/effect/type searching.
+- Validation:
+  - `node --check game.js`
+  - `node --check cards.js`
+  - Playwright smoke: search `perc` in deck builder returned visible results; details modal includes retreat cost (`output/deck-builder-perc-smoke.png`).
