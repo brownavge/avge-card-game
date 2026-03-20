@@ -986,3 +986,40 @@ Notes:
   - `node output/modal_item_regression_test.mjs`
   - `node output/rules_update_regression_test.mjs`
   - `node output/ui_smoke_test.mjs`
+- BAI Email rules tightening (2026-03-18):
+  - Confirmed BAI Email effect text already matches desired wording in card data:
+    - "Discard any stadium in play. Then, search for a Stadium and put it in your hand. Neither player can play a stadium until the beginning of your next turn."
+  - Improved implementation robustness so BAI Email is always consumed once played, including search modal close/cancel paths.
+  - Added `tempSelections.baiEmailSourceId` tracking and `finalizeBaiEmailResolution(playerNum)` helper to consistently move the played BAI Email from hand to discard.
+  - Updated stadium-search flow to finalize BAI consumption in:
+    - no-stadium-in-deck path,
+    - stadium-selected path,
+    - action-modal close path while stadium search is pending.
+- Validation completed:
+  - `node --check game.js`
+  - `node output/stadium_owner_discard_regression_test.mjs` (pass)
+  - `node output/ui_smoke_test.mjs` (pass)
+  - `node output/modal_item_regression_test.mjs` (pass)
+  - `node output/rules_update_regression_test.mjs` (pass)
+- Note:
+  - Two broad suites showed existing modal-intercept flake in this run (`item_rules_regression_test`, `supporter_smoke_test`); failures were not in BAI Email paths.
+- BAI Email choice + Arranger verification pass (2026-03-18):
+  - BAI Email search now enforces explicit stadium choice whenever at least one stadium exists in deck.
+    - Removed search modal Cancel action.
+    - If action modal is closed while BAI stadium search is pending and choices exist, modal is re-opened (cannot bypass selection).
+    - If no stadium exists in deck, BAI resolves/consumes normally.
+  - Added BAI choice regression test:
+    - `output/bai_email_choice_test.mjs` verifies a selectable stadium list appears and selected stadium enters hand.
+  - Added Arranger status verification test:
+    - `output/arranger_status_verification_test.mjs` verifies:
+      1) on-damage Arranger trigger opens discard-item shuffle selection,
+      2) on-KO Arranger trigger opens musescore retrieval selection.
+- Validation completed:
+  - `node --check game.js`
+  - `node --check output/bai_email_choice_test.mjs`
+  - `node --check output/arranger_status_verification_test.mjs`
+  - `node output/bai_email_choice_test.mjs` (pass)
+  - `node output/arranger_status_verification_test.mjs` (pass)
+  - `node output/ui_smoke_test.mjs` (pass)
+  - `node output/rules_update_regression_test.mjs` (pass)
+  - `node output/stadium_owner_discard_regression_test.mjs` (pass)

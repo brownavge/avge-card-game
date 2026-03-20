@@ -194,12 +194,12 @@
 - **A capella:** Choir does +10 damage.
 
 ### Riley Hall
-- **Attendance Policy:** If this Stadium is active at the beginning of your turn, each of your characters take 10 damage for each of your empty bench slots.
+- **Attendance Policy:** If this Stadium is active at the beginning of a player's turn, each of their characters takes 10 nonlethal damage for each empty bench slot you have.
 - **String Sectionals:** Strings do +10 damage.
 
 ### Alumnae Hall
-- **Return by 4pm:** Upon this Stadium being played, both players must discard all music stands.
-- **Intense reverb:** While this Stadium is active, whenever a player uses an Item or Supporter, all their active and benched characters take 10 nonlethal damage.
+- **Return by 4pm:** Upon this Stadium being played, both players discard all items (only when played after first turn).
+- **Intense Reverb:** While active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.
 
 ### Main Hall
 - **Small Ensemble Limit:** While this Stadium is active, each player may only play up to three Helper Cards per turn.

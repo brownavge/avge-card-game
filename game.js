@@ -4454,6 +4454,8 @@ function executeItemEffect(card) {
 
         // Stadium removal
         case 'BAI Email':
+            if (!game.tempSelections) game.tempSelections = {};
+            game.tempSelections.baiEmailSourceId = card.id;
             if (game.stadium) {
                 const removedStadiumName = game.stadium.name;
                 discardActiveStadiumToOwner();
@@ -5653,19 +5655,14 @@ function showStadiumSearchModal(player) {
     const stadiums = playerObj.deck.filter(c => c.cardType === 'stadium');
     if (stadiums.length === 0) {
         game.log('No stadiums in deck', 'info');
-        const baiCard = playerObj.hand.find(c => c.name === 'BAI Email');
-        if (baiCard) {
-            playerObj.hand = playerObj.hand.filter(c => c.id !== baiCard.id);
-            playerObj.discard.push(baiCard);
-        }
-        delete game.tempSelections.stadiumSearchPlayer;
+        finalizeBaiEmailResolution(playerNum);
         closeModal('action-modal');
         updateUI();
         return;
     }
 
     let html = `<h2>BAI Email</h2>`;
-    html += `<p>Select a Stadium to put into your hand</p>`;
+    html += `<p>Select a Stadium to put into your hand.</p>`;
     html += `<div class="target-selection">`;
 
     stadiums.forEach(card => {
@@ -5673,10 +5670,32 @@ function showStadiumSearchModal(player) {
     });
 
     html += `</div>`;
-    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
 
     content.innerHTML = html;
     modal.classList.remove('hidden');
+}
+
+function finalizeBaiEmailResolution(playerNum) {
+    const resolvedPlayerNum = Number(playerNum || (game.tempSelections && game.tempSelections.stadiumSearchPlayer) || game.currentPlayer);
+    const player = game.players[resolvedPlayerNum];
+    if (!player) return;
+
+    const sourceId = game.tempSelections && game.tempSelections.baiEmailSourceId;
+    let baiCard = null;
+    if (sourceId) {
+        baiCard = player.hand.find(c => c && c.id === sourceId) || null;
+    }
+    if (!baiCard) {
+        baiCard = player.hand.find(c => c && c.name === 'BAI Email') || null;
+    }
+    if (baiCard) {
+        player.hand = player.hand.filter(c => c.id !== baiCard.id);
+        player.discard.push(baiCard);
+    }
+    if (game.tempSelections) {
+        delete game.tempSelections.stadiumSearchPlayer;
+        delete game.tempSelections.baiEmailSourceId;
+    }
 }
 
 function selectStadiumSearch(cardId, playerNum = null) {
@@ -5691,15 +5710,7 @@ function selectStadiumSearch(cardId, playerNum = null) {
         game.log(`BAI Email: Added ${card.name} to hand`, 'info');
     }
 
-    const baiCard = player.hand.find(c => c.name === 'BAI Email');
-    if (baiCard) {
-        player.hand = player.hand.filter(c => c.id !== baiCard.id);
-        player.discard.push(baiCard);
-    }
-
-    if (game.tempSelections) {
-        delete game.tempSelections.stadiumSearchPlayer;
-    }
+    finalizeBaiEmailResolution(resolvedPlayerNum);
 
     closeModal('action-modal');
     updateUI();
@@ -7753,17 +7764,21 @@ function playStadium(cardId) {
     player.hand = player.hand.filter(c => c.id !== cardId);
     game.log(`Played stadium: ${card.name}`);
 
-    // Alumnae Hall: Both players discard all items when played
+    // Alumnae Hall: Both players discard all items when played after turn 1.
     if (card.name === 'Alumnae Hall') {
-        [1, 2].forEach(playerNum => {
-            const p = game.players[playerNum];
-            const itemsInHand = p.hand.filter(c => c.cardType === 'item');
-            if (itemsInHand.length > 0) {
-                itemsInHand.forEach(item => p.discard.push(item));
-                p.hand = p.hand.filter(c => c.cardType !== 'item');
-                game.log(`Player ${playerNum}: Discarded ${itemsInHand.length} item(s) from hand`, 'info');
-            }
-        });
+        if (game.turn > 1) {
+            [1, 2].forEach(playerNum => {
+                const p = game.players[playerNum];
+                const itemsInHand = p.hand.filter(c => c.cardType === 'item');
+                if (itemsInHand.length > 0) {
+                    itemsInHand.forEach(item => p.discard.push(item));
+                    p.hand = p.hand.filter(c => c.cardType !== 'item');
+                    game.log(`Player ${playerNum}: Discarded ${itemsInHand.length} item(s) from hand`, 'info');
+                }
+            });
+        } else {
+            game.log('Alumnae Hall: Return by 4pm does not apply on the first turn.', 'info');
+        }
     }
 
     if (card.name === 'Steinert Practice Room') {
@@ -7812,6 +7827,21 @@ function closeModal(modalId) {
         delete game.tempSelections.foresightOriginal;
         delete game.tempSelections.foresightOpponent;
         delete game.tempSelections.foresightPending;
+    }
+
+    if (modalId === 'action-modal' && game.tempSelections && Number.isFinite(Number(game.tempSelections.stadiumSearchPlayer))) {
+        const pendingPlayer = Number(game.tempSelections.stadiumSearchPlayer);
+        const pendingPlayerObj = game.players[pendingPlayer];
+        const hasAnyStadiumChoice = !!(pendingPlayerObj && Array.isArray(pendingPlayerObj.deck) && pendingPlayerObj.deck.some((c) => getRuntimeCardCategory(c) === 'stadium'));
+
+        // BAI Email search is mandatory if there is at least one stadium in deck.
+        if (hasAnyStadiumChoice) {
+            showStadiumSearchModal(pendingPlayer);
+            return;
+        }
+
+        finalizeBaiEmailResolution(pendingPlayer);
+        updateUI();
     }
 
     if (modalId === 'action-modal' && game.tempSelections && game.tempSelections.drumKidWorkshopPendingTransfer) {

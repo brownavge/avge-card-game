@@ -909,15 +909,15 @@ const STADIUMS = {
         name: 'Riley Hall',
         type: 'stadium',
         isConcertHall: true,
-        effect: 'If this Stadium is active at the beginning of your turn, each of your characters takes 10 nonlethal damage for each empty bench slot you have.',
-        description: 'Venue Type: Concert Hall. Attendance Policy: If this Stadium is active at the beginning of your turn, each of your characters takes 10 nonlethal damage for each empty bench slot you have.'
+        effect: 'Attendance Policy: If this Stadium is active at the beginning of a player\'s turn, each of their characters takes 10 nonlethal damage for each empty bench slot you have.',
+        description: 'Venue Type: Concert Hall. Attendance Policy: If this Stadium is active at the beginning of a player\'s turn, each of their characters takes 10 nonlethal damage for each empty bench slot you have.'
     },
     ALUMNAE_HALL: {
         name: 'Alumnae Hall',
         type: 'stadium',
         isConcertHall: true,
-        effect: 'Upon this Stadium being played, both players discard all items. While active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.',
-        description: 'Venue Type: Concert Hall. Return by 4pm: Upon this Stadium being played, both players discard all items. Intense Reverb: While active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.'
+        effect: 'Return by 4pm: Upon this Stadium being played, both players discard all items (only when played after first turn). Intense Reverb: While active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.',
+        description: 'Venue Type: Concert Hall. Return by 4pm: Upon this Stadium being played, both players discard all items (only when played after first turn). Intense Reverb: While active, whenever a player draws a card, all their active and benched characters take 10 nonlethal damage.'
     },
     MAIN_HALL: {
         name: 'Main Hall',
