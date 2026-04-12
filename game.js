@@ -103,6 +103,28 @@ function ensureDiscardHooks() {
     });
 }
 
+function observeDiscardChanges() {
+    if (!game || !game.players) return;
+    if (!game.discardObservation) {
+        game.discardObservation = { 1: [], 2: [] };
+    }
+
+    [1, 2].forEach((playerNum) => {
+        const player = game.players[playerNum];
+        if (!player || !Array.isArray(player.discard)) return;
+
+        const currentCards = player.discard.filter((card) => card && typeof card === 'object' && typeof card.name === 'string' && card.name.trim().length > 0);
+        const previousCards = Array.isArray(game.discardObservation[playerNum]) ? game.discardObservation[playerNum] : [];
+        const newCards = currentCards.filter((card) => !previousCards.includes(card));
+
+        if (newCards.length > 0) {
+            maybeTriggerSasCybersecurity(playerNum, newCards);
+        }
+
+        game.discardObservation[playerNum] = currentCards.slice();
+    });
+}
+
 function getTypeMatchupInfo(types) {
     const normalizedTypes = Array.isArray(types) ? types.filter(Boolean) : [];
     const strongSet = new Set();
@@ -324,6 +346,7 @@ class GameState {
         this.playtestMode = false;
         this.lastAttackSource = null;
         this.stadiumLockUntilTurn = null;
+        this.discardObservation = { 1: [], 2: [] };
     }
 
     createPlayerState() {
@@ -2998,6 +3021,7 @@ function normalizeDiscardPiles() {
 function updateUI() {
     normalizeDiscardPiles();
     ensureDiscardHooks();
+    observeDiscardChanges();
     syncAllStatusDerivedStats();
     if (enforceStatusDerivedKnockouts()) return;
     if (document && document.body) {

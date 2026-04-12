@@ -1112,3 +1112,9 @@ Notes:
 - Updated Guitar/Choir/Brass card text in cards.js for Owen, Antong, Edward, Christmas, Meya, Roberto, Grace, Ben, Yanwan, Ross, Happy Ruth, Ryan Du, Rachel, Vincent, Barron, Carolyn, Filip, and Juan.
 - Logic updates: Grace Royalties now hits one chosen opposing AVGE-equipped character at end of turn; Ross Attack now topdecks from discard when Ross is on your bench; Happy Ruth is once-per-turn; Meya lock now follows the specific damaging source card and Meya instead of only the currently active characters.
 - Validation: node --check game.js; node --check cards.js.
+- 2026-04-12 targeted regression pass:
+  - Added `output/targeted_regression_test.mjs` to cover Grace Royalties, Ross Attack, Meya lock scoping, Sas Cybersecurity discard interception, Ominous Chimes delayed damage, Damper Pedal total-damage halving, and Reverse Heist redraw flow.
+  - Added discard-zone observation fallback in `game.js` so Sas Cybersecurity consistently sees cards entering discard even through paths that bypass the existing hook helper.
+  - Added `getCardsForPlayerZones()` helper and used it to correctly reset once-per-turn flags across all zones.
+  - Added `updateUI()` refresh after discard observation changes so discard counts stay synced during regression scenarios.
+  - Validation: `node output/targeted_regression_test.mjs` passed.
