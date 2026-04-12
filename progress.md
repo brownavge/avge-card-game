@@ -1062,3 +1062,53 @@ Notes:
   - `node --check game.js`
   - `node --check cards.js`
   - Playwright smoke: search `perc` in deck builder returned visible results; details modal includes retreat cost (`output/deck-builder-perc-smoke.png`).
+- 2026-03-21 supporter/status update pass:
+  - Johann now retrieves up to Supporter + Item/Tool + Stadium from discard and then ends turn.
+  - Richard remains self-only deck/discard swap (per latest text).
+  - Michelle text/effect already aligned: opponent shuffles hand into deck then draws 1 (first-turn restricted).
+  - Lucas reworked: reveal up to 2 eligible different-type characters; resolve one to hand and one to top of deck.
+  - Victoria Chen reworked: choose type, reveal up to 2 of that type; resolve one to hand and one to top of deck.
+  - Angel now grants Goon to friendly board and removes Goon from all opposing characters.
+  - Lio now draws 4 after shuffling hand into deck (still excludes played Lio card itself from shuffle to avoid duplication).
+  - Goon retreat modifier changed from doubled retreat cost to +1 retreat cost.
+  - Maid immunity check now applies threshold after super-effective bonus.
+  - Arranger now also prompts when a tool is discarded from that character (including KO/tool removals), shuffling a random discard card into deck on opt-in.
+- Validation: `node --check game.js` and `node --check cards.js` passed.
+- 2026-04-10 item sync pass:
+  - Updated item text + code for Printed Score, Annotated Score, Standard/Corrupted Musescore File, Concert Program, Concert Roster, Dress Rehearsal Roster, Concert Ticket, BAI Email, AVGE Birb, and Raffle Ticket.
+  - Printed Score now has the opponent choose their own discard from revealed hand.
+  - Annotated Score now discards a chosen revealed hand card, then returns a different discard card to opponent hand; requires opponent to already have discard.
+  - Standard/Corrupted Musescore File now discard a chosen attached tool from your board before searching deck.
+  - Dress Rehearsal Roster now chooses two specific energy discards from characters in play, then shuffles up to four random discard cards.
+  - Concert Program now reveals top 5 and puts a chosen character into hand, then shuffles.
+  - Concert Roster now reveals top 3 and can take one character or stadium into hand, leaving the rest in order.
+  - BAI Email lock updated to last through the end of your next turn.
+  - AVGE Birb penalty reduced to +20 on the first attack to your active next turn.
+  - Raffle Ticket now draws from the bottom of deck and fixed the discard cleanup typo for the card name.
+  - Validation: `node --check game.js`, `node --check cards.js`, and Playwright smoke (`#start-game-btn`) passed.
+- 2026-04-10 follow-up character updates:
+  - Emily Wang's Profit Margins is now a true once-per-turn activated ability: discard a tool from Emily to draw 1 card.
+  - Removed the old automatic pre-attack Profit Margins prompt path.
+  - Sophia Y. Wang and Julia Ceccarelli second moves updated to Ricochet (50); if the attack knocks out the target, it deals 30 damage to each remaining opposing character.
+  - Validation: `node --check game.js` and `node --check cards.js` passed.
+- 2026-04-11 woodwinds sync pass:
+  - Updated woodwinds stats/text in `cards.js` for Weston, Kathy, Felix, Desmond, Jordan, Analise, Harper, Kana, Meiyi, Jayden, Luca, Daniel Zhu, Rachael, Betty, Anna, Evelyn, Sarah, and Izzy to match the latest sheet.
+  - Logic updates completed for Analysis Paralysis (opponent chooses 2 cards to shuffle back), Speedrun Central (checks played-to-active this turn), Anna Brown bench immunity, BAI Wrangler to top of deck, and Wipeout (two targets in play + 80 self-damage).
+  - Added a `playedToActiveThisTurn` flag reset path for move logic.
+  - Validation: `node --check game.js` and `node --check cards.js` passed.
+
+2026-04-11
+- Updated Strings roster text in cards.js for Ina, Andrea, Ashley, Michelle Kim, Maggie, Gabriel, Jessica, Yuelin, Alice, Mason, Sophia, Fiona, Michael, and Iris.
+- Implemented Maggie Li start-of-turn Midday Nap heal, Jessica Jung Cleric Spell supporter-only discard selection, Mason Yu Arrangement Speedrun retargeting/damage flow, Ashley Toby renamed attack handler, and cleaned stale Profit Margins UI text.
+- Validation: node --check game.js; node --check cards.js.
+
+2026-04-11
+- Updated Piano/Percussion roster text in cards.js, added Sas Majumder, and aligned Luke/Henry/Katie/Matthew/Sophia/Joshua/Daniel definitions to the latest sheet.
+- Implemented Joshua bench-play Category Theory draw, Sophia S first-attach trigger, Katie end-turn heal threshold update, Daniel Yang Eight Hands Piano, Arpeggios, and a discard-hook based Sas Cybersecurity implementation.
+- Updated multi-hit handling so Three Hand Technique, Four Mallets, and Double Tongue apply per-hit damage modifiers like Red Room while consuming first-attack music-stand bonuses only on hit 1.
+- Validation: node --check game.js; node --check cards.js.
+
+2026-04-12
+- Updated Guitar/Choir/Brass card text in cards.js for Owen, Antong, Edward, Christmas, Meya, Roberto, Grace, Ben, Yanwan, Ross, Happy Ruth, Ryan Du, Rachel, Vincent, Barron, Carolyn, Filip, and Juan.
+- Logic updates: Grace Royalties now hits one chosen opposing AVGE-equipped character at end of turn; Ross Attack now topdecks from discard when Ross is on your bench; Happy Ruth is once-per-turn; Meya lock now follows the specific damaging source card and Meya instead of only the currently active characters.
+- Validation: node --check game.js; node --check cards.js.
