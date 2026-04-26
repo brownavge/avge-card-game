@@ -731,7 +731,7 @@ const CHARACTERS = {
         hp: 100,
         moves: [
             { name: 'Analysis Paralysis', cost: 1, damage: 0, effect: 'Reveal your opponent\'s hand. They choose two cards to shuffle back into their deck.' },
-            { name: 'Hyper-Ventilation!', cost: 3, damage: 30, effect: 'Roll a d6. Deal +(10x the result) damage.' }
+            { name: 'Flutter Tongue', cost: 3, damage: 0, effect: 'Roll a 6 sided die until you get two consecutive numbers that add to 7. For each roll, do a separate attack of 10 damage.' }
         ],
         retreatCost: 1
     },
@@ -754,7 +754,7 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 100,
         moves: [
-            { name: 'Overblow', cost: 2, damage: 50, effect: 'You take 10 recoil damage' },
+            { name: 'Circular Breathing', cost: 1, damage: 10, effect: 'Deal +10 damage for every consecutive use, up to +40.' },
             { name: 'Speedrun Central', cost: 3, damage: 40, effect: 'If this character was played to Active this turn, deal +60 damage.' }
         ],
         retreatCost: 2
@@ -772,10 +772,10 @@ const CHARACTERS = {
     ANALISE_JIA: {
         name: 'Analise Jia',
         type: [TYPES.WOODWINDS],
-        hp: 100,
+        hp: 110,
         moves: [
-            { name: 'Double Tongue', cost: 1, damage: 0, effect: 'Two individual attacks of 10 damage each.' },
-            { name: 'Banana Bread for Everyone!', cost: 3, damage: 0, effect: 'Heal 30 damage from each of your characters. Discard an energy from this character' }
+            { name: 'Reed Replenishment', cost: 2, damage: 10, effect: 'You may put an Item card you played this turn into your hand.' },
+            { name: 'Banana Bread for Everyone!', cost: 3, damage: 0, effect: 'Your characters in play heal 30 damage. Remove 1 energy from this character.' }
         ],
         retreatCost: 1
     },
@@ -799,7 +799,7 @@ const CHARACTERS = {
             type: 'passive'
         },
         moves: [
-            { name: 'Hyper-Ventilation!', cost: 3, damage: 30, effect: 'Roll a d6. Deal +(10x the result) damage.' }
+            { name: 'Flutter Tongue', cost: 3, damage: 0, effect: 'Roll a 6 sided die until you get two consecutive numbers that add to 7. For each roll, do a separate attack of 10 damage.' }
         ],
         retreatCost: 2
     },
@@ -808,8 +808,8 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 90,
         moves: [
-            { name: 'Sparkling Run', cost: 2, damage: 30, effect: 'Heal 20 damage.' },
-            { name: 'Clarinet Solo', cost: 2, damage: 70, effect: 'Only usable if there are no other WW characters in play.' }
+            { name: 'Reed Replenishment', cost: 2, damage: 10, effect: 'You may put an Item card you played this turn into your hand.' },
+            { name: 'Clarinet Solo', cost: 2, damage: 20, effect: 'If no other WW characters are in play, deal +50 damage.' }
         ],
         retreatCost: 1
     },
@@ -833,7 +833,7 @@ const CHARACTERS = {
         hp: 90,
         moves: [
             { name: 'Sparkling Run', cost: 2, damage: 30, effect: 'Heal 20 damage.' },
-            { name: 'Piccolo Solo', cost: 2, damage: 70, effect: 'Only usable if there are no other WW characters in play.' }
+            { name: 'Piccolo Solo', cost: 3, damage: 40, effect: 'If no other WW characters are in play, deal +50 damage.' }
         ],
         retreatCost: 1
     },
@@ -856,10 +856,10 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 100,
         moves: [
-            { name: 'Circular Breathing', cost: 1, damage: 10, effect: 'During your next turn, this attack does 10 more damage. Effect stacks up to 50 damage if used consecutively.' },
-            { name: 'E2 Reaction', cost: 2, damage: 30, effect: 'Only works when your opponent\'s bench has at least 2 members. 30 damage; you may choose one of your opponent\'s benched characters to shuffle back into their deck. (Damage does NOT save.)' }
+            { name: 'Circular Breathing', cost: 1, damage: 10, effect: 'Deal +10 damage for every consecutive use, up to +40.' },
+            { name: 'E2 Reaction', cost: 3, damage: 0, effect: 'If your opponent\'s Bench has 2+ characters, you may shuffle one opposing Benched character back into their deck.' }
         ],
-        retreatCost: 1
+        retreatCost: 2
     },
     BETTY_SOLOMON: {
         name: 'Betty Solomon',
@@ -867,7 +867,7 @@ const CHARACTERS = {
         hp: 100,
         moves: [
             { name: 'Outreach', cost: 1, damage: 0, effect: 'Search through your deck for any character card, and put it on top of your deck.' },
-            { name: 'Overblow', cost: 2, damage: 50, effect: 'You take 10 recoil damage' }
+            { name: 'Multiphonics', cost: 3, damage: 0, effect: 'Flip two coins. If both heads, 50 damage to each character on opponent\'s Bench. If both tails, 100 damage.' }
         ],
         retreatCost: 1
     },
@@ -890,8 +890,8 @@ const CHARACTERS = {
         type: [TYPES.WOODWINDS],
         hp: 100,
         moves: [
-            { name: 'Circular Breathing', cost: 1, damage: 10, effect: 'During your next turn, this attack does 10 more damage. Effect stacks up to 50 damage if used consecutively.' },
-            { name: 'SE Lord', cost: 2, damage: 0, effect: 'Transfer all existing damage from opponent\'s Bench to their Active character.' }
+            { name: 'Circular Breathing', cost: 1, damage: 10, effect: 'Deal +10 damage for every consecutive use, up to +40.' },
+            { name: 'Small Ensemble Lord', cost: 2, damage: 0, effect: 'Transfer all existing damage from opponent\'s Bench to their Active character.' }
         ],
         retreatCost: 1
     },
@@ -901,7 +901,7 @@ const CHARACTERS = {
         hp: 100,
         moves: [
             { name: 'Double Tongue', cost: 1, damage: 0, effect: 'Two individual attacks of 10 damage each' },
-            { name: 'Artist Alley', cost: 3, damage: 0, effect: 'Discard any amount of concert programs or concert tickets from your hand and do 40 damage to any character in play for each.' }
+            { name: 'Artist Alley', cost: 3, damage: 0, effect: 'Discard any number of Concert Programs, Concert Rosters, or Concert Tickets. For each, deal 40 damage to one opposing character.' }
         ],
         retreatCost: 1
     },
@@ -911,11 +911,11 @@ const CHARACTERS = {
         hp: 110,
         ability: {
             name: 'BAI Wrangler',
-            description: 'Once per turn, you may put a stadium from your discard pile onto the top of your deck.',
+            description: 'You may flip a coin once per turn. If heads, shuffle a stadium card from your discard pile into your deck.',
             type: 'activated'
         },
         moves: [
-            { name: 'Multiphonics', cost: 3, damage: 0, effect: 'Flip two coins. If both land heads, deal 50 damage to opponent’s Bench. If both land tails, 100 damage.' }
+            { name: 'Overblow', cost: 2, damage: 50, effect: 'You take 10 recoil damage' }
         ],
         retreatCost: 2
     }

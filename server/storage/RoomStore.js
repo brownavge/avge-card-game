@@ -40,6 +40,14 @@ export function saveRoom(room) {
   fs.writeFileSync(file, JSON.stringify(payload));
 }
 
+export function deleteRoom(roomId) {
+  ensureRoomsDir();
+  const file = roomPath(roomId);
+  if (fs.existsSync(file)) {
+    fs.unlinkSync(file);
+  }
+}
+
 export function shouldSnapshot(room) {
   return room.serverSeq % SNAPSHOT_INTERVAL === 0;
 }

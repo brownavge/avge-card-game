@@ -1118,3 +1118,19 @@ Notes:
   - Added `getCardsForPlayerZones()` helper and used it to correctly reset once-per-turn flags across all zones.
   - Added `updateUI()` refresh after discard observation changes so discard counts stay synced during regression scenarios.
   - Validation: `node output/targeted_regression_test.mjs` passed.
+- 2026-04-12 custom-deck multiplayer verification pass:
+  - Rechecked real 2-client multiplayer custom deck join flow using isolated browser contexts and distinct localStorage custom decks for host/guest.
+  - Confirmed the actual deck-payload path is working: during setup, host opening hand resolved to custom `Owen Landry` deck and guest opening hand resolved to custom `David Man` deck, with opponent start logs matching on both sides.
+  - The older custom-deck regression was flaky because it depended on setup->main readiness sync rather than the deck identity itself.
+  - Rewrote `output/custom_deck_multiplayer_regression_test.mjs` and `output/custom_deck_legacy_payload_regression_test.mjs` to assert multiplayer custom deck identity directly from setup/opening-hand state instead of waiting for main phase.
+  - Validation: `node output/custom_deck_multiplayer_regression_test.mjs` ✅, `node output/custom_deck_legacy_payload_regression_test.mjs` ✅, repeated loop `custom_deck_multiplayer_regression_test.mjs` 6/6 ✅.
+- 2026-04-13 multiplayer setup/startup hardening:
+  - Fixed a real setup sync bug in `game.js`: guest opening-setup actions (`chooseOpeningActive`, `toggleOpeningBench`, `setOpeningReady`) no longer send full local snapshots. They now sync as actions only, allowing the host to replay and re-authoritize state instead of stale guest snapshots overwriting room state.
+  - Fixed stale room reuse on the server: when the last client leaves a room, persisted room storage is now deleted instead of retained forever. This prevents later matches from colliding with old 4-digit room codes and inheriting stale players/session state.
+  - Hardened multiplayer regression scripts to use a host-created room code rather than preselecting a random shared code, eliminating false failures from room-code collisions.
+  - Updated `multiplayer_prompt_pause_test.mjs` to advance past the opening player's first turn before attempting to play Michelle, matching the current first-turn restriction rules.
+  - Validation on restarted server:
+    - `node output/basic_multiplayer_game_test.mjs` ✅
+    - `node output/multiplayer_prompt_pause_test.mjs` ✅
+    - `basic_multiplayer_game_test.mjs` repeated 8/8 ✅
+    - `multiplayer_prompt_pause_test.mjs` repeated 6/6 ✅

@@ -29,6 +29,16 @@ async function waitForMainPhase(page, timeoutMs = 45000) {
   throw new Error('Timed out waiting for main phase.');
 }
 
+async function waitForAssignedRoomCode(page, timeoutMs = 20000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const roomCode = await page.locator('#multiplayer-room').inputValue();
+    if (/^\d{4}$/.test(roomCode)) return roomCode;
+    await page.waitForTimeout(150);
+  }
+  throw new Error('Timed out waiting for assigned room code.');
+}
+
 async function completeOpeningSetup(page) {
   for (let i = 0; i < 5; i += 1) {
     const state = await readState(page);
@@ -76,8 +86,6 @@ async function run() {
   p1.on('pageerror', (err) => errors.push(`p1:${String(err)}`));
   p2.on('pageerror', (err) => errors.push(`p2:${String(err)}`));
 
-  const room = `9${Math.floor(Math.random() * 900 + 100)}`;
-
   await Promise.all([
     p1.goto('http://localhost:3001', { waitUntil: 'domcontentloaded' }),
     p2.goto('http://localhost:3001', { waitUntil: 'domcontentloaded' })
@@ -85,9 +93,10 @@ async function run() {
 
   await Promise.all([p1.check('#multiplayer-toggle'), p2.check('#multiplayer-toggle')]);
   await Promise.all([p1.check('#playtest-mode-toggle'), p2.check('#playtest-mode-toggle')]);
-  await Promise.all([p1.fill('#multiplayer-room', room), p2.fill('#multiplayer-room', room)]);
 
   await p1.click('#start-game-btn');
+  const room = await waitForAssignedRoomCode(p1);
+  await p2.fill('#multiplayer-room', room);
   await p2.click('#start-game-btn');
 
   await Promise.all([

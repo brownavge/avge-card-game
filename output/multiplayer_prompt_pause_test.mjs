@@ -17,6 +17,10 @@ async function waitForMainPhase(page, timeoutMs = 45000) {
   throw new Error('Timed out waiting for main phase.');
 }
 
+async function readState(page) {
+  return page.evaluate(() => JSON.parse(window.render_game_to_text()));
+}
+
 async function waitForLocalPlayer(page, timeoutMs = 20000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -28,6 +32,26 @@ async function waitForLocalPlayer(page, timeoutMs = 20000) {
     await page.waitForTimeout(150);
   }
   throw new Error('Timed out waiting for multiplayer local player assignment.');
+}
+
+async function waitForCurrentPlayer(p1, p2, expected, timeoutMs = 15000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const [s1, s2] = await Promise.all([readState(p1), readState(p2)]);
+    if (Number(s1.currentPlayer) === expected && Number(s2.currentPlayer) === expected) return;
+    await p1.waitForTimeout(150);
+  }
+  throw new Error(`Timed out waiting for currentPlayer=${expected} on both clients.`);
+}
+
+async function waitForAssignedRoomCode(page, timeoutMs = 20000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const roomCode = await page.locator('#multiplayer-room').inputValue();
+    if (/^\d{4}$/.test(roomCode)) return roomCode;
+    await page.waitForTimeout(150);
+  }
+  throw new Error('Timed out waiting for assigned room code.');
 }
 
 async function chooseActiveAndConfirm(page) {
@@ -64,7 +88,6 @@ async function run() {
   const ctx2 = await browser.newContext({ viewport: { width: 1366, height: 900 } });
   const p1 = await ctx1.newPage();
   const p2 = await ctx2.newPage();
-  const room = `9${Math.floor(Math.random() * 900 + 100)}`;
 
   await Promise.all([
     p1.goto('http://localhost:3001', { waitUntil: 'domcontentloaded' }),
@@ -79,12 +102,10 @@ async function run() {
     p1.check('#playtest-mode-toggle'),
     p2.check('#playtest-mode-toggle')
   ]);
-  await Promise.all([
-    p1.fill('#multiplayer-room', room),
-    p2.fill('#multiplayer-room', room)
-  ]);
 
   await p1.click('#start-game-btn');
+  const room = await waitForAssignedRoomCode(p1);
+  await p2.fill('#multiplayer-room', room);
   await p2.click('#start-game-btn');
   await Promise.all([
     p1.waitForSelector('#game-container:not(.hidden)'),
@@ -97,8 +118,15 @@ async function run() {
   await chooseActiveAndConfirm(p2);
   await Promise.all([waitForMainPhase(p1), waitForMainPhase(p2)]);
 
-  const p1State = await p1.evaluate(() => JSON.parse(window.render_game_to_text()));
-  const p2State = await p2.evaluate(() => JSON.parse(window.render_game_to_text()));
+  // Advance past the opening player's first turn so Michelle is legally playable.
+  const openingState = await readState(p1);
+  const openingTurnPlayer = Number(openingState.currentPlayer);
+  const openingActorPage = Number(openingState.localPlayer) === openingTurnPlayer ? p1 : p2;
+  await openingActorPage.click('#end-turn-btn');
+  await waitForCurrentPlayer(p1, p2, openingTurnPlayer === 1 ? 2 : 1);
+
+  const p1State = await readState(p1);
+  const p2State = await readState(p2);
   const actorPage = Number(p1State.localPlayer) === Number(p1State.currentPlayer) ? p1 : p2;
   const responderPage = actorPage === p1 ? p2 : p1;
 

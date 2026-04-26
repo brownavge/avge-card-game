@@ -21,41 +21,30 @@ async function waitForSetup(page, timeoutMs = 30000) {
   throw new Error('Timed out waiting for setup guide');
 }
 
-async function waitForLocalPlayer(page, timeoutMs = 20000) {
+async function waitForDeckIdentity(page, expectedLocalPlayer, expectedHandName, expectedOpponentStartName, timeoutMs = 30000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    const state = await readState(page);
-    const lp = Number(state.localPlayer);
-    if (lp === 1 || lp === 2) return lp;
-    await page.waitForTimeout(120);
-  }
-  throw new Error('Timed out waiting for local player assignment');
-}
-
-async function chooseActiveAndReady(page) {
-  const lp = await waitForLocalPlayer(page);
-  await page.evaluate((localPlayer) => {
-    const cards = Array.from(document.querySelectorAll('#hand-cards .card'));
-    const chosen = cards.find((card) => {
-      const label = (card.textContent || '').toLowerCase();
-      return label.includes('david man') || label.includes('owen landry');
-    }) || cards[0];
-    const cardId = chosen ? chosen.getAttribute('data-card-id') : null;
-    if (cardId) {
-      window.chooseOpeningActive(cardId, localPlayer);
-      window.setOpeningReady(localPlayer);
+    const snapshot = await page.evaluate(() => ({
+      state: JSON.parse(window.render_game_to_text()),
+      handNames: [...document.querySelectorAll('#hand-cards .card .card-name')].map((el) => el.textContent.trim())
+    }));
+    const localPlayer = Number(snapshot.state.localPlayer);
+    const opponentLastLog = Array.isArray(snapshot.state.lastLog) ? snapshot.state.lastLog.join(' | ') : '';
+    const handOk =
+      snapshot.handNames.length > 0 &&
+      snapshot.handNames.every((name) => name === expectedHandName);
+    const logOk = opponentLastLog.includes(`Player ${expectedLocalPlayer === 1 ? 2 : 1} starts with ${expectedOpponentStartName}`);
+    if (
+      snapshot.state.phase === 'setup' &&
+      localPlayer === expectedLocalPlayer &&
+      handOk &&
+      logOk
+    ) {
+      return snapshot;
     }
-  }, lp);
-}
-
-async function waitForMain(page, timeoutMs = 45000) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const state = await readState(page);
-    if (state.phase === 'main') return state;
     await page.waitForTimeout(120);
   }
-  throw new Error('Timed out waiting for main phase');
+  throw new Error(`Timed out waiting for legacy deck identity: player ${expectedLocalPlayer}, hand ${expectedHandName}, opponent ${expectedOpponentStartName}`);
 }
 
 async function run() {
@@ -101,15 +90,13 @@ async function run() {
   await p2.click('#start-game-btn');
 
   await Promise.all([waitForSetup(p1), waitForSetup(p2)]);
-  await Promise.all([chooseActiveAndReady(p1), chooseActiveAndReady(p2)]);
+  const [stateP1, stateP2] = await Promise.all([
+    waitForDeckIdentity(p1, 1, 'Owen Landry', 'David Man'),
+    waitForDeckIdentity(p2, 2, 'David Man', 'Owen Landry')
+  ]);
 
-  const stateP1 = await waitForMain(p1);
-  const p1SeesP2Active = stateP1.players?.[1]?.active?.name;
-
-  assert(
-    p1SeesP2Active === 'David Man',
-    `Expected Player 1 to see Player 2 active from legacy custom deck as David Man, got: ${p1SeesP2Active}`
-  );
+  assert(stateP1.handNames.every((name) => name === 'Owen Landry'), `Expected host opening hand to be Owen-only, got: ${stateP1.handNames.join(', ')}`);
+  assert(stateP2.handNames.every((name) => name === 'David Man'), `Expected guest opening hand to be David-only from legacy custom deck, got: ${stateP2.handNames.join(', ')}`);
   assert(pageErrors.length === 0, `Page errors found:\n${pageErrors.join('\n')}`);
 
   await browser.close();

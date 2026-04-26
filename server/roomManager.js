@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { createGameState } from '../shared/state.js';
-import { loadRoom, saveRoom } from './storage/RoomStore.js';
+import { deleteRoom, loadRoom, saveRoom } from './storage/RoomStore.js';
 
 const rooms = new Map();
 
@@ -159,7 +159,7 @@ export function removeClientFromRoom(roomId, client) {
   if (!room) return;
   room.clients.delete(client);
   if (room.clients.size === 0) {
-    saveRoom(room);
+    deleteRoom(room.id);
     rooms.delete(roomId);
   }
 }
