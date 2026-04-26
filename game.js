@@ -828,6 +828,21 @@ class GameState {
 
         characterCard.damage = (characterCard.damage || 0) + finalDamage;
 
+        if (canApplyAbilities && characterCard.name === 'Gabriel Chen' && !characterCard.usedYouKnowWhatItIsThisGame) {
+            const remainingHp = characterCard.hp - characterCard.damage;
+            if (remainingHp <= 60) {
+                const ownerPlayerNum = this.findPlayerWithCharacter(characterCard);
+                const opposingPlayerNum = ownerPlayerNum === 1 ? 2 : 1;
+                const opposingCharacters = [this.players[opposingPlayerNum].active, ...this.players[opposingPlayerNum].bench].filter(Boolean);
+                characterCard.usedYouKnowWhatItIsThisGame = true;
+                if (opposingCharacters.length > 0) {
+                    const chosenTarget = opposingCharacters[randInt(opposingCharacters.length)];
+                    this.dealDamage(chosenTarget, 70, null);
+                    this.log(`Gabriel Chen's You know what it is: ${chosenTarget.name} takes 70 damage!`, 'damage');
+                }
+            }
+        }
+
         // Arranger status: may shuffle a random card from discard into deck when damaged
         if (characterCard.status && characterCard.status.includes('Arranger') && finalDamage > 0) {
             const ownerPlayerNum = this.findPlayerWithCharacter(characterCard);
@@ -994,18 +1009,18 @@ class GameState {
                 });
             }
 
-            // Yuelin Hu's Musical Cat Summoned - Draw AVGE Birb → discard and deal 40 to opponent active
+            // Yuelin Hu's Musical Cat Summoned - Draw AVGE Birb → discard and deal 20 to opponent active
             if (!abilitiesDisabledFor(playerNum) && card.name === 'AVGE Birb' && [player.active, ...player.bench].some(c => c && c.name === 'Yuelin Hu')) {
                 this.log('Yuelin Hu\'s Musical Cat Summoned: Drew AVGE Birb!');
-                const useAbility = confirm('Yuelin Hu: Discard AVGE Birb to deal 40 damage to opponent active?');
+                const useAbility = confirm('Yuelin Hu: Discard AVGE Birb to deal 20 damage to opponent active?');
                 if (useAbility) {
                     player.discard.push(card);
                     player.hand = player.hand.filter(c => c.id !== card.id);
                     const opponentNum = playerNum === 1 ? 2 : 1;
                     const opponent = this.players[opponentNum];
                     if (opponent.active) {
-                        this.dealDamage(opponent.active, 40);
-                        this.log('Yuelin Hu\'s Musical Cat Summoned: Dealt 40 damage to opponent active!', 'damage');
+                        this.dealDamage(opponent.active, 20);
+                        this.log('Yuelin Hu\'s Musical Cat Summoned: Dealt 20 damage to opponent active!', 'damage');
                     }
                 }
             }
@@ -6459,6 +6474,108 @@ function forceOpponentSwitch(opponentNum, benchIndex) {
     updateUI();
 }
 
+function showWePlayGodSelection(attacker) {
+    const attackerId = attacker && attacker.id ? attacker.id : attacker;
+    if (!openModalForPlayer(game.currentPlayer, 'showWePlayGodSelection', [attackerId])) return;
+    if (typeof attacker === 'string') attacker = findCardById(attacker);
+    const modal = document.getElementById('action-modal');
+    const content = document.getElementById('action-content');
+    const allChars = [
+        game.players[1].active, ...game.players[1].bench,
+        game.players[2].active, ...game.players[2].bench
+    ].filter(Boolean);
+
+    if (!game.tempSelections) game.tempSelections = {};
+    game.tempSelections.wePlayGodTargets = game.tempSelections.wePlayGodTargets || new Set();
+    game.tempSelections.wePlayGodAttackerId = attacker.id;
+
+    let html = `<h2>We Play God</h2>`;
+    html += `<p>Select exactly 2 characters in play.</p>`;
+    html += `<div class="target-selection">`;
+
+    allChars.forEach((char) => {
+        const isSelected = game.tempSelections.wePlayGodTargets.has(char.id);
+        html += `<div class="target-option${isSelected ? ' selected' : ''}" onclick="toggleWePlayGodTarget('${char.id}')">${char.name}</div>`;
+    });
+
+    html += `</div>`;
+    html += `<button class="action-btn" onclick="confirmWePlayGod()">Confirm</button>`;
+    html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
+    content.innerHTML = html;
+    modal.classList.remove('hidden');
+}
+
+function toggleWePlayGodTarget(charId) {
+    if (!game.tempSelections) return;
+    const selected = game.tempSelections.wePlayGodTargets;
+    if (!selected) return;
+
+    if (selected.has(charId)) {
+        selected.delete(charId);
+    } else if (selected.size < 2) {
+        selected.add(charId);
+    } else {
+        showLocalAlert('Select exactly 2 characters.');
+    }
+
+    showWePlayGodSelection(game.tempSelections.wePlayGodAttackerId);
+}
+
+function confirmWePlayGod() {
+    const selected = game.tempSelections && game.tempSelections.wePlayGodTargets;
+    const attacker = findCardById(game.tempSelections && game.tempSelections.wePlayGodAttackerId);
+    if (!selected || !attacker || selected.size !== 2) {
+        showLocalAlert('Select exactly 2 characters.');
+        return;
+    }
+
+    const selectedChars = Array.from(selected).map((id) => findCardById(id)).filter(Boolean);
+    if (selectedChars.length !== 2) {
+        showLocalAlert('Selected characters are no longer in play.');
+        return;
+    }
+
+    const randomIndex = randInt(2);
+    const switchChar = selectedChars[randomIndex];
+    const sourceChar = selectedChars[1 - randomIndex];
+    const switchOwnerNum = game.findPlayerWithCharacter(switchChar);
+    const sourceOwnerNum = game.findPlayerWithCharacter(sourceChar);
+    const attackerOwnerNum = game.findPlayerWithCharacter(attacker);
+
+    if (switchOwnerNum) {
+        const switchOwner = game.players[switchOwnerNum];
+        if (switchOwner.active && switchOwner.active.id !== switchChar.id) {
+            const benchIndex = switchOwner.bench.findIndex((char) => char && char.id === switchChar.id);
+            if (benchIndex !== -1) {
+                const previousActive = switchOwner.active;
+                switchOwner.active = switchChar;
+                switchOwner.bench[benchIndex] = previousActive;
+                game.log(`We Play God: ${switchChar.name} moved to active`, 'info');
+            }
+        }
+    }
+
+    if (!sourceChar.moves || sourceChar.moves.length === 0) {
+        game.log('We Play God: The other chosen character has no attacks to copy', 'info');
+    } else {
+        const options = sourceChar.moves.map((move, idx) => `${idx + 1}) ${move.name}`).join('\n');
+        const rawChoice = prompt(`We Play God: Choose an attack from ${sourceChar.name}:\n${options}`);
+        let moveIndex = Number(rawChoice) - 1;
+        if (!Number.isFinite(moveIndex) || moveIndex < 0 || moveIndex >= sourceChar.moves.length) {
+            moveIndex = 0;
+        }
+        const copiedMove = { ...sourceChar.moves[moveIndex] };
+        const copiedTarget = game.players[attackerOwnerNum === 1 ? 2 : 1].active;
+        game.log(`We Play God: Using ${copiedMove.name} from ${sourceChar.name}`, 'info');
+        performMoveEffect(attacker, copiedTarget, copiedMove);
+    }
+
+    delete game.tempSelections.wePlayGodTargets;
+    delete game.tempSelections.wePlayGodAttackerId;
+    closeModal('action-modal');
+    updateUI();
+}
+
 function showEmmaSwitchModal(chooserPlayerNum, opponentNum, supporterCardId = null) {
     const resolvedChooser = Number.isFinite(Number(chooserPlayerNum)) ? Number(chooserPlayerNum) : Number(game.currentPlayer);
     const resolvedOpponent = Number.isFinite(Number(opponentNum)) ? Number(opponentNum) : (resolvedChooser === 1 ? 2 : 1);
@@ -8873,8 +8990,8 @@ function calculateDamage(attacker, defender, baseDamage, move) {
         const bothBenchesFull = currentPlayer.bench.every(slot => slot !== null) &&
                                  opponent.bench.every(slot => slot !== null);
         if (bothBenchesFull) {
-            damage *= 2;
-            game.log('Ashley Toby\'s Instagram Viral: 2x damage!');
+            damage += 40;
+            game.log('Ashley Toby\'s Instagram Viral: +40 damage!');
         }
     }
 
@@ -11935,9 +12052,10 @@ function showForesightModal(opponent, topThree) {
 function renderForesightModal() {
     const content = document.getElementById('action-content');
     const cards = game.tempSelections.foresightCards || [];
+    const bottomCard = game.tempSelections.foresightBottomCard || null;
 
     let html = `<h2>Foresight: Rearrange Opponent's Deck</h2>`;
-    html += `<p>Move cards to set the new top-to-bottom order:</p>`;
+    html += `<p>Optionally send one card to the bottom, then reorder the rest top-to-bottom.</p>`;
     html += `<div id="foresight-list" class="target-selection">`;
 
     cards.forEach((card, idx) => {
@@ -11946,11 +12064,16 @@ function renderForesightModal() {
         html += `<div class="action-buttons">`;
         html += `<button class="action-btn" onclick="moveForesightCard(${idx}, -1)">Up</button>`;
         html += `<button class="action-btn" onclick="moveForesightCard(${idx}, 1)">Down</button>`;
+        html += `<button class="action-btn" onclick="toggleForesightBottom(${idx})">Bottom</button>`;
         html += `</div>`;
         html += `</div>`;
     });
 
     html += `</div>`;
+    if (bottomCard) {
+        html += `<p>Bottom card: ${bottomCard.name}</p>`;
+        html += `<button class="action-btn" onclick="restoreForesightBottomCard()">Keep All In Top 3</button>`;
+    }
     html += `<button class="action-btn" onclick="completeForesight()">Confirm Order</button>`;
     html += `<button class="action-btn" onclick="closeModal('action-modal')">Cancel</button>`;
 
@@ -11971,12 +12094,39 @@ function moveForesightCard(index, direction) {
     renderForesightModal();
 }
 
+function toggleForesightBottom(index) {
+    const cards = game.tempSelections.foresightCards;
+    if (!cards || index < 0 || index >= cards.length) return;
+    if (game.tempSelections.foresightBottomCard) {
+        restoreForesightBottomCard(false);
+    }
+    const [card] = cards.splice(index, 1);
+    game.tempSelections.foresightBottomCard = card || null;
+    renderForesightModal();
+}
+
+function restoreForesightBottomCard(shouldRender = true) {
+    const bottomCard = game.tempSelections.foresightBottomCard;
+    const cards = game.tempSelections.foresightCards;
+    if (bottomCard && cards) {
+        cards.push(bottomCard);
+    }
+    delete game.tempSelections.foresightBottomCard;
+    if (shouldRender) {
+        renderForesightModal();
+    }
+}
+
 function completeForesight() {
     const cards = game.tempSelections.foresightCards;
     const opponent = game.tempSelections.foresightOpponent;
+    const bottomCard = game.tempSelections.foresightBottomCard;
 
     if (cards && opponent) {
         opponent.deck.unshift(...cards);
+        if (bottomCard) {
+            opponent.deck.push(bottomCard);
+        }
     }
 
     if (game.tempSelections) {
@@ -11984,9 +12134,10 @@ function completeForesight() {
         delete game.tempSelections.foresightOriginal;
         delete game.tempSelections.foresightOpponent;
         delete game.tempSelections.foresightPending;
+        delete game.tempSelections.foresightBottomCard;
     }
 
-    game.log('Foresight: Opponent\'s top 3 cards rearranged');
+    game.log(bottomCard ? 'Foresight: Reordered top cards and sent one to the bottom' : 'Foresight: Opponent\'s top 3 cards rearranged');
     closeModal('action-modal');
     updateUI();
 }
@@ -12969,6 +13120,28 @@ function performMoveEffect(attacker, target, move) {
             executeDamageAttack(attacker, target, move);
             break;
 
+        case 'Arrangement':
+            {
+                const benchedChars = player.bench.filter(Boolean);
+                if (benchedChars.length === 0) {
+                    game.log('Arrangement: No benched character to give Arranger status', 'info');
+                    break;
+                }
+                const options = benchedChars.map((char, idx) => `${idx + 1}) ${char.name}`).join('\n');
+                const rawChoice = prompt(`Arrangement: Choose a benched character to gain Arranger status:\n${options}`);
+                let choiceIndex = Number(rawChoice) - 1;
+                if (!Number.isFinite(choiceIndex) || choiceIndex < 0 || choiceIndex >= benchedChars.length) {
+                    choiceIndex = 0;
+                }
+                const chosenChar = benchedChars[choiceIndex];
+                if (!chosenChar.status) chosenChar.status = [];
+                if (!chosenChar.status.includes('Arranger')) {
+                    chosenChar.status.push('Arranger');
+                }
+                game.log(`Arrangement: ${chosenChar.name} gained Arranger status`, 'info');
+            }
+            break;
+
         case 'Vocal warmups':
             // Attach an energy from your hand to this character
             const energyCards = player.hand.filter(c => c.cardType === 'energy');
@@ -13229,6 +13402,20 @@ function performMoveEffect(attacker, target, move) {
                 game.dealDamage(target, tripleStopsFinal);
                 game.log(`Triple Stop: ${heads} heads for ${tripleStopsFinal} damage!`, 'damage');
             }
+            break;
+
+        case 'We Play God':
+            if (!attacker.attachedEnergy || attacker.attachedEnergy.length === 0) {
+                game.log('We Play God: No energy to discard', 'info');
+                break;
+            }
+            {
+                const discardedEnergy = attacker.attachedEnergy.pop();
+                player.discard.push(discardedEnergy);
+                game.log('We Play God: Discarded 1 energy', 'info');
+            }
+            showWePlayGodSelection(attacker);
+            return true;
             break;
 
         case 'Four Mallets':
@@ -14004,6 +14191,19 @@ function performMoveEffect(attacker, target, move) {
             game.log(`${attacker.name} used VocaRock!! for ${vocaRockFinal} damage!`, 'damage');
             break;
 
+        case 'Electric Cello':
+            {
+                let electricCelloDamage = 60;
+                if (game.stadium && game.isPerformanceSpace(game.stadium.name)) {
+                    electricCelloDamage += 20;
+                    game.log('Electric Cello: +20 damage in performance hall!');
+                }
+                const electricCelloFinal = calculateDamage(attacker, target, electricCelloDamage, move);
+                game.dealDamage(target, electricCelloFinal);
+                game.log(`${attacker.name} used Electric Cello for ${electricCelloFinal} damage!`, 'damage');
+            }
+            break;
+
         case 'Midday Nap':
             // Heal 20 damage
             if (attacker.damage > 0) {
@@ -14280,15 +14480,15 @@ function performMoveEffect(attacker, target, move) {
             break;
 
         case 'Spike':
-            // 10 damage, discard 1 energy from each opponent benched character
+            // 30 damage, then may switch opponent's active with a benched character
             executeDamageAttack(attacker, target, move);
-            opponent.bench.filter(c => c).forEach(benchChar => {
-                if (benchChar.attachedEnergy && benchChar.attachedEnergy.length > 0) {
-                    const discarded = benchChar.attachedEnergy.pop();
-                    opponent.discard.push(discarded);
-                    game.log(`Spike: Discarded energy from ${benchChar.name}`);
+            if (opponent.active && opponent.bench.some(Boolean)) {
+                const shouldSwitch = confirm('Spike: Switch the opponent\'s active character with a benched character?');
+                if (shouldSwitch) {
+                    showOpponentSwitchModal(opponentNum);
+                    return true;
                 }
-            });
+            }
             break;
 
         case 'Photograph':
@@ -14611,6 +14811,8 @@ const EXPORTED_ACTIONS = {
     executePercussionEnsemble,
     completeForesight,
     moveForesightCard,
+    toggleForesightBottom,
+    restoreForesightBottomCard,
     executeGachaGaming,
     executeGachaGamingStep,
     finalizeGachaGaming,
@@ -14623,6 +14825,8 @@ const EXPORTED_ACTIONS = {
     executeWipeout,
     toggleArrangementSpeedrunTarget,
     confirmArrangementSpeedrun,
+    toggleWePlayGodTarget,
+    confirmWePlayGod,
     executeAttack,
     handleTargetSelection,
     executeOutreach,
@@ -14672,6 +14876,8 @@ const MULTIPLAYER_LOCAL_FIRST_ACTIONS = new Set([
     'confirmSongVotingSelection',
     'toggleArtistAlleyCard',
     'confirmArtistAlley',
+    'toggleWePlayGodTarget',
+    'confirmWePlayGod',
     'toggleCameraSelection',
     'confirmCameraSelection',
     'toggleFoldingStandCard',
@@ -14683,7 +14889,9 @@ const MULTIPLAYER_LOCAL_FIRST_ACTIONS = new Set([
     'confirmForcedActiveSwitch',
     'executeGachaGaming',
     'executeGachaGamingStep',
-    'finalizeGachaGaming'
+    'finalizeGachaGaming',
+    'toggleForesightBottom',
+    'restoreForesightBottomCard'
     ,
     'toggleOpeningBench',
     'setOpeningReady'

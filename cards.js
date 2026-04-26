@@ -536,7 +536,7 @@ const CHARACTERS = {
         type: [TYPES.STRINGS],
         hp: 100,
         moves: [
-            { name: 'Foresight', cost: 1, damage: 0, effect: 'Look at the top 3 cards of your opponent\'s deck. You may reorder them.' },
+            { name: 'Foresight', cost: 1, damage: 0, effect: 'Look at the top 3 cards of your opponent\'s deck. You may put one on the bottom, and reorder the other two.' },
             { name: 'Snap Pizz', cost: 3, damage: 20, effect: 'Remove 2 energy from one opposing character.' }
         ],
         retreatCost: 1
@@ -544,10 +544,10 @@ const CHARACTERS = {
     ASHLEY_TOBY: {
         name: 'Ashley Toby',
         type: [TYPES.STRINGS],
-        hp: 90,
+        hp: 100,
         ability: {
             name: 'Instagram Viral',
-            description: 'If both benches are full, this character does 2x damage.',
+            description: 'If both benches are full, this character does +40 damage.',
             type: 'passive'
         },
         moves: [
@@ -568,7 +568,7 @@ const CHARACTERS = {
     MAGGIE_LI: {
         name: 'Maggie Li',
         type: [TYPES.STRINGS],
-        hp: 110,
+        hp: 100,
         ability: {
             name: 'Midday Nap',
             description: 'At the beginning of your turn, you may heal 10 damage from this character.',
@@ -583,8 +583,12 @@ const CHARACTERS = {
         name: 'Gabriel Chen',
         type: [TYPES.STRINGS],
         hp: 90,
+        ability: {
+            name: 'You know what it is',
+            description: 'The first time each game this character has 60 health or less, you may instantly deal 70 damage to one random opposing character.',
+            type: 'passive'
+        },
         moves: [
-            { name: 'You know what it is', cost: 1, damage: 0, effect: 'If this character has exactly 60 health, deal 70 damage to one opposing character.' },
             { name: 'Harmonics', cost: 2, damage: 0, effect: 'Flip two coins. If both heads, deal 60 damage to three opposing characters, or 70 damage to two opposing characters.' }
         ],
         retreatCost: 2
@@ -623,7 +627,7 @@ const CHARACTERS = {
         hp: 100,
         ability: {
             name: 'Musical Cat Summoned!',
-            description: 'Whenever you draw an AVGE Birb, you may discard it to deal 40 damage.',
+            description: 'Whenever you draw an AVGE Birb, you may discard it to deal 20 damage.',
             type: 'passive'
         },
         moves: [
@@ -650,15 +654,15 @@ const CHARACTERS = {
         type: [TYPES.STRINGS],
         hp: 100,
         moves: [
-            { name: '440 Hz', cost: 1, damage: 0, effect: 'Attach 1 energy to one Benched character.' },
-            { name: 'Arrangement Speedrun', cost: 3, damage: 0, effect: 'Give all of your characters in play arranger status. For each character that already has arranger status, flip a coin. If you flipped 2 heads or more, do 50 damage to two characters of choice.' }
+            { name: 'Arrangement', cost: 1, damage: 0, effect: 'Give one benched character arranger status.' },
+            { name: 'We Play God', cost: 3, damage: 0, effect: 'Discard an energy from this card. Then, choose any two characters in play. Randomly select one of them; that character moves to their side\'s active slot, and choose an attack from the other character to use as this attack.' }
         ],
         retreatCost: 2
     },
     SOPHIA_Y_WANG: {
         name: 'Sophia Y. Wang',
         type: [TYPES.STRINGS],
-        hp: 100,
+        hp: 110,
         moves: [
             { name: 'Gacha Gaming', cost: 1, damage: 0, effect: 'You may draw cards, taking 20 Fixed damage for each card drawn (you may not self-KO). If you get AVGE Birb, stop and heal all damage from this character. If you stop otherwise, shuffle drawn cards into your deck.' },
             { name: 'Ricochet', cost: 3, damage: 50, effect: 'If you knock out a character using this attack, do 30 damage to each remaining opposing character.' }
@@ -684,8 +688,8 @@ const CHARACTERS = {
         type: [TYPES.STRINGS],
         hp: 100,
         moves: [
-            { name: '440 Hz', cost: 1, damage: 0, effect: 'Attach 1 energy to one Benched character.' },
-            { name: 'Synchro Summon', cost: 2, damage: 0, effect: 'Reveal cards from your deck until a character card is revealed. If that character is not a String type, deal 30 damage, and put the character in your hand. Shuffle your deck afterwards.' }
+            { name: 'Synchro Summon', cost: 2, damage: 0, effect: 'Reveal cards from your deck until a character card is revealed. If that character is not a String type, deal 30 damage, and put the character in your hand. Shuffle your deck afterwards.' },
+            { name: 'Electric Cello', cost: 3, damage: 60, effect: '+20 damage if the stadium in play is a performance hall.' }
         ],
         retreatCost: 1
     },
@@ -695,7 +699,7 @@ const CHARACTERS = {
         hp: 100,
         moves: [
             { name: 'Open Strings', cost: 1, damage: 10, effect: 'Draw a card. If it is an item, you must immediately use it.' },
-            { name: 'Spike', cost: 3, damage: 10, effect: 'Discard an energy from each of your opponent\'s benched characters.' }
+            { name: 'Spike', cost: 3, damage: 30, effect: 'After attacking, you may switch the opponent\'s active character with one benched character.' }
         ],
         retreatCost: 1
     },
